@@ -8,7 +8,7 @@ type Pasien struct {
 	Nama              string    `json:"nama" db:"Nama"`
 	TanggalLahir      time.Time `json:"tanggal_lahir" db:"Tanggal_Lahir"`
 	JenisKelamin      string    `json:"jenis_kelamin" db:"Jenis_Kelamin"`
-	TempatLahir       time.Time `json:"tempat_lahir" db:"Tempat_Lahir"` // Jika memang bertipe DATE
+	TempatLahir       string `json:"tempat_lahir" db:"Tempat_Lahir"` // Jika memang bertipe DATE
 	Kelurahan         string    `json:"kelurahan" db:"Kelurahan"`
 	Kecamatan         string    `json:"kecamatan" db:"Kecamatan"`
 	Alamat            string    `json:"alamat,omitempty" db:"Alamat"`

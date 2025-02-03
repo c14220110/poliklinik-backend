@@ -13,12 +13,12 @@ func RegisterAdministrasiRoutes(
 	pasienController *controllers.PasienController,
 	billingController *controllers.BillingController,
 ) {
-	// Public endpoints: Register, Login, Logout
+	// Public endpoints: Register, Login
 	http.HandleFunc("/api/administrasi/register", adminController.CreateAdmin)
 	http.HandleFunc("/api/administrasi/login", adminController.Login)
-	http.HandleFunc("/api/administrasi/logout", adminController.Logout)
 
 	// Protected endpoints (dilindungi JWT)
+	http.Handle("/api/administrasi/logout", middlewares.JWTMiddleware(http.HandlerFunc(adminController.Logout)))
 	http.Handle("/api/pasien/register", middlewares.JWTMiddleware(http.HandlerFunc(pasienController.RegisterPasien)))
 	http.Handle("/api/pasien/list", middlewares.JWTMiddleware(http.HandlerFunc(pasienController.ListPasien)))
 	http.Handle("/api/billing/list", middlewares.JWTMiddleware(http.HandlerFunc(billingController.ListBilling)))
