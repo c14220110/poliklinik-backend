@@ -1,0 +1,63 @@
+-- File: db/changelog/pendaftaran.sql
+
+-- Table: Administrasi
+CREATE TABLE IF NOT EXISTS Administrasi (
+  ID_Admin INT(11) NOT NULL AUTO_INCREMENT,
+  Nama VARCHAR(255) NOT NULL,
+  Username VARCHAR(100) NOT NULL,
+  Password VARCHAR(255) NOT NULL,
+  Created_At DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  PRIMARY KEY (ID_Admin),
+  UNIQUE KEY Username (Username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table: Poliklinik
+CREATE TABLE IF NOT EXISTS Poliklinik (
+  ID_Poli INT(11) NOT NULL AUTO_INCREMENT,
+  Nama_Poli VARCHAR(255) NOT NULL,
+  Jumlah_Tenkes INT(11) NOT NULL,
+  Alamat TEXT DEFAULT NULL,
+  Created_At DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  PRIMARY KEY (ID_Poli)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table: Pasien
+CREATE TABLE IF NOT EXISTS Pasien (
+  ID_Pasien INT(11) NOT NULL AUTO_INCREMENT,
+  Nama VARCHAR(255) NOT NULL,
+  Tanggal_Lahir DATE NOT NULL,
+  Alamat TEXT DEFAULT NULL,
+  No_Telp VARCHAR(20) DEFAULT NULL,
+  Poli_Tujuan VARCHAR(255) NOT NULL,
+  Tanggal_Registrasi DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  PRIMARY KEY (ID_Pasien)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table: Antrian
+CREATE TABLE IF NOT EXISTS Antrian (
+  ID_Antrian INT(11) NOT NULL AUTO_INCREMENT,
+  ID_Pasien INT(11) NOT NULL,
+  ID_Poli INT(11) NOT NULL,
+  Nomor_Antrian INT(11) NOT NULL,
+  Status INT(11) NOT NULL CHECK (Status IN (0, 1, 2)),
+  Created_At DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  PRIMARY KEY (ID_Antrian),
+  KEY ID_Pasien (ID_Pasien),
+  KEY ID_Poli (ID_Poli),
+  CONSTRAINT antrian_ibfk_1 FOREIGN KEY (ID_Pasien) REFERENCES Pasien (ID_Pasien) ON DELETE CASCADE,
+  CONSTRAINT antrian_ibfk_2 FOREIGN KEY (ID_Poli) REFERENCES Poliklinik (ID_Poli) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table: Billing
+CREATE TABLE IF NOT EXISTS Billing (
+  ID_Billing INT(11) NOT NULL AUTO_INCREMENT,
+  ID_Pasien INT(11) NOT NULL,
+  ID_Admin INT(11) NOT NULL,
+  Status INT(11) NOT NULL CHECK (Status IN (0, 1)),
+  Created_At DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  PRIMARY KEY (ID_Billing),
+  KEY ID_Pasien (ID_Pasien),
+  KEY ID_Admin (ID_Admin),
+  CONSTRAINT billing_ibfk_1 FOREIGN KEY (ID_Pasien) REFERENCES Pasien (ID_Pasien) ON DELETE CASCADE,
+  CONSTRAINT billing_ibfk_2 FOREIGN KEY (ID_Admin) REFERENCES Administrasi (ID_Admin) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
