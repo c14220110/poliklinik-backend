@@ -22,46 +22,67 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-// Login menangani permintaan login administrasi.
+// **LOGIN FUNCTION WITH STANDARDIZED RESPONSE**
 func (ac *AdministrasiController) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Invalid request payload",
+			"data":    nil,
+		})
 		return
 	}
 
 	admin, err := ac.Service.Authenticate(req.Username, req.Password)
 	if err != nil {
-		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "Invalid username or password",
+			"data":    nil,
+		})
 		return
 	}
 
 	// Generate JWT token setelah autentikasi berhasil.
 	token, err := utils.GenerateToken(admin.ID, admin.Username)
 	if err != nil {
-		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to generate token",
+			"data":    nil,
+		})
 		return
 	}
 
-	response := map[string]interface{}{
-		"id":       admin.ID,
-		"nama":     admin.Nama,
-		"username": admin.Username,
-		"token":    token,
-		"message":  "Login successful",
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	// **Response sukses dengan format standar**
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Login successful",
+		"data": map[string]interface{}{
+			"id":       admin.ID,
+			"nama":     admin.Nama,
+			"username": admin.Username,
+			"token":    token,
+		},
+	})
 }
 
-// Logout menangani permintaan logout.
+
+// **LOGOUT FUNCTION WITH STANDARDIZED RESPONSE**
 func (ac *AdministrasiController) Logout(w http.ResponseWriter, r *http.Request) {
-	response := map[string]interface{}{
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  http.StatusOK,
 		"message": "Logout successful",
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+		"data":    nil,
+	})
 }
+
 
 // CreateAdminRequest merupakan struktur request untuk pembuatan admin baru.
 type CreateAdminRequest struct {

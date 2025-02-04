@@ -8,6 +8,7 @@ import (
 	"github.com/c14220110/poliklinik-backend/internal/administrasi/services"
 )
 
+// BillingController menangani permintaan terkait data Billing.
 type BillingController struct {
 	Service *services.BillingService
 }
@@ -16,6 +17,8 @@ func NewBillingController(service *services.BillingService) *BillingController {
 	return &BillingController{Service: service}
 }
 
+// ListBilling mengembalikan data billing dengan struktur:
+// { "status": HTTP_CODE, "message": "Feedback", "data": [ ... ] }
 func (bc *BillingController) ListBilling(w http.ResponseWriter, r *http.Request) {
 	statusParam := r.URL.Query().Get("status")
 	var filterStatus *int = nil
@@ -27,12 +30,23 @@ func (bc *BillingController) ListBilling(w http.ResponseWriter, r *http.Request)
 
 	data, err := bc.Service.GetRecentBilling(filterStatus)
 	if err != nil {
-		http.Error(w, "Failed to retrieve billing data", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve billing data: " + err.Error(),
+			"data":    nil,
+		})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Billing data retrieved successfully",
+		"data":    data,
+	})
 }
+
 
 func (bc *BillingController) BillingDetail(w http.ResponseWriter, r *http.Request) {
 	idParam := r.URL.Query().Get("id_pasien")

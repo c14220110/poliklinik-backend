@@ -18,17 +18,25 @@ func NewPasienController(service *services.PendaftaranService) *PasienController
 	return &PasienController{Service: service}
 }
 
-// ExtendedPasien digunakan untuk menangkap data pendaftaran pasien yang dikirim dari frontend,
-// termasuk ID_Poli yang dipilih oleh admin.
-type ExtendedPasien struct {
-	models.Pasien
-	IDPoli int `json:"id_poli"`
+// ExtendedPasienRequest digunakan untuk menangkap data pendaftaran pasien yang dikirim dari frontend,
+// dengan tanggal_lahir dalam bentuk string.
+type ExtendedPasienRequest struct {
+	Nama         string `json:"nama"`
+	TanggalLahir string `json:"tanggal_lahir"`  // diharapkan format "2006-01-02"
+	JenisKelamin string `json:"jenis_kelamin"`
+	TempatLahir  string `json:"tempat_lahir"`
+	Nik          string `json:"nik"`
+	Kelurahan    string `json:"kelurahan"`
+	Kecamatan    string `json:"kecamatan"`
+	Alamat       string `json:"alamat"`
+	NoTelp       string `json:"no_telp"`
+	IDPoli       int    `json:"id_poli"`
 }
 
 // RegisterPasien menerima data pendaftaran pasien baru dan membuat entri antrian dalam satu transaksi.
 func (pc *PasienController) RegisterPasien(w http.ResponseWriter, r *http.Request) {
-	var ep ExtendedPasien
-	if err := json.NewDecoder(r.Body).Decode(&ep); err != nil {
+	var req ExtendedPasienRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  http.StatusBadRequest,
@@ -39,25 +47,60 @@ func (pc *PasienController) RegisterPasien(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Validasi field wajib
-	if ep.Nama == "" || ep.PoliTujuan == "" || ep.IDPoli == 0 {
+	if req.Nama == "" || req.IDPoli == 0 || req.TanggalLahir == "" || req.Nik == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "Nama, Poli Tujuan, dan id_poli harus diisi",
+			"message": "Nama, tanggal_lahir, NIK, dan id_poli harus diisi",
 			"data":    nil,
 		})
 		return
 	}
 
-	// Set Tanggal_Registrasi
-	ep.TanggalRegistrasi = time.Now()
-
-	// Buat data antrian; nomor antrian dan status akan dihitung di service.
-	var a models.Antrian
-	a.IDPoli = ep.IDPoli
-
-	patientID, nomorAntrian, err := pc.Service.RegisterPasienWithAntrian(ep.Pasien, a)
+	// Parse tanggal_lahir dari string ke time.Time
+	parsedDate, err := time.Parse("2006-01-02", req.TanggalLahir)
 	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Format tanggal_lahir tidak valid. Gunakan format YYYY-MM-DD",
+			"data":    nil,
+		})
+		return
+	}
+
+	// Buat objek Pasien berdasarkan request
+	p := models.Pasien{
+		Nama:         req.Nama,
+		TanggalLahir: parsedDate,
+		JenisKelamin: req.JenisKelamin,
+		TempatLahir:  req.TempatLahir,
+		Nik:          req.Nik,
+		Kelurahan:    req.Kelurahan,
+		Kecamatan:    req.Kecamatan,
+		Alamat:       req.Alamat,
+		NoTelp:       req.NoTelp,
+		TanggalRegistrasi: time.Now(),
+	}
+
+	// Buat data antrian
+	var a models.Antrian
+	a.IDPoli = req.IDPoli
+
+	patientID, nomorAntrian, err := pc.Service.RegisterPasienWithAntrian(p, a)
+	if err != nil {
+		// Jika error adalah "NIK sudah terdaftar", kirimkan status 409 (Conflict)
+		if err.Error() == "NIK sudah terdaftar" {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":  http.StatusConflict,
+				"message": "NIK sudah terdaftar dalam sistem",
+				"data":    nil,
+			})
+			return
+		}
+
+		// Jika error lain, kembalikan status 500
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  http.StatusInternalServerError,
