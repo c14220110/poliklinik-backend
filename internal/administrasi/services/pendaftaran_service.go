@@ -125,17 +125,27 @@ func (s *PendaftaranService) RegisterPasienWithAntrian(p models.Pasien, a models
 		return 0, 0, err
 	}
 
-	// Hitung Nomor_Antrian untuk poli yang dipilih
+	// Hitung Nomor_Antrian untuk poli yang dipilih, reset jika sudah lewat tengah malam
 	var maxNomor sql.NullInt64
-	err = tx.QueryRow("SELECT COALESCE(MAX(Nomor_Antrian), 0) FROM Antrian WHERE ID_Poli = ?", a.IDPoli).Scan(&maxNomor)
+	var lastResetDate sql.NullTime
+
+	err = tx.QueryRow("SELECT MAX(Nomor_Antrian), MAX(Created_At) FROM Antrian WHERE ID_Poli = ?", a.IDPoli).
+    Scan(&maxNomor, &lastResetDate)
 	if err != nil {
-		tx.Rollback()
-		return 0, 0, err
+    tx.Rollback()
+    return 0, 0, err
 	}
-	nextNomor := int64(1)
-	if maxNomor.Valid {
-		nextNomor = maxNomor.Int64 + 1
+
+	 // Default nomor antrian mulai dari 1
+ 	nextNomor := int64(1)
+
+	 // Jika ada antrian sebelumnya, cek apakah tanggal masih sama dengan hari ini
+ 	if maxNomor.Valid && lastResetDate.Valid {
+    	if lastResetDate.Time.Format("2006-01-02") == time.Now().Format("2006-01-02") {
+        nextNomor = maxNomor.Int64 + 1 // Tambah nomor antrian jika masih hari yang sama
+    	}
 	}
+
 
 	// Insert data antrian dengan Nomor_Antrian yang telah dihitung dan status 0 (Menunggu)
 	queryAntrian := `
