@@ -32,7 +32,10 @@ func main() {
 	// Inisialisasi service untuk screening (suster)
 	susterService := screeningServices.NewSusterService(db)
 
-	// Inisialisasi controller
+	// Inisialisasi service untuk antrian screening
+	antrianService := screeningServices.NewAntrianService(db)
+
+	// Inisialisasi controller untuk administrasi
 	adminController := adminControllers.NewAdministrasiController(adminService)
 	pasienController := adminControllers.NewPasienController(pendaftaranService)
 	billingController := adminControllers.NewBillingController(billingService)
@@ -40,11 +43,17 @@ func main() {
 	// Inisialisasi controller untuk screening (suster)
 	susterController := screeningControllers.NewSusterController(susterService)
 
+	// Inisialisasi controller untuk antrian screening
+	antrianController := screeningControllers.NewAntrianController(antrianService)
+
 	// Daftarkan routing khusus untuk modul administrasi
 	adminRoutes.RegisterAdministrasiRoutes(adminController, pasienController, billingController)
 
 	// Daftarkan routing khusus untuk screening (suster)
 	screeningRoutes.RegisterSusterRoutes(susterController)
+
+	// Daftarkan routing khusus untuk antrian screening
+	screeningRoutes.RegisterAntrianRoutes(antrianController)
 
 	log.Printf("Server berjalan pada port %s...", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, nil))
