@@ -81,7 +81,7 @@ type LoginDokterRequest struct {
 	IDPoli   int    `json:"id_poli"` // Dokter memilih poliklinik yang ingin diakses
 }
 
-// LoginDokter menangani request login dokter.
+// LoginDokter menangani request login dokter dengan validasi shift aktif.
 func (dc *DokterController) LoginDokter(w http.ResponseWriter, r *http.Request) {
 	var req LoginDokterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -103,21 +103,19 @@ func (dc *DokterController) LoginDokter(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	dokter, err := dc.Service.AuthenticateDokter(req.Username, req.Password)
+	// Autentikasi dokter dengan cek shift aktif
+	dokter, shift, err := dc.Service.AuthenticateDokter(req.Username, req.Password, req.IDPoli)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  http.StatusUnauthorized,
-			"message": "Invalid username or password",
+			"message": err.Error(),
 			"data":    nil,
 		})
 		return
 	}
 
-	// Di sini, untuk tahap login dokter, Anda bisa menambahkan validasi tambahan untuk IDPoli
-	// Jika dokter harus memilih poliklinik tertentu, validasi itu bisa dilakukan di level aplikasi.
-	// Sebagai contoh, kita anggap bahwa input IDPoli diterima dan langsung dikembalikan di response.
-	
+	// Generate JWT token
 	token, err := utils.GenerateToken(dokter.ID_Dokter, dokter.Username)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -138,8 +136,13 @@ func (dc *DokterController) LoginDokter(w http.ResponseWriter, r *http.Request) 
 			"nama":         dokter.Nama,
 			"username":     dokter.Username,
 			"spesialisasi": dokter.Spesialisasi,
-			"id_poli":      req.IDPoli, // dikembalikan sesuai dengan pilihan dokter
+			"id_poli":      shift.ID_Poli, // ID poli dari shift aktif
 			"token":        token,
+			"shift": map[string]interface{}{
+				"id_shift":    shift.ID_Shift,
+				"jam_mulai":   shift.Jam_Mulai,
+				"jam_selesai": shift.Jam_Selesai,
+			},
 		},
 	})
 }

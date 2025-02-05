@@ -18,10 +18,7 @@ import (
 )
 
 func main() {
-	// Muat konfigurasi dari .env
 	cfg := config.LoadConfig()
-
-	// Hubungkan ke database MariaDB
 	db := mariadb.Connect()
 
 	// Inisialisasi service untuk administrasi, pendaftaran, dan billing
@@ -46,13 +43,13 @@ func main() {
 	// Inisialisasi controller untuk dokter
 	dokterController := dokterControllers.NewDokterController(dokterService)
 
-	// Daftarkan routing khusus untuk modul administrasi
+	// Daftarkan routing modul administrasi
 	adminRoutes.RegisterAdministrasiRoutes(adminController, pasienController, billingController)
 
-	// Daftarkan routing khusus untuk screening (suster)
+	// Daftarkan routing modul screening (suster)
 	screeningRoutes.RegisterSusterRoutes(susterController)
 
-	// Daftarkan routing khusus untuk dokter
+	// Daftarkan routing modul dokter
 	dokterRoutes.RegisterDokterRoutes(dokterController)
 
 	log.Printf("Server berjalan pada port %s...", cfg.Port)

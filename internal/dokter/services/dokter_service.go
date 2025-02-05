@@ -3,8 +3,7 @@ package services
 import (
 	"database/sql"
 	"errors"
-
-	//"time"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -33,16 +32,43 @@ func (s *DokterService) CreateDokter(d models.Dokter) (int64, error) {
 	return result.LastInsertId()
 }
 
-// AuthenticateDokter memvalidasi login dokter.
-func (s *DokterService) AuthenticateDokter(username, password string) (*models.Dokter, error) {
+// AuthenticateDokter memvalidasi login dokter dengan cek shift aktif.
+// Param: username, password, dan selectedPoli (id_poli yang dipilih oleh dokter dari dropdown).
+// Jika dokter memiliki shift aktif dan selectedPoli sama dengan shift aktif, kembalikan data dokter dan shift.
+func (s *DokterService) AuthenticateDokter(username, password string, selectedPoli int) (*models.Dokter, *models.ShiftDokter, error) {
 	var dokter models.Dokter
-	query := `SELECT ID_Dokter, Nama, Username, Password, Spesialisasi FROM Dokter WHERE Username = ?`
-	err := s.DB.QueryRow(query, username).Scan(&dokter.ID_Dokter, &dokter.Nama, &dokter.Username, &dokter.Password, &dokter.Spesialisasi)
+	queryDokter := `SELECT ID_Dokter, Nama, Username, Password, Spesialisasi FROM Dokter WHERE Username = ?`
+	err := s.DB.QueryRow(queryDokter, username).Scan(&dokter.ID_Dokter, &dokter.Nama, &dokter.Username, &dokter.Password, &dokter.Spesialisasi)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	// Verifikasi password menggunakan bcrypt
 	if err := bcrypt.CompareHashAndPassword([]byte(dokter.Password), []byte(password)); err != nil {
-		return nil, errors.New("invalid credentials")
+		return nil, nil, errors.New("invalid credentials")
 	}
-	return &dokter, nil
+
+	// Cek shift aktif dokter: Cari record di Shift_Dokter di mana
+	// Jam_Mulai <= now <= Jam_Selesai dan ID_Dokter = dokter.ID_Dokter.
+	now := time.Now()
+	var shift models.ShiftDokter
+	queryShift := `
+		SELECT ID_Shift, ID_Dokter, ID_Poli, ID_Management, Jam_Mulai, Jam_Selesai 
+		FROM Shift_Dokter 
+		WHERE ID_Dokter = ? AND Jam_Mulai <= ? AND Jam_Selesai >= ?
+	`
+	err = s.DB.QueryRow(queryShift, dokter.ID_Dokter, now, now).Scan(&shift.ID_Shift, &shift.ID_Dokter, &shift.ID_Poli, &shift.ID_Management, &shift.Jam_Mulai, &shift.Jam_Selesai)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil, errors.New("dokter tidak memiliki shift aktif")
+		}
+		return nil, nil, err
+	}
+
+	// Pastikan id_poli yang dipilih (selectedPoli) sama dengan id_poli dari shift aktif.
+	if shift.ID_Poli != selectedPoli {
+		return nil, nil, errors.New("poliklinik yang dipilih tidak sesuai dengan shift aktif")
+	}
+
+	return &dokter, &shift, nil
 }
