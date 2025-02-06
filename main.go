@@ -32,6 +32,10 @@ func main() {
 	// Inisialisasi service untuk dokter
 	dokterService := dokterServices.NewDokterService(db)
 
+		// Inisialisasi controller untuk poliklinik (untuk modul dokter)
+	dokterPoliklinikController := dokterControllers.NewPoliklinikController(db)
+
+
 	// Inisialisasi controller untuk administrasi
 	adminController := adminControllers.NewAdministrasiController(adminService)
 	pasienController := adminControllers.NewPasienController(pendaftaranService)
@@ -47,6 +51,11 @@ func main() {
 	adminRoutes.RegisterAdministrasiRoutes(adminController, pasienController, billingController)
 	screeningRoutes.RegisterSusterRoutes(susterController)
 	dokterRoutes.RegisterDokterRoutes(dokterController)
+
+
+	dokterRoutes.RegisterPoliklinikRoutes(dokterPoliklinikController)
+
+	
 
 	log.Printf("Server berjalan pada port %s...", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, nil))
