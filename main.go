@@ -43,13 +43,9 @@ func main() {
 	// Inisialisasi controller untuk dokter
 	dokterController := dokterControllers.NewDokterController(dokterService)
 
-	// Daftarkan routing modul administrasi
+	// Daftarkan routing untuk masing-masing modul
 	adminRoutes.RegisterAdministrasiRoutes(adminController, pasienController, billingController)
-
-	// Daftarkan routing modul screening (suster)
 	screeningRoutes.RegisterSusterRoutes(susterController)
-
-	// Daftarkan routing modul dokter
 	dokterRoutes.RegisterDokterRoutes(dokterController)
 
 	log.Printf("Server berjalan pada port %s...", cfg.Port)

@@ -20,8 +20,8 @@ var (
 func Connect() *sql.DB {
 	once.Do(func() {
 		cfg := config.LoadConfig()
-		// Format DSN: username:password@tcp(host:port)/dbname?parseTime=true
-		dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true",
+		// Format DSN: username:password@tcp(host:port)/dbname?parseTime=true&loc=Asia%2FJakarta
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&loc=Asia%%2FJakarta",
 			cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName)
 
 		var err error

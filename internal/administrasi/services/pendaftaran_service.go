@@ -75,10 +75,6 @@ func (s *PendaftaranService) GetListPasien() ([]map[string]interface{}, error) {
 }
 
 
-// RegisterPasienWithAntrian melakukan pendaftaran pasien dan pembuatan antrian
-// dalam satu transaksi. Fungsi ini menghitung Nomor_Antrian dengan mengambil nilai maksimum
-// nomor antrian pada poli yang sama dan menambahkan 1.
-// Mengembalikan: patientID, nomorAntrian, dan error (jika ada).
 func (s *PendaftaranService) RegisterPasienWithAntrian(p models.Pasien, a models.Antrian) (int64, int64, error) {
 	// Cek apakah NIK sudah ada di database
 	var existingID int
@@ -125,11 +121,16 @@ func (s *PendaftaranService) RegisterPasienWithAntrian(p models.Pasien, a models
 		return 0, 0, err
 	}
 
+	// Hitung rentang waktu hari ini berdasarkan zona waktu aplikasi
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	endOfDay := startOfDay.Add(24 * time.Hour)
+
 	// Hitung Nomor_Antrian untuk poli yang dipilih, hanya berdasarkan record yang dibuat hari ini.
 	var maxNomor sql.NullInt64
 	err = tx.QueryRow(
-		"SELECT COALESCE(MAX(Nomor_Antrian), 0) FROM Antrian WHERE ID_Poli = ? AND DATE(Created_At) = CURDATE()",
-		a.IDPoli,
+		"SELECT COALESCE(MAX(Nomor_Antrian), 0) FROM Antrian WHERE ID_Poli = ? AND Created_At >= ? AND Created_At < ?",
+		a.IDPoli, startOfDay, endOfDay,
 	).Scan(&maxNomor)
 	if err != nil {
 		tx.Rollback()

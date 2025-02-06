@@ -22,7 +22,6 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-// **LOGIN FUNCTION WITH STANDARDIZED RESPONSE**
 func (ac *AdministrasiController) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -46,8 +45,8 @@ func (ac *AdministrasiController) Login(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Generate JWT token setelah autentikasi berhasil.
-	token, err := utils.GenerateToken(admin.ID, admin.Username)
+	// Gunakan GenerateTokenWithClaims dengan extra claim kosong
+	token, err := utils.GenerateTokenWithClaims(admin.ID, admin.Username, map[string]interface{}{})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -58,7 +57,6 @@ func (ac *AdministrasiController) Login(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// **Response sukses dengan format standar**
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  http.StatusOK,
@@ -71,6 +69,7 @@ func (ac *AdministrasiController) Login(w http.ResponseWriter, r *http.Request) 
 		},
 	})
 }
+
 
 
 // **LOGOUT FUNCTION WITH STANDARDIZED RESPONSE**

@@ -111,8 +111,8 @@ func (sc *SusterController) LoginSuster(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Generate JWT token untuk suster
-	token, err := utils.GenerateToken(suster.ID_Suster, suster.Username)
+	// Gunakan GenerateTokenWithClaims dengan extra claim kosong
+	token, err := utils.GenerateTokenWithClaims(suster.ID_Suster, suster.Username, map[string]interface{}{})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -131,7 +131,7 @@ func (sc *SusterController) LoginSuster(w http.ResponseWriter, r *http.Request) 
 			"id":       suster.ID_Suster,
 			"nama":     suster.Nama,
 			"username": suster.Username,
-			"id_poli":  shift.ID_Poli, // id_poli dari shift aktif
+			"id_poli":  shift.ID_Poli,
 			"token":    token,
 			"shift": map[string]interface{}{
 				"id_shift":    shift.ID_Shift,
@@ -141,3 +141,4 @@ func (sc *SusterController) LoginSuster(w http.ResponseWriter, r *http.Request) 
 		},
 	})
 }
+
