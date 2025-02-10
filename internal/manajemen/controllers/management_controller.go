@@ -4,25 +4,25 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/c14220110/poliklinik-backend/internal/administrasi/services"
+	"github.com/c14220110/poliklinik-backend/internal/manajemen/services"
 	"github.com/c14220110/poliklinik-backend/pkg/utils"
 )
 
-type AdministrasiController struct {
-	Service *services.AdministrasiService
+type ManagementController struct {
+	Service *services.ManagementService
 }
 
-func NewAdministrasiController(service *services.AdministrasiService) *AdministrasiController {
-	return &AdministrasiController{Service: service}
+func NewManagementController(service *services.ManagementService) *ManagementController {
+	return &ManagementController{Service: service}
 }
 
-type LoginRequest struct {
+type LoginManagementRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-func (ac *AdministrasiController) Login(w http.ResponseWriter, r *http.Request) {
-	var req LoginRequest
+func (mc *ManagementController) Login(w http.ResponseWriter, r *http.Request) {
+	var req LoginManagementRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -32,8 +32,18 @@ func (ac *AdministrasiController) Login(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
+	if req.Username == "" || req.Password == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Username and Password are required",
+			"data":    nil,
+		})
+		return
+	}
 
-	admin, err := ac.Service.AuthenticateAdmin(req.Username, req.Password)
+	// Autentikasi manajemen
+	m, err := mc.Service.AuthenticateManagement(req.Username, req.Password)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -44,12 +54,13 @@ func (ac *AdministrasiController) Login(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Sisipkan klaim tambahan ke token JWT
 	extraClaims := map[string]interface{}{
-		"role":       "Administrasi",
-		"privileges": []string{"pendaftaran", "billing", "cetak_data", "cetak_label", "cetak_gelang"},
+		"role":       "Manajemen",
+		"privileges": []string{"manage_dashboard", "manage_poli", "manage_shift", "manage_user", "manage_role_privilege"},
 	}
 
-	token, err := utils.GenerateTokenWithClaims(admin.ID_Admin, admin.Username, extraClaims)
+	token, err := utils.GenerateTokenWithClaims(m.ID_Management, m.Username, extraClaims)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -60,14 +71,15 @@ func (ac *AdministrasiController) Login(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Response standar: status, message, data
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Login successful",
 		"data": map[string]interface{}{
-			"id":       admin.ID_Admin,
-			"nama":     admin.Nama,
-			"username": admin.Username,
+			"id":       m.ID_Management,
+			"nama":     m.Nama,
+			"username": m.Username,
 			"token":    token,
 		},
 	})

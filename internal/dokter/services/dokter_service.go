@@ -3,16 +3,30 @@ package services
 import (
 	"database/sql"
 	"errors"
-
-	//"strconv"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
-
-	"github.com/c14220110/poliklinik-backend/internal/dokter/models"
 )
 
-// DokterService menangani operasi terkait dokter, termasuk autentikasi dan (baru) pengambilan antrian.
+type Dokter struct {
+	ID_Dokter    int
+	Nama         string
+	Username     string
+	Password     string
+	Spesialisasi string
+	CreatedAt    time.Time
+}
+
+type ShiftKaryawan struct {
+	ID_Shift_Karyawan int
+	ID_Poli           int
+	ID_Shift          int
+	ID_Karyawan       int
+	Tanggal           time.Time
+	Jam_Mulai         time.Time
+	Jam_Selesai       time.Time
+}
+
 type DokterService struct {
 	DB *sql.DB
 }
@@ -21,26 +35,10 @@ func NewDokterService(db *sql.DB) *DokterService {
 	return &DokterService{DB: db}
 }
 
-// CreateDokter mendaftarkan dokter baru dengan meng-hash password-nya.
-func (s *DokterService) CreateDokter(d models.Dokter) (int64, error) {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(d.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return 0, err
-	}
-	query := `INSERT INTO Dokter (Nama, Username, Password, Spesialisasi) VALUES (?, ?, ?, ?)`
-	result, err := s.DB.Exec(query, d.Nama, d.Username, hashedPassword, d.Spesialisasi)
-	if err != nil {
-		return 0, err
-	}
-	return result.LastInsertId()
-}
-
-// AuthenticateDokter memvalidasi login dokter dengan cek shift aktif (lihat revisi sebelumnya).
-// (Fungsi ini sudah ada dan tidak berubah, jadi tetap seperti sebelumnya.)
-func (s *DokterService) AuthenticateDokter(username, password string, selectedPoli int) (*models.Dokter, *models.ShiftDokter, error) {
-	var dokter models.Dokter
-	queryDokter := `SELECT ID_Dokter, Nama, Username, Password, Spesialisasi FROM Dokter WHERE Username = ?`
-	err := s.DB.QueryRow(queryDokter, username).Scan(&dokter.ID_Dokter, &dokter.Nama, &dokter.Username, &dokter.Password, &dokter.Spesialisasi)
+func (ds *DokterService) AuthenticateDokterUsingKaryawan(username, password string, selectedPoli int) (*Dokter, *ShiftKaryawan, error) {
+	var dokter Dokter
+	query := "SELECT ID_Karyawan, Nama, Username, Password, '' as Spesialisasi, Created_At FROM Karyawan WHERE Username = ?"
+	err := ds.DB.QueryRow(query, username).Scan(&dokter.ID_Dokter, &dokter.Nama, &dokter.Username, &dokter.Password, &dokter.Spesialisasi, &dokter.CreatedAt)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -48,28 +46,48 @@ func (s *DokterService) AuthenticateDokter(username, password string, selectedPo
 		return nil, nil, errors.New("invalid credentials")
 	}
 
-	// Cek shift aktif di Shift_Dokter
-	now := time.Now()
-	var shift models.ShiftDokter
-	queryShift := `
-		SELECT ID_Shift, ID_Dokter, ID_Poli, ID_Management, Jam_Mulai, Jam_Selesai 
-		FROM Shift_Dokter 
-		WHERE ID_Dokter = ? AND Jam_Mulai <= ? AND Jam_Selesai >= ?
+	var roleName string
+	roleQuery := `
+		SELECT r.Nama_Role 
+		FROM Detail_Role_Karyawan drk 
+		JOIN Role r ON drk.ID_Role = r.ID_Role 
+		WHERE drk.ID_Karyawan = ?
+		LIMIT 1
 	`
-	err = s.DB.QueryRow(queryShift, dokter.ID_Dokter, now, now).Scan(&shift.ID_Shift, &shift.ID_Dokter, &shift.ID_Poli, &shift.ID_Management, &shift.Jam_Mulai, &shift.Jam_Selesai)
+	err = ds.DB.QueryRow(roleQuery, dokter.ID_Dokter).Scan(&roleName)
+	if err != nil {
+		return nil, nil, errors.New("failed to retrieve role")
+	}
+	if roleName != "Dokter" {
+		return nil, nil, errors.New("user is not a Dokter")
+	}
+
+	//now := time.Now()
+	var shift ShiftKaryawan
+	shiftQuery := `
+		SELECT sk.ID_Shift_Karyawan, sk.ID_Poli, sk.ID_Shift, sk.ID_Karyawan, sk.Tanggal,
+		       s.Jam_Mulai, s.Jam_Selesai
+		FROM Shift_Karyawan sk
+		JOIN Shift s ON sk.ID_Shift = s.ID_Shift
+		WHERE sk.ID_Karyawan = ? AND sk.ID_Poli = ? AND sk.Tanggal = CURDATE()
+		  AND (
+		    (s.Jam_Mulai < s.Jam_Selesai AND CURTIME() BETWEEN s.Jam_Mulai AND s.Jam_Selesai)
+		    OR (s.Jam_Mulai > s.Jam_Selesai AND (CURTIME() >= s.Jam_Mulai OR CURTIME() < s.Jam_Selesai))
+		  )
+		LIMIT 1
+	`
+	err = ds.DB.QueryRow(shiftQuery, dokter.ID_Dokter, selectedPoli).Scan(&shift.ID_Shift_Karyawan, &shift.ID_Poli, &shift.ID_Shift, &shift.ID_Karyawan, &shift.Tanggal, &shift.Jam_Mulai, &shift.Jam_Selesai)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil, errors.New("dokter tidak memiliki shift aktif")
+			return nil, nil, errors.New("no active shift for this Dokter on the selected poliklinik")
 		}
 		return nil, nil, err
 	}
 
-	if shift.ID_Poli != selectedPoli {
-		return nil, nil, errors.New("poliklinik yang dipilih tidak sesuai dengan shift aktif")
-	}
-
 	return &dokter, &shift, nil
 }
+
+
 
 // ----------------------------------------------
 // Fungsi baru: GetListAntrianByPoli

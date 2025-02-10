@@ -7,10 +7,11 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	commonModels "github.com/c14220110/poliklinik-backend/internal/common/models"
 	"github.com/c14220110/poliklinik-backend/internal/screening/models"
 )
 
-// SusterService menangani logika bisnis untuk suster.
+// SusterService menangani login suster.
 type SusterService struct {
 	DB *sql.DB
 }
@@ -19,55 +20,52 @@ func NewSusterService(db *sql.DB) *SusterService {
 	return &SusterService{DB: db}
 }
 
-// CreateSuster mendaftarkan suster baru dan meng-hash password-nya.
-func (s *SusterService) CreateSuster(suster models.Suster) (int64, error) {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(suster.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return 0, err
-	}
-	query := `INSERT INTO Suster (Nama, Username, Password, Created_At) VALUES (?, ?, ?, ?)`
-	result, err := s.DB.Exec(query, suster.Nama, suster.Username, hashedPassword, time.Now())
-	if err != nil {
-		return 0, err
-	}
-	return result.LastInsertId()
-}
-
-// AuthenticateSuster memvalidasi login suster, dengan memeriksa:
-// 1. Kredensial suster (username & password)
-// 2. Apakah suster memiliki shift aktif (saat ini berada di antara Jam_Mulai dan Jam_Selesai)
-// 3. Apakah id_poli yang dipilih sama dengan id_poli dari shift aktif
-func (s *SusterService) AuthenticateSuster(username, password string, selectedPoli int) (*models.Suster, *models.ShiftSuster, error) {
+// AuthenticateSusterUsingKaryawan memvalidasi login suster dari tabel Karyawan.
+func (s *SusterService) AuthenticateSusterUsingKaryawan(username, password string, selectedPoli int) (*models.Suster, *commonModels.ShiftKaryawan, error) {
 	var suster models.Suster
-	query := `SELECT ID_Suster, Nama, Username, Password, Created_At FROM Suster WHERE Username = ?`
-	err := s.DB.QueryRow(query, username).Scan(&suster.ID_Suster, &suster.Nama, &suster.Username, &suster.Password, &suster.CreatedAt)
+	queryKaryawan := "SELECT ID_Karyawan, Nama, Username, Password FROM Karyawan WHERE Username = ?"
+	err := s.DB.QueryRow(queryKaryawan, username).Scan(&suster.ID_Suster, &suster.Nama, &suster.Username, &suster.Password)
 	if err != nil {
 		return nil, nil, err
 	}
-	// Periksa password menggunakan bcrypt
 	if err := bcrypt.CompareHashAndPassword([]byte(suster.Password), []byte(password)); err != nil {
 		return nil, nil, errors.New("invalid credentials")
 	}
-
-	// Cek shift aktif suster: Shift_Suster di mana Jam_Mulai <= sekarang <= Jam_Selesai
-	now := time.Now()
-	var shift models.ShiftSuster
-	queryShift := `
-		SELECT ID_Shift, ID_Suster, ID_Poli, ID_Management, Jam_Mulai, Jam_Selesai 
-		FROM Shift_Suster 
-		WHERE ID_Suster = ? AND Jam_Mulai <= ? AND Jam_Selesai >= ?
+	// Cek role untuk suster
+	var roleName string
+	queryRole := `
+		SELECT r.Nama_Role 
+		FROM Detail_Role_Karyawan drk 
+		JOIN Role r ON drk.ID_Role = r.ID_Role 
+		WHERE drk.ID_Karyawan = ?
+		LIMIT 1
 	`
-	err = s.DB.QueryRow(queryShift, suster.ID_Suster, now, now).Scan(&shift.ID_Shift, &shift.ID_Suster, &shift.ID_Poli, &shift.ID_Management, &shift.Jam_Mulai, &shift.Jam_Selesai)
+	err = s.DB.QueryRow(queryRole, suster.ID_Suster).Scan(&roleName)
+	if err != nil {
+		return nil, nil, errors.New("failed to retrieve role")
+	}
+	if roleName != "Suster" {
+		return nil, nil, errors.New("user is not a Suster")
+	}
+
+	// Cek shift aktif di Shift_Karyawan
+	now := time.Now()
+	var shift commonModels.ShiftKaryawan
+	queryShift := `
+		SELECT ID_Shift, ID_Karyawan, ID_Poli, Jam_Mulai, Jam_Selesai 
+		FROM Shift_Karyawan 
+		WHERE ID_Karyawan = ? AND Jam_Mulai <= ? AND Jam_Selesai >= ?
+		LIMIT 1
+	`
+	err = s.DB.QueryRow(queryShift, suster.ID_Suster, now, now).Scan(&shift.ID_Shift, &shift.ID_Karyawan, &shift.ID_Poli, &shift.Jam_Mulai, &shift.Jam_Selesai)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil, errors.New("suster tidak memiliki shift aktif")
 		}
 		return nil, nil, err
 	}
-
-	// Pastikan id_poli yang dipilih sama dengan id_poli dari shift aktif
 	if shift.ID_Poli != selectedPoli {
-		return nil, nil, errors.New("poli yang dipilih tidak sesuai dengan shift aktif")
+		return nil, nil, errors.New("poliklinik yang dipilih tidak sesuai dengan shift aktif")
 	}
 
 	return &suster, &shift, nil

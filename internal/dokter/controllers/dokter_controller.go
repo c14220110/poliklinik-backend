@@ -1,15 +1,22 @@
 package controllers
 
 import (
+	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
-	"github.com/c14220110/poliklinik-backend/internal/dokter/models"
+	//"time"
+
 	"github.com/c14220110/poliklinik-backend/internal/dokter/services"
 	"github.com/c14220110/poliklinik-backend/pkg/utils"
-	"github.com/golang-jwt/jwt/v4"
+	"golang.org/x/crypto/bcrypt"
 )
+
+type LoginDokterRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	IDPoli   int    `json:"id_poli"`
+}
 
 type DokterController struct {
 	Service *services.DokterService
@@ -19,67 +26,6 @@ func NewDokterController(service *services.DokterService) *DokterController {
 	return &DokterController{Service: service}
 }
 
-// LoginDokterRequest adalah struktur request untuk login dokter.
-type LoginDokterRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	IDPoli   int    `json:"id_poli"` // Dokter memilih poliklinik yang ingin diakses
-}
-
-// CreateDokter registers a new dokter.
-func (dc *DokterController) CreateDokter(w http.ResponseWriter, r *http.Request) {
-	// Contoh implementasi register dokter
-	var req struct {
-		Nama         string `json:"nama"`
-		Username     string `json:"username"`
-		Password     string `json:"password"`
-		Spesialisasi string `json:"spesialisasi"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusBadRequest,
-			"message": "Invalid request payload",
-			"data":    nil,
-		})
-		return
-	}
-	if req.Nama == "" || req.Username == "" || req.Password == "" || req.Spesialisasi == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusBadRequest,
-			"message": "All fields are required",
-			"data":    nil,
-		})
-		return
-	}
-	dokter := models.Dokter{
-		Nama:         req.Nama,
-		Username:     req.Username,
-		Password:     req.Password,
-		Spesialisasi: req.Spesialisasi,
-	}
-	id, err := dc.Service.CreateDokter(dokter)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusInternalServerError,
-			"message": "Failed to create dokter: " + err.Error(),
-			"data":    nil,
-		})
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  http.StatusOK,
-		"message": "Dokter created successfully",
-		"data": map[string]interface{}{
-			"id": id,
-		},
-	})
-}
-
-// LoginDokter menangani request login dokter dengan validasi shift aktif.
 func (dc *DokterController) LoginDokter(w http.ResponseWriter, r *http.Request) {
 	var req LoginDokterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -101,22 +47,103 @@ func (dc *DokterController) LoginDokter(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Autentikasi dan validasi shift aktif
-	dokter, shift, err := dc.Service.AuthenticateDokter(req.Username, req.Password, req.IDPoli)
+	// Gunakan dc.Service.DB (field DB di dalam service) untuk query
+	var idKaryawan int
+	var nama, username, hashedPassword string
+	query := "SELECT ID_Karyawan, Nama, Username, Password FROM Karyawan WHERE Username = ?"
+	err := dc.Service.DB.QueryRow(query, req.Username).Scan(&idKaryawan, &nama, &username, &hashedPassword)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  http.StatusUnauthorized,
-			"message": err.Error(),
+			"message": "Invalid username or password",
 			"data":    nil,
 		})
 		return
 	}
 
-	// Generate token dengan claim tambahan "id_poli" dari shift aktif
-	token, err := utils.GenerateTokenWithClaims(dokter.ID_Dokter, dokter.Username, map[string]interface{}{
-		"id_poli": shift.ID_Poli,
-	})
+	// Verifikasi password
+	if err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(req.Password)); err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "Invalid username or password",
+			"data":    nil,
+		})
+		return
+	}
+
+	// Cek role melalui Detail_Role_Karyawan dan Role (harus "Dokter")
+	var roleName string
+	roleQuery := `
+		SELECT r.Nama_Role 
+		FROM Detail_Role_Karyawan drk 
+		JOIN Role r ON drk.ID_Role = r.ID_Role 
+		WHERE drk.ID_Karyawan = ?
+		LIMIT 1
+	`
+	err = dc.Service.DB.QueryRow(roleQuery, idKaryawan).Scan(&roleName)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve role: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+	if roleName != "Dokter" {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusForbidden,
+			"message": "User is not a Dokter",
+			"data":    nil,
+		})
+		return
+	}
+
+	// Cek shift aktif dari Shift_Karyawan dan Shift (dengan kondisi Tanggal = CURDATE())
+	var idShiftKaryawan int
+	var jamMulai, jamSelesai string
+	shiftQuery := `
+		SELECT sk.ID_Shift_Karyawan, TIME(s.Jam_Mulai), TIME(s.Jam_Selesai)
+		FROM Shift_Karyawan sk
+		JOIN Shift s ON sk.ID_Shift = s.ID_Shift
+		WHERE sk.ID_Karyawan = ? 
+		  AND sk.ID_Poli = ? 
+		  AND sk.Tanggal = CURDATE()
+		  AND (
+		     (s.Jam_Mulai < s.Jam_Selesai AND CURTIME() BETWEEN s.Jam_Mulai AND s.Jam_Selesai)
+		     OR (s.Jam_Mulai > s.Jam_Selesai AND (CURTIME() >= s.Jam_Mulai OR CURTIME() < s.Jam_Selesai))
+		  )
+		LIMIT 1
+	`
+	err = dc.Service.DB.QueryRow(shiftQuery, idKaryawan, req.IDPoli).Scan(&idShiftKaryawan, &jamMulai, &jamSelesai)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":  http.StatusUnauthorized,
+				"message": "No active shift for this Dokter on the selected poliklinik",
+				"data":    nil,
+			})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve shift: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+
+	extraClaims := map[string]interface{}{
+		"role":       "Dokter",
+		"privileges": []string{"assessment", "input_screening", "e_resep", "pulangkan_pasien"},
+		"id_poli":    req.IDPoli,
+	}
+	token, err := utils.GenerateTokenWithClaims(idKaryawan, username, extraClaims)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -132,99 +159,17 @@ func (dc *DokterController) LoginDokter(w http.ResponseWriter, r *http.Request) 
 		"status":  http.StatusOK,
 		"message": "Login successful",
 		"data": map[string]interface{}{
-			"id":           dokter.ID_Dokter,
-			"nama":         dokter.Nama,
-			"username":     dokter.Username,
-			"spesialisasi": dokter.Spesialisasi,
-			"id_poli":      shift.ID_Poli, // dikirim sebagai verifikasi
+			"id":           idKaryawan,
+			"nama":         nama,
+			"username":     username,
+			"role":         "Dokter",
+			"id_poli":      req.IDPoli,
 			"token":        token,
 			"shift": map[string]interface{}{
-				"id_shift":    shift.ID_Shift,
-				"jam_mulai":   shift.Jam_Mulai,
-				"jam_selesai": shift.Jam_Selesai,
+				"id_shift_karyawan": idShiftKaryawan,
+				"jam_mulai":         jamMulai,
+				"jam_selesai":       jamSelesai,
 			},
 		},
-	})
-}
-
-// ListAntrian mengembalikan daftar antrian pasien yang statusnya 0 untuk poli yang sesuai dengan token.
-func (dc *DokterController) ListAntrian(w http.ResponseWriter, r *http.Request) {
-	// Ambil token dari header Authorization
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusUnauthorized,
-			"message": "Authorization header missing",
-			"data":    nil,
-		})
-		return
-	}
-	// Asumsikan format "Bearer <token>"
-	var tokenString string
-	_, err := fmt.Sscanf(authHeader, "Bearer %s", &tokenString)
-	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusUnauthorized,
-			"message": "Invalid authorization header format",
-			"data":    nil,
-		})
-		return
-	}
-
-	// Decode token
-	token, err := utils.ValidateToken(tokenString)
-	if err != nil || !token.Valid {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusUnauthorized,
-			"message": "Invalid token",
-			"data":    nil,
-		})
-		return
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusUnauthorized,
-			"message": "Invalid token claims",
-			"data":    nil,
-		})
-		return
-	}
-
-	// Ambil id_poli dari claims
-	idPoliFloat, ok := claims["id_poli"].(float64)
-	if !ok {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusUnauthorized,
-			"message": "id_poli not found in token",
-			"data":    nil,
-		})
-		return
-	}
-	idPoli := int(idPoliFloat)
-
-	// Panggil service untuk mendapatkan antrian berdasarkan id_poli
-	data, err := dc.Service.GetListAntrianByPoli(idPoli)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusInternalServerError,
-			"message": "Failed to retrieve antrian data: " + err.Error(),
-			"data":    nil,
-		})
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  http.StatusOK,
-		"message": "Antrian data retrieved successfully",
-		"data":    data,
 	})
 }
