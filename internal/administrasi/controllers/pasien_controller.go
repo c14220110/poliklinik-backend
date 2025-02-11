@@ -9,7 +9,19 @@ import (
 	"github.com/c14220110/poliklinik-backend/internal/administrasi/services"
 )
 
-// PasienController menangani endpoint pendaftaran pasien.
+type ExtendedPasienRequest struct {
+	IDPoli       int    `json:"id_poli"`
+	Nama         string `json:"nama"`
+	JenisKelamin string `json:"jenis_kelamin"`
+	TempatLahir  string `json:"tempat_lahir"`
+	TanggalLahir string `json:"tanggal_lahir"`
+	Nik          string `json:"nik"`
+	NoTelp       string `json:"no_telp"`
+	Alamat       string `json:"alamat"`
+	Kelurahan    string `json:"kelurahan"`
+	Kecamatan    string `json:"kecamatan"`
+}
+
 type PasienController struct {
 	Service *services.PendaftaranService
 }
@@ -18,46 +30,30 @@ func NewPasienController(service *services.PendaftaranService) *PasienController
 	return &PasienController{Service: service}
 }
 
-// ExtendedPasienRequest digunakan untuk menangkap data pendaftaran pasien yang dikirim dari frontend,
-// dengan tanggal_lahir dalam bentuk string.
-type ExtendedPasienRequest struct {
-	Nama         string `json:"nama"`
-	TanggalLahir string `json:"tanggal_lahir"`  // diharapkan format "2006-01-02"
-	JenisKelamin string `json:"jenis_kelamin"`
-	TempatLahir  string `json:"tempat_lahir"`
-	Nik          string `json:"nik"`
-	Kelurahan    string `json:"kelurahan"`
-	Kecamatan    string `json:"kecamatan"`
-	Alamat       string `json:"alamat"`
-	NoTelp       string `json:"no_telp"`
-	IDPoli       int    `json:"id_poli"`
-}
-
-// RegisterPasien menerima data pendaftaran pasien baru dan membuat entri antrian dalam satu transaksi.
 func (pc *PasienController) RegisterPasien(w http.ResponseWriter, r *http.Request) {
 	var req ExtendedPasienRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "Invalid request payload",
+			"message": "Invalid request payload: " + err.Error(),
 			"data":    nil,
 		})
 		return
 	}
 
 	// Validasi field wajib
-	if req.Nama == "" || req.IDPoli == 0 || req.TanggalLahir == "" || req.Nik == "" {
+	if req.Nama == "" || req.TanggalLahir == "" || req.Nik == "" || req.IDPoli == 0 {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "Nama, tanggal_lahir, NIK, dan id_poli harus diisi",
+			"message": "Nama, tanggal_lahir, nik, dan id_poli harus diisi",
 			"data":    nil,
 		})
 		return
 	}
 
-	// Parse tanggal_lahir dari string ke time.Time
+	// Parse tanggal_lahir
 	parsedDate, err := time.Parse("2006-01-02", req.TanggalLahir)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -69,38 +65,24 @@ func (pc *PasienController) RegisterPasien(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Buat objek Pasien berdasarkan request
+	// Buat objek Pasien (sesuai dengan struktur tabel)
 	p := models.Pasien{
 		Nama:         req.Nama,
 		TanggalLahir: parsedDate,
 		JenisKelamin: req.JenisKelamin,
 		TempatLahir:  req.TempatLahir,
-		Nik:          req.Nik,
+		NIK:          req.Nik,
 		Kelurahan:    req.Kelurahan,
 		Kecamatan:    req.Kecamatan,
 		Alamat:       req.Alamat,
 		NoTelp:       req.NoTelp,
-		TanggalRegistrasi: time.Now(),
 	}
 
-	// Buat data antrian
-	var a models.Antrian
-	a.IDPoli = req.IDPoli
+	// Ambil operatorID dari token JWT. (Di sini diset sebagai dummy; seharusnya diambil dari context JWT)
+	operatorID := 1
 
-	patientID, nomorAntrian, err := pc.Service.RegisterPasienWithAntrian(p, a)
+	patientID, nomorAntrian, err := pc.Service.RegisterPasienWithRekamMedisAndAntrian(p, req.IDPoli, operatorID)
 	if err != nil {
-		// Jika error adalah "NIK sudah terdaftar", kirimkan status 409 (Conflict)
-		if err.Error() == "NIK sudah terdaftar" {
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  http.StatusConflict,
-				"message": "NIK sudah terdaftar dalam sistem",
-				"data":    nil,
-			})
-			return
-		}
-
-		// Jika error lain, kembalikan status 500
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  http.StatusInternalServerError,
@@ -110,17 +92,19 @@ func (pc *PasienController) RegisterPasien(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Response sukses
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Pasien berhasil didaftarkan",
 		"data": map[string]interface{}{
-			"id":            patientID,
+			"id_pasien":     patientID,
 			"nomor_antrian": nomorAntrian,
 		},
 	})
 }
+
+
+
 
 // ListPasien mengembalikan daftar pasien beserta informasi antrian dan rekam medis.
 func (pc *PasienController) ListPasien(w http.ResponseWriter, r *http.Request) {

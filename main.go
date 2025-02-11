@@ -7,6 +7,7 @@ import (
 	"github.com/c14220110/poliklinik-backend/config"
 	adminControllers "github.com/c14220110/poliklinik-backend/internal/administrasi/controllers"
 	adminRoutes "github.com/c14220110/poliklinik-backend/internal/administrasi/routes"
+	billingRoutes "github.com/c14220110/poliklinik-backend/internal/administrasi/routes" // pastikan path sesuai
 	adminServices "github.com/c14220110/poliklinik-backend/internal/administrasi/services"
 	dokterControllers "github.com/c14220110/poliklinik-backend/internal/dokter/controllers"
 	dokterRoutes "github.com/c14220110/poliklinik-backend/internal/dokter/routes"
@@ -21,6 +22,7 @@ import (
 	screeningControllers "github.com/c14220110/poliklinik-backend/internal/screening/controllers"
 	screeningRoutes "github.com/c14220110/poliklinik-backend/internal/screening/routes"
 	screeningServices "github.com/c14220110/poliklinik-backend/internal/screening/services"
+
 	"github.com/c14220110/poliklinik-backend/pkg/storage/mariadb"
 )
 
@@ -66,6 +68,8 @@ func main() {
 	managementRoutes.RegisterManagementRoutes(managementController)
 	userRoutes.RegisterUserRoutes(userController)
 	shiftRoutes.RegisterShiftRoutes(shiftController)
+	billingRoutes.RegisterBillingRoutes(billingController)
+
 
 	log.Printf("Server berjalan pada port %s...", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, nil))

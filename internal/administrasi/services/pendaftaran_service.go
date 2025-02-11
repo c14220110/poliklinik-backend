@@ -2,12 +2,13 @@ package services
 
 import (
 	"database/sql"
-	"fmt"
-	"time"
+	//"fmt"
+	//"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/administrasi/models"
 )
 
+// PendaftaranService menangani registrasi pasien.
 type PendaftaranService struct {
 	DB *sql.DB
 }
@@ -15,6 +16,132 @@ type PendaftaranService struct {
 func NewPendaftaranService(db *sql.DB) *PendaftaranService {
 	return &PendaftaranService{DB: db}
 }
+
+// RegisterPasienWithRekamMedisAndAntrian melakukan registrasi pasien, pembuatan rekam medis (jika belum ada),
+// pembuatan riwayat kunjungan, dan pembuatan antrian, dalam satu transaksi.
+// operatorID adalah ID_Karyawan yang menginput (diambil dari token JWT).
+func (s *PendaftaranService) RegisterPasienWithRekamMedisAndAntrian(p models.Pasien, idPoli int, operatorID int) (int64, int64, error) {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	var patientID int64
+	var idRM int64
+
+	// 1. Cek apakah pasien sudah terdaftar berdasarkan NIK.
+	var existingID int64
+	err = tx.QueryRow("SELECT ID_Pasien FROM Pasien WHERE NIK = ?", p.NIK).Scan(&existingID)
+	if err != nil && err != sql.ErrNoRows {
+		tx.Rollback()
+		return 0, 0, err
+	}
+
+	if err == sql.ErrNoRows {
+		// Pasien belum terdaftar: Insert ke tabel Pasien.
+		queryPasien := `
+			INSERT INTO Pasien 
+				(Nama, Tanggal_Lahir, Jenis_Kelamin, Tempat_Lahir, NIK, Kelurahan, Kecamatan, Alamat, No_Telp)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`
+		res, err := tx.Exec(queryPasien,
+			p.Nama,
+			p.TanggalLahir,
+			p.JenisKelamin,
+			p.TempatLahir,
+			p.NIK,
+			p.Kelurahan,
+			p.Kecamatan,
+			p.Alamat,
+			p.NoTelp,
+		)
+		if err != nil {
+			tx.Rollback()
+			return 0, 0, err
+		}
+		patientID, err = res.LastInsertId()
+		if err != nil {
+			tx.Rollback()
+			return 0, 0, err
+		}
+	} else {
+		// Pasien sudah ada.
+		patientID = existingID
+	}
+
+	// 2. Buat atau ambil rekam medis untuk pasien.
+	err = tx.QueryRow("SELECT ID_RM FROM Rekam_Medis WHERE ID_Pasien = ? LIMIT 1", patientID).Scan(&idRM)
+	if err == sql.ErrNoRows {
+		// Belum ada rekam medis, buat baru.
+		queryRM := `
+			INSERT INTO Rekam_Medis (ID_Pasien)
+			VALUES (?)
+		`
+		res, err := tx.Exec(queryRM, patientID)
+		if err != nil {
+			tx.Rollback()
+			return 0, 0, err
+		}
+		idRM, err = res.LastInsertId()
+		if err != nil {
+			tx.Rollback()
+			return 0, 0, err
+		}
+	} else if err != nil {
+		tx.Rollback()
+		return 0, 0, err
+	}
+
+	// 3. Buat record di tabel Riwayat_Kunjungan.
+	queryRK := `
+		INSERT INTO Riwayat_Kunjungan (ID_RM, ID_Poli, Created_At)
+		VALUES (?, ?, NOW())
+	`
+	_, err = tx.Exec(queryRK, idRM, idPoli)
+	if err != nil {
+		tx.Rollback()
+		return 0, 0, err
+	}
+
+	// 4. Hitung nomor antrian untuk poli yang dipilih pada hari ini.
+	// Gunakan rentang waktu: DATE(Created_At) = CURDATE()
+	var maxNomor sql.NullInt64
+	queryMax := `
+		SELECT COALESCE(MAX(Nomor_Antrian), 0)
+		FROM Antrian
+		WHERE ID_Poli = ? AND DATE(Created_At) = CURDATE()
+	`
+	err = tx.QueryRow(queryMax, idPoli).Scan(&maxNomor)
+	if err != nil {
+		tx.Rollback()
+		return 0, 0, err
+	}
+	nomorAntrian := int64(1)
+	if maxNomor.Valid {
+		nomorAntrian = maxNomor.Int64 + 1
+	}
+
+	// 5. Buat record di tabel Antrian.
+	queryAntrian := `
+		INSERT INTO Antrian (ID_Pasien, ID_Poli, Nomor_Antrian, Status, Created_At)
+		VALUES (?, ?, ?, 0, NOW())
+	`
+	_, err = tx.Exec(queryAntrian, patientID, idPoli, nomorAntrian)
+	if err != nil {
+		tx.Rollback()
+		return 0, 0, err
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return patientID, nomorAntrian, nil
+}
+
+
+
 
 func (s *PendaftaranService) GetListPasien() ([]map[string]interface{}, error) {
 	query := `
@@ -72,100 +199,4 @@ func (s *PendaftaranService) GetListPasien() ([]map[string]interface{}, error) {
 		result = append(result, data)
 	}
 	return result, nil
-}
-
-
-func (s *PendaftaranService) RegisterPasienWithAntrian(p models.Pasien, a models.Antrian) (int64, int64, error) {
-	// Cek apakah NIK sudah ada di database
-	var existingID int
-	err := s.DB.QueryRow("SELECT ID_Pasien FROM Pasien WHERE NIK = ?", p.Nik).Scan(&existingID)
-	if err == nil {
-		// Jika NIK sudah ditemukan, kembalikan error khusus
-		return 0, 0, fmt.Errorf("NIK sudah terdaftar")
-	} else if err != sql.ErrNoRows {
-		// Jika error lain selain "tidak ditemukan", kembalikan error
-		return 0, 0, err
-	}
-
-	// Mulai transaksi
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return 0, 0, err
-	}
-
-	// Insert data pasien (tanpa data poli, karena itu akan disimpan di tabel Antrian)
-	queryPasien := `
-		INSERT INTO Pasien 
-			(Nama, Tanggal_Lahir, Jenis_Kelamin, Tempat_Lahir, Kelurahan, Kecamatan, NIK, No_Telp, Alamat, Tanggal_Registrasi)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-	result, err := tx.Exec(queryPasien,
-		p.Nama,
-		p.TanggalLahir,
-		p.JenisKelamin,
-		p.TempatLahir,
-		p.Kelurahan,
-		p.Kecamatan,
-		p.Nik,
-		p.NoTelp,
-		p.Alamat,
-		time.Now(),
-	)
-	if err != nil {
-		tx.Rollback()
-		return 0, 0, err
-	}
-	patientID, err := result.LastInsertId()
-	if err != nil {
-		tx.Rollback()
-		return 0, 0, err
-	}
-
-	// Hitung rentang waktu hari ini berdasarkan zona waktu aplikasi
-	now := time.Now()
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	endOfDay := startOfDay.Add(24 * time.Hour)
-
-	// Hitung Nomor_Antrian untuk poli yang dipilih, hanya berdasarkan record yang dibuat hari ini.
-	var maxNomor sql.NullInt64
-	err = tx.QueryRow(
-		"SELECT COALESCE(MAX(Nomor_Antrian), 0) FROM Antrian WHERE ID_Poli = ? AND Created_At >= ? AND Created_At < ?",
-		a.IDPoli, startOfDay, endOfDay,
-	).Scan(&maxNomor)
-	if err != nil {
-		tx.Rollback()
-		return 0, 0, err
-	}
-	nextNomor := int64(1)
-	if maxNomor.Valid {
-		nextNomor = maxNomor.Int64 + 1
-	}
-
-	// Insert data antrian dengan Nomor_Antrian yang telah dihitung dan status 0 (Menunggu)
-	queryAntrian := `
-		INSERT INTO Antrian 
-			(ID_Pasien, ID_Poli, Nomor_Antrian, Status, Created_At)
-		VALUES (?, ?, ?, ?, ?)
-	`
-	a.IDPasien = int(patientID)
-	a.NomorAntrian = int(nextNomor)
-	a.Status = 0
-	_, err = tx.Exec(queryAntrian,
-		a.IDPasien,
-		a.IDPoli,
-		a.NomorAntrian,
-		a.Status,
-		time.Now(),
-	)
-	if err != nil {
-		tx.Rollback()
-		return 0, 0, err
-	}
-
-	// Commit transaksi
-	if err = tx.Commit(); err != nil {
-		return 0, 0, err
-	}
-
-	return patientID, nextNomor, nil
 }

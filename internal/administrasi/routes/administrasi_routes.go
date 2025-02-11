@@ -11,8 +11,12 @@ func RegisterAdministrasiRoutes(ac *controllers.AdministrasiController, pc *cont
 	// Login endpoint tidak dilindungi
 	http.HandleFunc("/api/administrasi/login", ac.Login)
 
-	// Endpoint lainnya dilindungi dengan JWTMiddlewareAdmin
+	// Registrasi pasien (misalnya, diakses via POST /api/pasien/register)
+	http.Handle("/api/pasien/register", middlewares.JWTMiddlewareAdmin(http.HandlerFunc(pc.RegisterPasien)))
+
+	// Contoh endpoint list pasien
 	http.Handle("/api/administrasi/pasien", middlewares.JWTMiddlewareAdmin(http.HandlerFunc(pc.ListPasien)))
+
+	// Endpoint billing
 	http.Handle("/api/administrasi/billing", middlewares.JWTMiddlewareAdmin(http.HandlerFunc(bc.ListBilling)))
-	// Tambahkan endpoint lain sesuai kebutuhan
 }
