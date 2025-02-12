@@ -38,6 +38,9 @@ func main() {
 	// Inisialisasi service untuk screening (suster)
 	susterService := screeningServices.NewSusterService(db)
 
+	screeningService := screeningServices.NewScreeningService(db)
+
+
 	// Inisialisasi service untuk dokter (dari tabel Karyawan)
 	dokterService := dokterServices.NewDokterService(db)
 
@@ -55,6 +58,9 @@ func main() {
 	// Inisialisasi controller untuk screening (suster)
 	susterController := screeningControllers.NewSusterController(susterService)
 
+	screeningController := screeningControllers.NewScreeningController(screeningService)
+
+
 	// Inisialisasi controller untuk dokter
 	dokterController := dokterControllers.NewDokterController(dokterService)
 
@@ -67,6 +73,7 @@ func main() {
 	adminRoutes.RegisterAdministrasiRoutes(adminController, pasienController, billingController)
 	adminRoutes.RegisterPoliklinikRoutes(poliklinikController)
 	screeningRoutes.RegisterSusterRoutes(susterController)
+	screeningRoutes.RegisterScreeningRoutes(screeningController)
 	dokterRoutes.RegisterDokterRoutes(dokterController)
 	managementRoutes.RegisterManagementRoutes(managementController)
 	userRoutes.RegisterUserRoutes(userController)
