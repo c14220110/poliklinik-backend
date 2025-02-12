@@ -49,6 +49,8 @@ func main() {
 	adminController := adminControllers.NewAdministrasiController(adminService)
 	pasienController := adminControllers.NewPasienController(pendaftaranService)
 	billingController := adminControllers.NewBillingController(billingService)
+	poliklinikController := adminControllers.NewPoliklinikController(db)
+
 
 	// Inisialisasi controller untuk screening (suster)
 	susterController := screeningControllers.NewSusterController(susterService)
@@ -63,6 +65,7 @@ func main() {
 	shiftController := shiftControllers.NewShiftController(shiftService, db)
 
 	adminRoutes.RegisterAdministrasiRoutes(adminController, pasienController, billingController)
+	adminRoutes.RegisterPoliklinikRoutes(poliklinikController)
 	screeningRoutes.RegisterSusterRoutes(susterController)
 	dokterRoutes.RegisterDokterRoutes(dokterController)
 	managementRoutes.RegisterManagementRoutes(managementController)
