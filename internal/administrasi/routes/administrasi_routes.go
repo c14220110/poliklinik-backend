@@ -12,14 +12,18 @@ func RegisterAdministrasiRoutes(ac *controllers.AdministrasiController, pc *cont
 	http.HandleFunc("/api/administrasi/login", ac.Login)
 
 	// Registrasi pasien (POST)
-	http.Handle("/api/pasien/register", middlewares.JWTMiddlewareAdmin(http.HandlerFunc(pc.RegisterPasien)))
+	http.Handle("/api/pasien/register", middlewares.JWTMiddleware(http.HandlerFunc(pc.RegisterPasien)))
+
+	//update
+	http.Handle("/api/kunjungan", middlewares.JWTMiddleware(http.HandlerFunc(pc.UpdateKunjungan)))
+
 
 	// Endpoint untuk mengambil seluruh data pasien
-	http.Handle("/api/administrasi/pasiendata", middlewares.JWTMiddlewareAdmin(http.HandlerFunc(pc.GetAllPasienData)))
+	http.Handle("/api/administrasi/pasiendata", middlewares.JWTMiddleware(http.HandlerFunc(pc.GetAllPasienData)))
 
 	// Endpoint list pasien (bisa berbeda, sesuai kebutuhan)
-	http.Handle("/api/administrasi/pasien", middlewares.JWTMiddlewareAdmin(http.HandlerFunc(pc.ListPasien)))
+	http.Handle("/api/administrasi/pasien", middlewares.JWTMiddleware(http.HandlerFunc(pc.ListPasien)))
 
 	// Endpoint billing
-	http.Handle("/api/administrasi/billing", middlewares.JWTMiddlewareAdmin(http.HandlerFunc(bc.ListBilling)))
+	http.Handle("/api/administrasi/billing", middlewares.JWTMiddleware(http.HandlerFunc(bc.ListBilling)))
 }

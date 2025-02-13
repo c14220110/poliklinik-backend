@@ -1,47 +1,74 @@
 package utils
 
 import (
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
 )
 
-var jwtSecret = []byte("your-secret-key") // Ambil dari konfigurasi atau environment
+// Claims terpadu untuk semua role
+type Claims struct {
+	IDKaryawan string      `json:"id_karyawan"`
+	Role       string      `json:"role"`
+	Privileges interface{} `json:"privileges"` // bisa berupa slice atau map, sesuai kebutuhan
+	IDPoli     int         `json:"id_poli,omitempty"`
+	Username   string      `json:"username"`
+	jwt.RegisteredClaims
+}
 
-// GenerateTokenWithClaims membuat token JWT dengan klaim tambahan.
-func GenerateTokenWithClaims(userID int, username string, extraClaims map[string]interface{}) (string, error) {
-	claims := jwt.MapClaims{
-		"user_id":  userID,
-		"username": username,
-		"exp":      time.Now().Add(72 * time.Hour).Unix(),
+// GenerateJWTToken membuat token JWT dengan klaim terpadu.
+func GenerateJWTToken(idKaryawan string, role string, privileges interface{}, idPoli int, username string) (string, error) {
+	// Ambil secret key dari environment (pastikan sudah di-set)
+	jwtKey := []byte(os.Getenv("JWT_SECRET_KEY"))
+	if len(jwtKey) == 0 {
+		return "", fmt.Errorf("JWT secret key is missing")
 	}
-	// Masukkan extra claims jika ada
-	for k, v := range extraClaims {
-		claims[k] = v
+
+	// Buat klaim
+	claims := Claims{
+		IDKaryawan: idKaryawan,
+		Role:       role,
+		Privileges: privileges,
+		IDPoli:     idPoli,
+		Username:   username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtSecret)
+	tokenString, err := token.SignedString(jwtKey)
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
 }
 
-// ValidateToken memvalidasi token JWT dan mengembalikan token yang sudah didecode.
-func ValidateToken(tokenString string) (*jwt.Token, error) {
-	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// Pastikan metode signing adalah HMAC
+// ValidateJWTToken memvalidasi token JWT dan mengembalikan klaim terpadu.
+func ValidateJWTToken(tokenString string) (*Claims, error) {
+	jwtKey := []byte(os.Getenv("JWT_SECRET_KEY"))
+	if len(jwtKey) == 0 {
+		return nil, fmt.Errorf("JWT secret key is missing")
+	}
+
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		// Pastikan metode signing benar
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, jwt.ErrInvalidKey
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return jwtSecret, nil
+		return jwtKey, nil
 	})
-}
+	if err != nil {
+		return nil, err
+	}
+	if !token.Valid {
+		return nil, fmt.Errorf("invalid token")
+	}
 
-
-func GenerateToken(userID int, username string) (string, error) {
-    claims := jwt.MapClaims{
-        "user_id":  userID,
-        "username": username,
-        "exp":      time.Now().Add(72 * time.Hour).Unix(),
-    }
-    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-    return token.SignedString(jwtSecret)
+	return claims, nil
 }

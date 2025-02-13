@@ -8,5 +8,5 @@ import (
 )
 
 func RegisterPoliklinikRoutes(pc *controllers.PoliklinikController) {
-	http.Handle("/api/administrasi/polikliniklist", middlewares.JWTMiddlewareAdmin(http.HandlerFunc(pc.GetPoliklinikList)))
+	http.Handle("/api/administrasi/polikliniklist", middlewares.JWTMiddleware(http.HandlerFunc(pc.GetPoliklinikList)))
 }

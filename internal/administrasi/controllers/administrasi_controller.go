@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/c14220110/poliklinik-backend/internal/administrasi/services"
 	"github.com/c14220110/poliklinik-backend/pkg/utils"
@@ -44,12 +45,21 @@ func (ac *AdministrasiController) Login(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	extraClaims := map[string]interface{}{
-		"role":       "Administrasi",
-		"privileges": []string{"pendaftaran", "billing", "cetak_data", "cetak_label", "cetak_gelang"},
-	}
-
-	token, err := utils.GenerateTokenWithClaims(admin.ID_Admin, admin.Username, extraClaims)
+	// Gunakan fungsi JWT terpadu: GenerateJWTToken
+	// Konversi admin.ID_Admin ke string dan set id_poli = 0 karena admin tidak terkait dengan poli.
+	token, err := utils.GenerateJWTToken(
+		strconv.Itoa(admin.ID_Admin),
+		"Administrasi",
+		[]map[string]interface{}{
+			{"privilege": "pendaftaran"},
+			{"privilege": "billing"},
+			{"privilege": "cetak_data"},
+			{"privilege": "cetak_label"},
+			{"privilege": "cetak_gelang"},
+		},
+		0,
+		admin.Username,
+	)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{

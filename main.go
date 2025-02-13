@@ -22,11 +22,16 @@ import (
 	screeningControllers "github.com/c14220110/poliklinik-backend/internal/screening/controllers"
 	screeningRoutes "github.com/c14220110/poliklinik-backend/internal/screening/routes"
 	screeningServices "github.com/c14220110/poliklinik-backend/internal/screening/services"
+	"github.com/joho/godotenv"
 
 	"github.com/c14220110/poliklinik-backend/pkg/storage/mariadb"
 )
 
 func main() {
+	if err := godotenv.Load(); err != nil { //kyke iki apus soale dh jwte
+    log.Fatal("Error loading .env file")
+  }
+
 	cfg := config.LoadConfig()
 	db := mariadb.Connect()
 

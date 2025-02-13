@@ -4,8 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-
-	//"time"
+	"strconv"
 
 	"github.com/c14220110/poliklinik-backend/internal/dokter/services"
 	"github.com/c14220110/poliklinik-backend/pkg/utils"
@@ -47,7 +46,7 @@ func (dc *DokterController) LoginDokter(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Gunakan dc.Service.DB (field DB di dalam service) untuk query
+	// Query data karyawan berdasarkan username
 	var idKaryawan int
 	var nama, username, hashedPassword string
 	query := "SELECT ID_Karyawan, Nama, Username, Password FROM Karyawan WHERE Username = ?"
@@ -73,7 +72,7 @@ func (dc *DokterController) LoginDokter(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Cek role melalui Detail_Role_Karyawan dan Role (harus "Dokter")
+	// Cek role: pastikan karyawan memiliki role "Dokter" melalui join Detail_Role_Karyawan dan Role
 	var roleName string
 	roleQuery := `
 		SELECT r.Nama_Role 
@@ -102,7 +101,7 @@ func (dc *DokterController) LoginDokter(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Cek shift aktif dari Shift_Karyawan dan Shift (dengan kondisi Tanggal = CURDATE())
+	// Cek shift aktif: cari record shift aktif untuk karyawan pada poli yang dipilih
 	var idShiftKaryawan int
 	var jamMulai, jamSelesai string
 	shiftQuery := `
@@ -138,12 +137,22 @@ func (dc *DokterController) LoginDokter(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	extraClaims := map[string]interface{}{
-		"role":       "Dokter",
-		"privileges": []string{"assessment", "input_screening", "e_resep", "pulangkan_pasien"},
-		"id_poli":    req.IDPoli,
+	// Siapkan privileges untuk Dokter
+	extraClaims := []map[string]interface{}{
+		{"privilege": "assessment"},
+		{"privilege": "input_screening"},
+		{"privilege": "e_resep"},
+		{"privilege": "pulangkan_pasien"},
 	}
-	token, err := utils.GenerateTokenWithClaims(idKaryawan, username, extraClaims)
+
+	// Gunakan GenerateJWTToken dari utils untuk membuat token terpadu
+	token, err := utils.GenerateJWTToken(
+		strconv.Itoa(idKaryawan),
+		"Dokter",
+		extraClaims,
+		req.IDPoli,
+		username,
+	)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -159,12 +168,12 @@ func (dc *DokterController) LoginDokter(w http.ResponseWriter, r *http.Request) 
 		"status":  http.StatusOK,
 		"message": "Login successful",
 		"data": map[string]interface{}{
-			"id":           idKaryawan,
-			"nama":         nama,
-			"username":     username,
-			"role":         "Dokter",
-			"id_poli":      req.IDPoli,
-			"token":        token,
+			"id":       idKaryawan,
+			"nama":     nama,
+			"username": username,
+			"role":     "Dokter",
+			"id_poli":  req.IDPoli,
+			"token":    token,
 			"shift": map[string]interface{}{
 				"id_shift_karyawan": idShiftKaryawan,
 				"jam_mulai":         jamMulai,

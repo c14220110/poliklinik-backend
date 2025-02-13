@@ -8,6 +8,9 @@ import (
 )
 
 func RegisterScreeningRoutes(sc *controllers.ScreeningController) {
-	// Misalnya, endpoint untuk input screening, dilindungi JWT (role Suster)
-	http.Handle("/api/screening", middlewares.JWTMiddlewareSuster(http.HandlerFunc(sc.InputScreening)))
+	// Endpoint POST untuk input screening
+	http.Handle("/api/screening/input", middlewares.JWTMiddleware(http.HandlerFunc(sc.InputScreening)))
+	
+	// Endpoint GET untuk mendapatkan screening berdasarkan id_pasien
+	http.Handle("/api/screening", middlewares.JWTMiddleware(http.HandlerFunc(sc.GetScreeningByPasienHandler)))
 }

@@ -8,7 +8,7 @@ import (
 )
 
 func RegisterUserRoutes(uc *controllers.UserController) {
-	http.Handle("/api/management/karyawan", middlewares.JWTMiddlewareManagement(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/api/management/karyawan", middlewares.JWTMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			uc.GetKaryawanList(w, r)

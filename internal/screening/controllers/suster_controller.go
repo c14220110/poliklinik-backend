@@ -4,25 +4,23 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/c14220110/poliklinik-backend/internal/screening/services"
 	"github.com/c14220110/poliklinik-backend/pkg/utils"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// LoginSusterRequest adalah struktur request untuk login suster.
 type LoginSusterRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 	IDPoli   int    `json:"id_poli"`
 }
 
-// SusterController menggunakan service dari package services.
 type SusterController struct {
 	Service *services.SusterService
 }
 
-// NewSusterController sekarang menerima parameter bertipe *services.SusterService.
 func NewSusterController(service *services.SusterService) *SusterController {
 	return &SusterController{Service: service}
 }
@@ -48,7 +46,7 @@ func (sc *SusterController) LoginSuster(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Contoh query dan logika autentikasi menggunakan sc.Service.DB
+	// Ambil data karyawan dari tabel Karyawan menggunakan sc.Service.DB
 	var idKaryawan int
 	var nama, username, hashedPassword string
 	query := "SELECT ID_Karyawan, Nama, Username, Password FROM Karyawan WHERE Username = ?"
@@ -63,6 +61,7 @@ func (sc *SusterController) LoginSuster(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Verifikasi password
 	if err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(req.Password)); err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -102,7 +101,7 @@ func (sc *SusterController) LoginSuster(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Cek shift aktif dengan join tabel Shift_Karyawan dan Shift
+	// Cek shift aktif dengan join Shift_Karyawan dan Shift
 	var idShiftKaryawan int
 	var jamMulai, jamSelesai string
 	shiftQuery := `
@@ -138,12 +137,11 @@ func (sc *SusterController) LoginSuster(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	extraClaims := map[string]interface{}{
-		"role":       "Suster",
-		"privileges": []string{"input_screening"},
-		"id_poli":    req.IDPoli,
-	}
-	token, err := utils.GenerateTokenWithClaims(idKaryawan, username, extraClaims)
+	// Generate token menggunakan fungsi JWT terpadu
+	// Gunakan strconv.Itoa untuk mengonversi idKaryawan ke string.
+	token, err := utils.GenerateJWTToken(strconv.Itoa(idKaryawan), "Suster", []map[string]interface{}{
+		{"privilege": "input_screening"},
+	}, req.IDPoli, username)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{

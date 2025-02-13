@@ -93,3 +93,43 @@ func (s *ScreeningService) InputScreening(screening models.Screening) (int64, er
 
 	return screeningID, nil
 }
+
+// GetScreeningByPasien mengembalikan daftar record screening untuk pasien dengan ID_Pasien tertentu.
+func (s *ScreeningService) GetScreeningByPasien(idPasien int) ([]models.Screening, error) {
+	query := `
+		SELECT ID_Screening, ID_Pasien, ID_Karyawan, Tensi, Berat_Badan, Suhu_Tubuh, 
+		       Tinggi_Badan, Gula_Darah, Detak_Nadi, Laju_Respirasi, Keterangan, Created_At
+		FROM Screening
+		WHERE ID_Pasien = ?
+		ORDER BY Created_At DESC
+	`
+	rows, err := s.DB.Query(query, idPasien)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var screenings []models.Screening
+	for rows.Next() {
+		var rec models.Screening
+		err := rows.Scan(
+			&rec.ID_Screening,
+			&rec.ID_Pasien,
+			&rec.ID_Karyawan,
+			&rec.Tensi,
+			&rec.Berat_Badan,
+			&rec.Suhu_Tubuh,
+			&rec.Tinggi_Badan,
+			&rec.Gula_Darah,
+			&rec.Detak_Nadi,
+			&rec.Laju_Respirasi,
+			&rec.Keterangan,
+			&rec.Created_At,
+		)
+		if err != nil {
+			return nil, err
+		}
+		screenings = append(screenings, rec)
+	}
+	return screenings, nil
+}
