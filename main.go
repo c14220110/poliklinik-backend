@@ -7,7 +7,7 @@ import (
 	"github.com/c14220110/poliklinik-backend/config"
 	adminControllers "github.com/c14220110/poliklinik-backend/internal/administrasi/controllers"
 	adminRoutes "github.com/c14220110/poliklinik-backend/internal/administrasi/routes"
-	billingRoutes "github.com/c14220110/poliklinik-backend/internal/administrasi/routes" // pastikan path sesuai
+	billingRoutes "github.com/c14220110/poliklinik-backend/internal/administrasi/routes"
 	adminServices "github.com/c14220110/poliklinik-backend/internal/administrasi/services"
 	dokterControllers "github.com/c14220110/poliklinik-backend/internal/dokter/controllers"
 	dokterRoutes "github.com/c14220110/poliklinik-backend/internal/dokter/routes"
@@ -16,7 +16,6 @@ import (
 	shiftControllers "github.com/c14220110/poliklinik-backend/internal/manajemen/controllers"
 	managementRoutes "github.com/c14220110/poliklinik-backend/internal/manajemen/routes"
 	shiftRoutes "github.com/c14220110/poliklinik-backend/internal/manajemen/routes"
-	userRoutes "github.com/c14220110/poliklinik-backend/internal/manajemen/routes"
 	managementServices "github.com/c14220110/poliklinik-backend/internal/manajemen/services"
 	shiftServices "github.com/c14220110/poliklinik-backend/internal/manajemen/services"
 	screeningControllers "github.com/c14220110/poliklinik-backend/internal/screening/controllers"
@@ -28,9 +27,9 @@ import (
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil { //kyke iki apus soale dh jwte
-    log.Fatal("Error loading .env file")
-  }
+	if err := godotenv.Load(); err != nil {
+		log.Fatal("Error loading .env file")
+	}
 
 	cfg := config.LoadConfig()
 	db := mariadb.Connect()
@@ -42,15 +41,13 @@ func main() {
 
 	// Inisialisasi service untuk screening (suster)
 	susterService := screeningServices.NewSusterService(db)
-
 	screeningService := screeningServices.NewScreeningService(db)
-
 
 	// Inisialisasi service untuk dokter (dari tabel Karyawan)
 	dokterService := dokterServices.NewDokterService(db)
 
 	// Inisialisasi service untuk management dan shift
-	managementService := managementServices.NewManagementService(db)
+	managementService := managementServices.NewManagementService(db) // ManagementService yang digunakan
 	shiftService := shiftServices.NewShiftService(db)
 
 	// Inisialisasi controller untuk administrasi
@@ -59,33 +56,33 @@ func main() {
 	billingController := adminControllers.NewBillingController(billingService)
 	poliklinikController := adminControllers.NewPoliklinikController(db)
 
-
 	// Inisialisasi controller untuk screening (suster)
 	susterController := screeningControllers.NewSusterController(susterService)
-
 	screeningController := screeningControllers.NewScreeningController(screeningService)
-
 
 	// Inisialisasi controller untuk dokter
 	dokterController := dokterControllers.NewDokterController(dokterService)
 
 	// Inisialisasi controller untuk management
 	managementController := managementControllers.NewManagementController(managementService)
-	userController := managementControllers.NewUserController(db)
+	karyawanController := managementControllers.NewKaryawanController(managementService) // Berikan managementService pada controller
+
 	// Inisialisasi controller untuk shift management (bagian dari Website Manajemen)
 	shiftController := shiftControllers.NewShiftController(shiftService, db)
 
+	// Daftarkan routing untuk masing-masing modul
 	adminRoutes.RegisterAdministrasiRoutes(adminController, pasienController, billingController)
 	adminRoutes.RegisterPoliklinikRoutes(poliklinikController)
 	screeningRoutes.RegisterSusterRoutes(susterController)
 	screeningRoutes.RegisterScreeningRoutes(screeningController)
 	dokterRoutes.RegisterDokterRoutes(dokterController)
-	managementRoutes.RegisterManagementRoutes(managementController)
-	userRoutes.RegisterUserRoutes(userController)
+	managementRoutes.RegisterManagementLoginRoutes(managementController)
+	managementRoutes.RegisterKaryawanRoutes(karyawanController)
+	
 	shiftRoutes.RegisterShiftRoutes(shiftController)
 	billingRoutes.RegisterBillingRoutes(billingController)
 
-
+	// Pastikan server berjalan dengan baik
 	log.Printf("Server berjalan pada port %s...", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, nil))
 }

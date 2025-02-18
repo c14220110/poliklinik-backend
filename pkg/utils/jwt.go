@@ -34,7 +34,7 @@ func GenerateJWTToken(idKaryawan string, role string, privileges interface{}, id
 		IDPoli:     idPoli,
 		Username:   username,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(99999 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
