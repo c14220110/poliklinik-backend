@@ -9,14 +9,14 @@ import (
 	"github.com/c14220110/poliklinik-backend/pkg/utils"
 )
 
-// Buat tipe kustom untuk context key
+// Definisikan tipe kustom untuk context key
 type contextKey string
 
 const (
-  ContextKeyUserID contextKey = "user_id"
+	// Ubah nama key menjadi ContextKeyClaims agar sesuai dengan yang digunakan di controller.
+	ContextKeyClaims contextKey = "claims"
 )
 
-// JWTMiddleware adalah middleware terpadu untuk memvalidasi token JWT.
 func JWTMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Ambil header Authorization
@@ -52,8 +52,8 @@ func JWTMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Simpan claims ke context (claims sudah bertipe *utils.Claims)
-		ctx := context.WithValue(r.Context(), ContextKeyUserID, claims)
+		// Simpan claims ke context dengan key ContextKeyClaims
+		ctx := context.WithValue(r.Context(), ContextKeyClaims, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

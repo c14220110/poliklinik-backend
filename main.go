@@ -14,6 +14,7 @@ import (
 	dokterServices "github.com/c14220110/poliklinik-backend/internal/dokter/services"
 	managementControllers "github.com/c14220110/poliklinik-backend/internal/manajemen/controllers"
 	shiftControllers "github.com/c14220110/poliklinik-backend/internal/manajemen/controllers"
+	cmsRoutes "github.com/c14220110/poliklinik-backend/internal/manajemen/routes"
 	managementRoutes "github.com/c14220110/poliklinik-backend/internal/manajemen/routes"
 	shiftRoutes "github.com/c14220110/poliklinik-backend/internal/manajemen/routes"
 	managementServices "github.com/c14220110/poliklinik-backend/internal/manajemen/services"
@@ -21,6 +22,7 @@ import (
 	screeningControllers "github.com/c14220110/poliklinik-backend/internal/screening/controllers"
 	screeningRoutes "github.com/c14220110/poliklinik-backend/internal/screening/routes"
 	screeningServices "github.com/c14220110/poliklinik-backend/internal/screening/services"
+
 	"github.com/joho/godotenv"
 
 	"github.com/c14220110/poliklinik-backend/pkg/storage/mariadb"
@@ -49,6 +51,8 @@ func main() {
 	// Inisialisasi service untuk management dan shift
 	managementService := managementServices.NewManagementService(db) // ManagementService yang digunakan
 	shiftService := shiftServices.NewShiftService(db)
+	cmsService := managementServices.NewCMSService(db)
+
 
 	// Inisialisasi controller untuk administrasi
 	adminController := adminControllers.NewAdministrasiController(adminService)
@@ -70,6 +74,9 @@ func main() {
 	// Inisialisasi controller untuk shift management (bagian dari Website Manajemen)
 	shiftController := shiftControllers.NewShiftController(shiftService, db)
 
+	cmsController := managementControllers.NewCMSController(cmsService)
+
+
 	// Daftarkan routing untuk masing-masing modul
 	adminRoutes.RegisterAdministrasiRoutes(adminController, pasienController, billingController)
 	adminRoutes.RegisterPoliklinikRoutes(poliklinikController)
@@ -81,6 +88,8 @@ func main() {
 	
 	shiftRoutes.RegisterShiftRoutes(shiftController)
 	billingRoutes.RegisterBillingRoutes(billingController)
+	cmsRoutes.RegisterCMSRoutes(cmsController)
+
 
 	// Pastikan server berjalan dengan baik
 	log.Printf("Server berjalan pada port %s...", cfg.Port)

@@ -40,7 +40,7 @@ type InputScreeningRequest struct {
 // Nilai operator (ID_Karyawan) diambil dari token JWT terpadu yang disimpan di context.
 func (sc *ScreeningController) InputScreening(w http.ResponseWriter, r *http.Request) {
 	// Ambil klaim terpadu dari context
-	claims, ok := r.Context().Value(middlewares.ContextKeyUserID).(*utils.Claims)
+	claims, ok := r.Context().Value(middlewares.ContextKeyClaims).(*utils.Claims)
 	if !ok || claims == nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]interface{}{
