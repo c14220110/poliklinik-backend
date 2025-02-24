@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"encoding/json"
+	"strconv"
+
 	//"fmt"
 	"net/http"
 	"time"
@@ -224,5 +226,106 @@ func (pc *PasienController) GetAllPasienData(w http.ResponseWriter, r *http.Requ
 		"status":  http.StatusOK,
 		"message": "Data pasien retrieved successfully",
 		"data":    list,
+	})
+}
+
+
+// TundaPasienHandler menangani endpoint untuk menunda pasien berdasarkan id_antrian.
+// Contoh URL: PUT http://localhost:8080/api/kunjungan/tunda?id_antrian=5
+func (pc *PasienController) TundaPasienHandler(w http.ResponseWriter, r *http.Request) {
+	idAntrianStr := r.URL.Query().Get("id_antrian")
+	if idAntrianStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_antrian parameter is required",
+			"data":    nil,
+		})
+		return
+	}
+	idAntrian, err := strconv.Atoi(idAntrianStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_antrian must be a number",
+			"data":    nil,
+		})
+		return
+	}
+
+	err = pc.Service.TundaPasien(idAntrian)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to tunda pasien: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Pasien successfully tunda",
+		"data":    nil,
+	})
+}
+
+
+// RescheduleAntrianHandler menangani endpoint untuk mereschedule nomor antrian.
+// Contoh URL: PUT http://localhost:8080/api/kunjungan/reschedule?id_antrian=5&id_poli=2
+func (pc *PasienController) RescheduleAntrianHandler(w http.ResponseWriter, r *http.Request) {
+	idAntrianStr := r.URL.Query().Get("id_antrian")
+	idPoliStr := r.URL.Query().Get("id_poli")
+	if idAntrianStr == "" || idPoliStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_antrian and id_poli parameters are required",
+			"data":    nil,
+		})
+		return
+	}
+	idAntrian, err := strconv.Atoi(idAntrianStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_antrian must be a number",
+			"data":    nil,
+		})
+		return
+	}
+	idPoli, err := strconv.Atoi(idPoliStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_poli must be a number",
+			"data":    nil,
+		})
+		return
+	}
+	
+	newPriority, err := pc.Service.RescheduleAntrianPriority(idAntrian, idPoli)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to reschedule antrian: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+	
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Antrian rescheduled successfully",
+		"data": map[string]interface{}{
+			"new_priority_order": newPriority,
+		},
 	})
 }

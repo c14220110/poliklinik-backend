@@ -25,5 +25,10 @@ func RegisterAdministrasiRoutes(ac *controllers.AdministrasiController, pc *cont
 	http.Handle("/api/administrasi/pasien", middlewares.JWTMiddleware(http.HandlerFunc(pc.ListPasien)))
 
 	// Endpoint billing
-	http.Handle("/api/administrasi/billing", middlewares.JWTMiddleware(http.HandlerFunc(bc.ListBilling)))
+	
+		http.Handle("/api/kunjungan/reschedule", middlewares.JWTMiddleware(http.HandlerFunc(pc.RescheduleAntrianHandler)))
+
+			http.Handle("/api/kunjungan/tunda", middlewares.JWTMiddleware(http.HandlerFunc(pc.TundaPasienHandler)))
+
+
 }
