@@ -48,6 +48,9 @@ func main() {
     shiftService := manajemenServices.NewShiftService(db)
     cmsService := manajemenServices.NewCMSService(db)
 
+    //Inisialisasi service untuk manajemen Role
+    roleService := manajemenServices.NewRoleService(db)
+
     // Inisialisasi controller untuk administrasi
     adminController := adminControllers.NewAdministrasiController(adminService)
     pasienController := adminControllers.NewPasienController(pendaftaranService)
@@ -69,6 +72,9 @@ func main() {
     shiftController := manajemenControllers.NewShiftController(shiftService, db)
     cmsController := manajemenControllers.NewCMSController(cmsService)
 
+    // Manajemen Role
+    roleController := manajemenControllers.NewRoleController(roleService)
+
     // Daftarkan routing untuk masing-masing modul
     adminRoutes.RegisterAdministrasiRoutes(adminController, pasienController, billingController)
     adminRoutes.RegisterPoliklinikRoutes(poliklinikController)
@@ -79,6 +85,7 @@ func main() {
     manajemenRoutes.RegisterKaryawanRoutes(karyawanController)
     manajemenRoutes.RegisterShiftRoutes(shiftController)
     manajemenRoutes.RegisterCMSRoutes(cmsController)
+    manajemenRoutes.RegisterRoleRoutes(roleController)
 
     // Pastikan server berjalan dengan baik
     log.Printf("Server berjalan pada port %s...", cfg.Port)
