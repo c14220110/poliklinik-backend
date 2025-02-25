@@ -3,6 +3,8 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/models"
 	"golang.org/x/crypto/bcrypt"
@@ -111,14 +113,24 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 		return 0, fmt.Errorf("username %s sudah digunakan", karyawan.Username)
 	}
 
-	// 3. Jika password diupdate, hash password tersebut.
+	// 3. Cek duplikasi NIK (selain record ini)
+	count = 0
+	err = s.DB.QueryRow("SELECT COUNT(*) FROM Karyawan WHERE nik = ? AND id_karyawan <> ?", karyawan.NIK, karyawan.IDKaryawan).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("gagal memeriksa duplikasi NIK: %v", err)
+	}
+	if count > 0 {
+		return 0, fmt.Errorf("NIK %s sudah digunakan", karyawan.NIK)
+	}
+
+	// 4. Hash password baru (jika diupdate)
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(karyawan.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return 0, fmt.Errorf("failed to hash password: %v", err)
 	}
 	karyawan.Password = string(hashedPassword)
 
-	// 4. Cari atau buat Role yang sesuai
+	// 5. Cari atau buat Role yang sesuai
 	var idRole int64
 	err = s.DB.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", role).Scan(&idRole)
 	if err == sql.ErrNoRows {
@@ -136,7 +148,7 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 		return 0, fmt.Errorf("gagal memeriksa role: %v", err)
 	}
 
-	// 5. Update record Karyawan termasuk kolom id_role
+	// 6. Update record Karyawan termasuk kolom id_role
 	updateKaryawan := `
 		UPDATE Karyawan 
 		SET nama = ?, username = ?, password = ?, nik = ?, tanggal_lahir = ?, alamat = ?, no_telp = ?, id_role = ?
@@ -157,7 +169,7 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 		return 0, fmt.Errorf("gagal mengupdate karyawan: %v", err)
 	}
 
-	// 6. Update Management_Karyawan untuk mencatat siapa yang melakukan pembaruan
+	// 7. Update Management_Karyawan untuk mencatat siapa yang melakukan pembaruan
 	updateManagement := `
 		UPDATE Management_Karyawan 
 		SET Updated_By = ?
@@ -171,20 +183,51 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 	return karyawan.IDKaryawan, nil
 }
 
-func (s *ManagementService) GetKaryawanList() ([]map[string]interface{}, error) {
-	query := `
+func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusFilter string) ([]map[string]interface{}, error) {
+	baseQuery := `
 		SELECT 
 			k.id_karyawan, 
-			k.nama, 
-			k.nik, 
-			k.tanggal_lahir, 
+			k.id_role,
 			r.nama_role,
-			YEAR(k.created_at) as tahun_kerja
+			k.nama,
+			k.username,
+			k.nik,
+			k.tanggal_lahir,
+			k.alamat,
+			k.no_telp
 		FROM Karyawan k
 		JOIN Role r ON k.id_role = r.id_role
-		ORDER BY k.id_karyawan
 	`
-	rows, err := s.DB.Query(query)
+	conditions := []string{}
+	params := []interface{}{}
+
+	// Filter berdasarkan id_role jika disediakan
+	if idRoleFilter != "" {
+		idRoleInt, err := strconv.Atoi(idRoleFilter)
+		if err != nil {
+			return nil, fmt.Errorf("invalid id_role value: %v", err)
+		}
+		conditions = append(conditions, "k.id_role = ?")
+		params = append(params, idRoleInt)
+	}
+
+	// Filter berdasarkan status
+	if statusFilter != "" {
+		statusLower := strings.ToLower(statusFilter)
+		if statusLower == "aktif" {
+			conditions = append(conditions, "k.deleted_at IS NULL")
+		} else if statusLower == "nonaktif" {
+			conditions = append(conditions, "k.deleted_at IS NOT NULL")
+		}
+	}
+
+	query := baseQuery
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY k.id_karyawan"
+
+	rows, err := s.DB.Query(query, params...)
 	if err != nil {
 		return nil, fmt.Errorf("query error: %v", err)
 	}
@@ -193,33 +236,52 @@ func (s *ManagementService) GetKaryawanList() ([]map[string]interface{}, error) 
 	var list []map[string]interface{}
 	for rows.Next() {
 		var idKaryawan int
-		var nama, nik string
+		var idRole int
+		var namaRole sql.NullString
+		var nama, username, nik string
 		var tanggalLahir sql.NullTime
-		var role sql.NullString
-		var tahunKerja sql.NullInt64
+		var alamat, noTelp string
 
-		if err := rows.Scan(&idKaryawan, &nama, &nik, &tanggalLahir, &role, &tahunKerja); err != nil {
+		if err := rows.Scan(&idKaryawan, &idRole, &namaRole, &nama, &username, &nik, &tanggalLahir, &alamat, &noTelp); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
 
 		record := map[string]interface{}{
 			"id_karyawan":  idKaryawan,
+			"id_role":      idRole,
+			"nama_role":    nil,
 			"nama":         nama,
+			"username":     username,
 			"nik":          nik,
 			"tanggal_lahir": nil,
-			"role":         nil,
-			"tahun_kerja":  nil,
+			"alamat":       alamat,
+			"no_telp":      noTelp,
+		}
+		if namaRole.Valid {
+			record["nama_role"] = namaRole.String
 		}
 		if tanggalLahir.Valid {
 			record["tanggal_lahir"] = tanggalLahir.Time.Format("2006-01-02")
 		}
-		if role.Valid {
-			record["role"] = role.String
-		}
-		if tahunKerja.Valid {
-			record["tahun_kerja"] = tahunKerja.Int64
-		}
 		list = append(list, record)
 	}
 	return list, nil
+}
+
+func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy string) error {
+	// 1. Update kolom deleted_at di tabel Karyawan
+	queryKaryawan := `UPDATE Karyawan SET deleted_at = NOW() WHERE id_karyawan = ?`
+	_, err := s.DB.Exec(queryKaryawan, idKaryawan)
+	if err != nil {
+		return fmt.Errorf("failed to soft delete karyawan: %v", err)
+	}
+
+	// 2. Update kolom deleted_by di tabel Management_Karyawan
+	queryManagement := `UPDATE Management_Karyawan SET deleted_by = ? WHERE id_karyawan = ?`
+	_, err = s.DB.Exec(queryManagement, deletedBy, idKaryawan)
+	if err != nil {
+		return fmt.Errorf("failed to update Management_Karyawan: %v", err)
+	}
+
+	return nil
 }

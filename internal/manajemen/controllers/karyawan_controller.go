@@ -126,7 +126,11 @@ func (kc *KaryawanController) AddKaryawan(w http.ResponseWriter, r *http.Request
 
 // GetKaryawanListHandler mengembalikan daftar karyawan dengan field: id_karyawan, nama, nik, tanggal_lahir, role, tahun_kerja.
 func (kc *KaryawanController) GetKaryawanListHandler(w http.ResponseWriter, r *http.Request) {
-	karyawanList, err := kc.Service.GetKaryawanList()
+	// Ambil query parameters: id_role dan status
+	idRole := r.URL.Query().Get("id_role")
+	status := r.URL.Query().Get("status")
+
+	list, err := kc.Service.GetKaryawanListFiltered(idRole, status)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -136,11 +140,12 @@ func (kc *KaryawanController) GetKaryawanListHandler(w http.ResponseWriter, r *h
 		})
 		return
 	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Karyawan list retrieved successfully",
-		"data":    karyawanList,
+		"data":    list,
 	})
 }
 
@@ -235,5 +240,72 @@ func (kc *KaryawanController) UpdateKaryawanHandler(w http.ResponseWriter, r *ht
 		"data": map[string]interface{}{
 			"id_karyawan": updatedID,
 		},
+	})
+}
+
+// SoftDeleteKaryawanHandler melakukan soft delete dengan mengupdate deleted_at di Karyawan 
+// dan deleted_by di Management_Karyawan.
+func (kc *KaryawanController) SoftDeleteKaryawanHandler(w http.ResponseWriter, r *http.Request) {
+	// Pastikan metode PUT
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusMethodNotAllowed,
+			"message": "Method not allowed",
+			"data":    nil,
+		})
+		return
+	}
+
+	idStr := r.URL.Query().Get("id_karyawan")
+	if idStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_karyawan parameter is required",
+			"data":    nil,
+		})
+		return
+	}
+
+	idKaryawan, err := strconv.Atoi(idStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_karyawan must be a number",
+			"data":    nil,
+		})
+		return
+	}
+
+	// Ambil klaim JWT untuk mendapatkan username management
+	claims, ok := r.Context().Value(middlewares.ContextKeyClaims).(*utils.Claims)
+	if !ok || claims == nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "Invalid or missing token claims",
+			"data":    nil,
+		})
+		return
+	}
+
+	err = kc.Service.SoftDeleteKaryawan(idKaryawan, claims.Username)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to soft delete karyawan: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Karyawan soft-deleted successfully",
+		"data":    nil,
 	})
 }
