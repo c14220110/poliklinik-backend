@@ -7,20 +7,42 @@ import (
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/models"
 )
 
-func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, idManagement int) (int64, error) {
-	// Cek apakah NIK sudah terdaftar
+func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, idManagement int, createdBy, updatedBy string) (int64, error) {
+	// 1. Cek apakah NIK sudah terdaftar
 	var idKaryawan int64
-	err := s.DB.QueryRow("SELECT ID_Karyawan FROM Karyawan WHERE NIK = ?", karyawan.NIK).Scan(&idKaryawan)
+	err := s.DB.QueryRow("SELECT id_karyawan FROM Karyawan WHERE NIK = ?", karyawan.NIK).Scan(&idKaryawan)
 	if err != sql.ErrNoRows {
+		// Jika tidak menghasilkan ErrNoRows, berarti NIK sudah terdaftar atau terjadi error
 		return 0, fmt.Errorf("NIK %s sudah terdaftar", karyawan.NIK)
 	}
 
-	// Insert Karyawan
+	// 2. Cek apakah Role sudah ada
+	var idRole int64
+	err = s.DB.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", role).Scan(&idRole)
+	if err == sql.ErrNoRows {
+		// Jika tidak ada, insert role baru
+		insertRole := "INSERT INTO Role (nama_role) VALUES (?)"
+		result, err := s.DB.Exec(insertRole, role)
+		if err != nil {
+			return 0, fmt.Errorf("gagal menambahkan role: %v", err)
+		}
+		idRole, err = result.LastInsertId()
+		if err != nil {
+			return 0, fmt.Errorf("gagal mendapatkan ID Role: %v", err)
+		}
+	} else if err != nil {
+		return 0, fmt.Errorf("gagal memeriksa role: %v", err)
+	}
+
+	// 3. Set id_role pada objek karyawan
+	karyawan.IDRole = idRole
+
+	// 4. Insert data karyawan ke tabel Karyawan, termasuk id_role
 	insertKaryawan := `
-		INSERT INTO Karyawan (Nama, Username, Password, NIK, Tanggal_Lahir, Alamat, No_Telp)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO Karyawan (Nama, Username, Password, NIK, Tanggal_Lahir, Alamat, No_Telp, id_role)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	result, err := s.DB.Exec(insertKaryawan, karyawan.Nama, karyawan.Username, karyawan.Password, karyawan.NIK, karyawan.TanggalLahir, karyawan.Alamat, karyawan.NoTelp)
+	result, err := s.DB.Exec(insertKaryawan, karyawan.Nama, karyawan.Username, karyawan.Password, karyawan.NIK, karyawan.TanggalLahir, karyawan.Alamat, karyawan.NoTelp, karyawan.IDRole)
 	if err != nil {
 		return 0, fmt.Errorf("gagal menambahkan karyawan: %v", err)
 	}
@@ -30,38 +52,12 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 		return 0, fmt.Errorf("gagal mendapatkan ID Karyawan: %v", err)
 	}
 
-	// Cek apakah Role sudah ada
-	var idRole int64
-	err = s.DB.QueryRow("SELECT ID_Role FROM Role WHERE Nama_Role = ?", role).Scan(&idRole)
-	if err == sql.ErrNoRows {
-		// Insert Role jika tidak ada
-		insertRole := "INSERT INTO Role (Nama_Role) VALUES (?)"
-		result, err := s.DB.Exec(insertRole, role)
-		if err != nil {
-			return 0, fmt.Errorf("gagal menambahkan role: %v", err)
-		}
-		idRole, err = result.LastInsertId()
-		if err != nil {
-			return 0, fmt.Errorf("gagal mendapatkan ID Role: %v", err)
-		}
-	}
-
-	// Insert Detail_Role_Karyawan
-	insertDetailRole := `
-		INSERT INTO Detail_Role_Karyawan (ID_Role, ID_Karyawan, Nama, NIK, Alamat, No_Telp)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`
-	_, err = s.DB.Exec(insertDetailRole, idRole, idKaryawan, karyawan.Nama, karyawan.NIK, karyawan.Alamat, karyawan.NoTelp)
-	if err != nil {
-		return 0, fmt.Errorf("gagal menambahkan detail role karyawan: %v", err)
-	}
-
-	// Insert Management_Karyawan untuk mencatat siapa yang menambahkan
+	// 5. Insert record di Management_Karyawan untuk mencatat siapa yang menambahkan karyawan
 	insertManagement := `
-		INSERT INTO Management_Karyawan (ID_Management, ID_Karyawan, Created_By, Updated_By)
+		INSERT INTO Management_Karyawan (id_management, id_karyawan, Created_By, Updated_By)
 		VALUES (?, ?, ?, ?)
 	`
-	_, err = s.DB.Exec(insertManagement, idManagement, idKaryawan, "admin", "admin")
+	_, err = s.DB.Exec(insertManagement, idManagement, idKaryawan, createdBy, updatedBy)
 	if err != nil {
 		return 0, fmt.Errorf("gagal mencatat di Management_Karyawan: %v", err)
 	}

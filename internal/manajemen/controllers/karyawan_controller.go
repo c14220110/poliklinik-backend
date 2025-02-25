@@ -3,19 +3,14 @@ package controllers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/c14220110/poliklinik-backend/internal/common/middlewares"
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/models"
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/services"
+	"github.com/c14220110/poliklinik-backend/pkg/utils"
 )
-
-type KaryawanController struct {
-	Service *services.ManagementService
-}
-
-func NewKaryawanController(service *services.ManagementService) *KaryawanController {
-	return &KaryawanController{Service: service}
-}
 
 type AddKaryawanRequest struct {
 	NIK          string `json:"nik"`
@@ -26,6 +21,14 @@ type AddKaryawanRequest struct {
 	Role         string `json:"role"`
 	Username     string `json:"username"`
 	Password     string `json:"password"`
+}
+
+type KaryawanController struct {
+	Service *services.ManagementService
+}
+
+func NewKaryawanController(service *services.ManagementService) *KaryawanController {
+	return &KaryawanController{Service: service}
 }
 
 func (kc *KaryawanController) AddKaryawan(w http.ResponseWriter, r *http.Request) {
@@ -63,11 +66,31 @@ func (kc *KaryawanController) AddKaryawan(w http.ResponseWriter, r *http.Request
 		Password:     req.Password,
 	}
 
-	// Ambil ID_Management dari token JWT
-	idManagement := 1 // Dummy value for now, replace with actual user_id from token
+	// Ambil klaim JWT dari context untuk mendapatkan id_management dan username management yang sedang login
+	claims, ok := r.Context().Value(middlewares.ContextKeyClaims).(*utils.Claims)
+	if !ok || claims == nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "Invalid or missing token claims",
+			"data":    nil,
+		})
+		return
+	}
 
-	// Panggil service untuk tambah karyawan dan role
-	idKaryawan, err := kc.Service.AddKaryawan(karyawan, req.Role, idManagement)
+	idManagement, err := strconv.Atoi(claims.IDKaryawan)
+	if err != nil || idManagement <= 0 {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "Invalid management ID in token",
+			"data":    nil,
+		})
+		return
+	}
+
+	// Panggil service untuk menambahkan karyawan
+	idKaryawan, err := kc.Service.AddKaryawan(karyawan, req.Role, idManagement, claims.Username, claims.Username)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -78,7 +101,6 @@ func (kc *KaryawanController) AddKaryawan(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Response sukses
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  http.StatusOK,
@@ -88,6 +110,8 @@ func (kc *KaryawanController) AddKaryawan(w http.ResponseWriter, r *http.Request
 		},
 	})
 }
+
+
 
 // GetKaryawanListHandler mengembalikan daftar karyawan dengan field: id_karyawan, nama, nik, tanggal_lahir, role, tahun_kerja.
 func (kc *KaryawanController) GetKaryawanListHandler(w http.ResponseWriter, r *http.Request) {
