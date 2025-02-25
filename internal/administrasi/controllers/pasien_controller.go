@@ -329,3 +329,47 @@ func (pc *PasienController) RescheduleAntrianHandler(w http.ResponseWriter, r *h
 		},
 	})
 }
+
+// GetAntrianTodayHandler menangani endpoint GET untuk mengambil data antrian hari ini dengan filter opsional.
+func (pc *PasienController) GetAntrianTodayHandler(w http.ResponseWriter, r *http.Request) {
+	// Ambil query parameter status, misalnya ?status=Menunggu
+	statusFilter := r.URL.Query().Get("status")
+
+	list, err := pc.Service.GetAntrianToday(statusFilter)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve antrian: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Antrian retrieved successfully",
+		"data":    list,
+	})
+}
+
+func (pc *PasienController) GetAllStatusAntrianHandler(w http.ResponseWriter, r *http.Request) {
+	list, err := pc.Service.GetAllStatusAntrian() // Pastikan Service di sini adalah *PendaftaranService
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve status antrian: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Status antrian retrieved successfully",
+		"data":    list,
+	})
+}

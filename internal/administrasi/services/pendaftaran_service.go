@@ -470,3 +470,109 @@ func (s *PendaftaranService) RescheduleAntrianPriority(idAntrian int, idPoli int
 	}
 	return newPriority, nil
 }
+
+// GetAntrianToday mengambil data antrian hari ini dengan join ke Pasien, Rekam_Medis, Poliklinik, dan Status_Antrian.
+// Jika statusFilter tidak kosong, query akan memfilter berdasarkan status.
+func (s *PendaftaranService) GetAntrianToday(statusFilter string) ([]map[string]interface{}, error) {
+	query := `
+		SELECT 
+			p.id_pasien,
+			p.nama,
+			rm.id_rm,
+			a.id_poli,
+			pol.nama_poli,
+			a.nomor_antrian,
+			a.id_status,
+			sa.status,
+			a.priority_order
+		FROM Antrian a
+		JOIN Pasien p ON a.id_pasien = p.id_pasien
+		JOIN Rekam_Medis rm ON p.id_pasien = rm.id_pasien
+		JOIN Poliklinik pol ON a.id_poli = pol.id_poli
+		JOIN Status_Antrian sa ON a.id_status = sa.id_status
+		WHERE DATE(a.created_at) = CURDATE()
+	`
+	// Jika statusFilter disediakan, tambahkan filter.
+	params := []interface{}{}
+	if statusFilter != "" {
+		// Misalnya, statusFilter "aktif" berarti kita ingin nilai status "Menunggu" (atau sesuai nilai di tabel Status_Antrian)
+		// atau Anda bisa langsung memfilter berdasarkan nilai string yang ada di kolom sa.status.
+		query += " AND sa.status = ?"
+		params = append(params, statusFilter)
+	}
+	// Urutkan berdasarkan nomor antrian
+	query += " ORDER BY a.nomor_antrian"
+
+	rows, err := s.DB.Query(query, params...)
+	if err != nil {
+		return nil, fmt.Errorf("query error: %v", err)
+	}
+	defer rows.Close()
+
+	var list []map[string]interface{}
+	for rows.Next() {
+		var idPasien int
+		var nama string
+		var idRM sql.NullInt64
+		var idPoli int
+		var namaPoli sql.NullString
+		var nomorAntrian int
+		var idStatus int
+		var status sql.NullString
+		var priorityOrder sql.NullInt64
+
+		if err := rows.Scan(&idPasien, &nama, &idRM, &idPoli, &namaPoli, &nomorAntrian, &idStatus, &status, &priorityOrder); err != nil {
+			return nil, fmt.Errorf("scan error: %v", err)
+		}
+
+		record := map[string]interface{}{
+			"id_pasien":     idPasien,
+			"nama":          nama,
+			"id_rm":         nil,
+			"id_poli":       idPoli,
+			"nama_poli":     nil,
+			"nomor_antrian": nomorAntrian,
+			"id_status":     idStatus,
+			"status":        nil,
+			"priority_order": nil,
+		}
+		if idRM.Valid {
+			record["id_rm"] = idRM.Int64
+		}
+		if namaPoli.Valid {
+			record["nama_poli"] = namaPoli.String
+		}
+		if status.Valid {
+			record["status"] = status.String
+		}
+		if priorityOrder.Valid {
+			record["priority_order"] = priorityOrder.Int64
+		}
+		list = append(list, record)
+	}
+	return list, nil
+}
+
+func (s *PendaftaranService) GetAllStatusAntrian() ([]map[string]interface{}, error) {
+	query := "SELECT id_status, status FROM Status_Antrian"
+	rows, err := s.DB.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("query error: %v", err)
+	}
+	defer rows.Close()
+
+	var list []map[string]interface{}
+	for rows.Next() {
+		var idStatus int
+		var status string
+		if err := rows.Scan(&idStatus, &status); err != nil {
+			return nil, fmt.Errorf("scan error: %v", err)
+		}
+		record := map[string]interface{}{
+			"id_status": idStatus,
+			"status":    status,
+		}
+		list = append(list, record)
+	}
+	return list, nil
+}

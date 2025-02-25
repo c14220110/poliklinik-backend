@@ -20,6 +20,6 @@ func RegisterKaryawanRoutes(kc *controllers.KaryawanController) {
 	// Tambahkan route update karyawan
 	http.Handle("/api/karyawan/update", middlewares.JWTMiddleware(http.HandlerFunc(kc.UpdateKaryawanHandler)))
 	// Tambahkan route hapus karyawan
-		http.Handle("/api/karyawan/delete", middlewares.JWTMiddleware(http.HandlerFunc(kc.SoftDeleteKaryawanHandler)))
-
+	http.Handle("/api/karyawan/delete", middlewares.JWTMiddleware(http.HandlerFunc(kc.SoftDeleteKaryawanHandler)))
+	
 }
