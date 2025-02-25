@@ -3,7 +3,6 @@ package services
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -20,28 +19,26 @@ func NewAdministrasiService(db *sql.DB) *AdministrasiService {
 
 func (s *AdministrasiService) AuthenticateAdmin(username, password string) (*models.Administrasi, error) {
 	var admin models.Administrasi
-	query := "SELECT ID_Karyawan, Nama, Username, Password, Created_At FROM Karyawan WHERE Username = ?"
-	err := s.DB.QueryRow(query, username).Scan(&admin.ID_Admin, &admin.Nama, &admin.Username, &admin.Password, &admin.CreatedAt)
+	var roleName string
+
+	// Query untuk mengambil data karyawan beserta role langsung dari tabel Role
+	query := `
+		SELECT k.id_karyawan, k.nama, k.username, k.password, k.created_at, r.nama_role
+		FROM Karyawan k
+		JOIN Role r ON k.id_role = r.id_role
+		WHERE k.username = ?
+	`
+	err := s.DB.QueryRow(query, username).Scan(&admin.ID_Admin, &admin.Nama, &admin.Username, &admin.Password, &admin.CreatedAt, &roleName)
 	if err != nil {
 		return nil, err
 	}
 
+	// Verifikasi password
 	if err := bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(password)); err != nil {
 		return nil, errors.New("invalid credentials")
 	}
 
-	var roleName string
-	roleQuery := `
-		SELECT r.Nama_Role 
-		FROM Detail_Role_Karyawan drk 
-		JOIN Role r ON drk.ID_Role = r.ID_Role 
-		WHERE drk.ID_Karyawan = ?
-		LIMIT 1
-	`
-	err = s.DB.QueryRow(roleQuery, admin.ID_Admin).Scan(&roleName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve role: %v", err)
-	}
+	// Pastikan role adalah "Administrasi"
 	if roleName != "Administrasi" {
 		return nil, errors.New("user does not have administrasi privileges")
 	}

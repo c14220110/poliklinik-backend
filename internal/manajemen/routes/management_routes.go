@@ -8,13 +8,15 @@ import (
 )
 
 func RegisterManagementLoginRoutes(mc *controllers.ManagementController) {
-	// Route login tidak dilindungi oleh middleware JWT.
+	// Route login tidak dilindungi oleh JWT.
 	http.Handle("/api/management/login", http.HandlerFunc(mc.Login))
 }
 
 func RegisterKaryawanRoutes(kc *controllers.KaryawanController) {
-	// Route untuk pengelolaan karyawan (dilindungi JWT)
+	// Route untuk menambah karyawan
 	http.Handle("/api/karyawan", middlewares.JWTMiddleware(http.HandlerFunc(kc.AddKaryawan)))
+	// Route untuk mendapatkan daftar karyawan
 	http.Handle("/api/ambilkaryawan", middlewares.JWTMiddleware(http.HandlerFunc(kc.GetKaryawanListHandler)))
-
+	// Tambahkan route update karyawan
+	http.Handle("/api/karyawan/update", middlewares.JWTMiddleware(http.HandlerFunc(kc.UpdateKaryawanHandler)))
 }
