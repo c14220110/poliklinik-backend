@@ -1,60 +1,104 @@
 package controllers
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/c14220110/poliklinik-backend/internal/screening/services"
+	"github.com/labstack/echo/v4"
 )
 
 type AntrianController struct {
-	Service *services.AntrianService
+	AntrianService *services.AntrianService
 }
 
 func NewAntrianController(service *services.AntrianService) *AntrianController {
-	return &AntrianController{Service: service}
+	return &AntrianController{AntrianService: service}
 }
 
-// GetAntrianTerlamaHandler menangani request untuk mendapatkan antrian pasien paling lama dengan status = 0
-func (ac *AntrianController) GetAntrianTerlamaHandler(w http.ResponseWriter, r *http.Request) {
-	idPoliParam := r.URL.Query().Get("id_poli")
-	if idPoliParam == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+// MasukkanPasienHandler menangani request untuk mengubah status antrian pasien.
+// Jika tidak ada baris dengan id_status = 0 atau id_poli tidak valid, handler akan mengembalikan response 404.
+func (ac *AntrianController) MasukkanPasienHandler(c echo.Context) error {
+	// Ambil parameter id_poli dari query string.
+	idPoliStr := c.QueryParam("id_poli")
+	if idPoliStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "id_poli harus diberikan",
+			"message": "id_poli parameter is required",
 			"data":    nil,
 		})
-		return
 	}
-
-	idPoli, err := strconv.Atoi(idPoliParam)
+	idPoli, err := strconv.Atoi(idPoliStr)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "id_poli harus berupa angka",
+			"message": "id_poli must be a number",
 			"data":    nil,
 		})
-		return
 	}
 
-	data, err := ac.Service.GetAntrianTerlama(idPoli)
+	// Panggil service untuk melakukan update status antrian.
+	err = ac.AntrianService.MasukkanPasien(idPoli)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusNotFound,
-			"message": err.Error(),
+		// Jika error mengindikasikan tidak ada baris yang ditemukan, kembalikan status 404.
+		if strings.Contains(err.Error(), "tidak ada pasien dengan status 0") {
+			return c.JSON(http.StatusNotFound, map[string]interface{}{
+				"status":  http.StatusNotFound,
+				"message": err.Error(),
+				"data":    nil,
+			})
+		}
+		// Untuk error lain, kembalikan status 500.
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to update antrian: " + err.Error(),
 			"data":    nil,
 		})
-		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
-		"message": "Antrian ditemukan",
-		"data":    data,
+		"message": "Pasien berhasil dimasukkan",
+		"data":    nil,
 	})
+}
+
+
+
+// GetAntrianTerlamaHandler menangani request untuk mendapatkan antrian pasien paling lama dengan status = 0
+func (ac *AntrianController) GetAntrianTerlamaHandler(c echo.Context) error {
+    idPoliParam := c.QueryParam("id_poli")
+    if idPoliParam == "" {
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{
+            "status":  http.StatusBadRequest,
+            "message": "id_poli harus diberikan",
+            "data":    nil,
+        })
+    }
+
+    idPoli, err := strconv.Atoi(idPoliParam)
+    if err != nil {
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{
+            "status":  http.StatusBadRequest,
+            "message": "id_poli harus berupa angka",
+            "data":    nil,
+        })
+    }
+
+    // Perbaiki: gunakan ac.AntrianService, bukan ac.Service
+    data, err := ac.AntrianService.GetAntrianTerlama(idPoli)
+    if err != nil {
+        return c.JSON(http.StatusNotFound, map[string]interface{}{
+            "status":  http.StatusNotFound,
+            "message": err.Error(),
+            "data":    nil,
+        })
+    }
+
+    return c.JSON(http.StatusOK, map[string]interface{}{
+        "status":  http.StatusOK,
+        "message": "Antrian ditemukan",
+        "data":    data,
+    })
 }

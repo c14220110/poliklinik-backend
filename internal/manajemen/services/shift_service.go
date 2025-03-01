@@ -2,6 +2,8 @@ package services
 
 import (
 	"database/sql"
+	"fmt"
+	"time"
 )
 
 type ShiftService struct {
@@ -12,107 +14,146 @@ func NewShiftService(db *sql.DB) *ShiftService {
 	return &ShiftService{DB: db}
 }
 
-// GetPoliklinikList returns list of poliklinik (ID_Poli and Nama_Poli).
-func (s *ShiftService) GetPoliklinikList() ([]map[string]interface{}, error) {
-	query := "SELECT ID_Poli, Nama_Poli FROM Poliklinik ORDER BY Nama_Poli ASC"
-	rows, err := s.DB.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+// AssignShift melakukan insert ke tabel Shift_Karyawan dan Management_Shift_Karyawan.
+// Parameter id_management berasal dari JWT (dari management yang membuat record).
+func (s *ShiftService) AssignShift(idPoli, idKaryawan, idRole, idShift, idManagement int, tanggalStr string) (int64, error) {
+    // Parse tanggal dengan format "2006-01-02"
+    tanggal, err := time.Parse("2006-01-02", tanggalStr)
+    if err != nil {
+        return 0, fmt.Errorf("format tanggal tidak valid: %v", err)
+    }
 
-	var results []map[string]interface{}
-	for rows.Next() {
-		var idPoli int
-		var namaPoli string
-		if err := rows.Scan(&idPoli, &namaPoli); err != nil {
-			return nil, err
-		}
-		results = append(results, map[string]interface{}{
-			"ID_Poli":   idPoli,
-			"Nama_Poli": namaPoli,
-		})
-	}
-	return results, nil
+    // Ambil data Shift untuk mendapatkan jam_mulai dan jam_selesai default
+    var jamMulai, jamSelesai string
+    queryShift := "SELECT jam_mulai, jam_selesai FROM Shift WHERE id_shift = ?"
+    err = s.DB.QueryRow(queryShift, idShift).Scan(&jamMulai, &jamSelesai)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            return 0, fmt.Errorf("id_shift %d tidak ditemukan", idShift)
+        }
+        return 0, err
+    }
+
+    // Mulai transaction
+    tx, err := s.DB.Begin()
+    if err != nil {
+        return 0, err
+    }
+
+    // Insert ke tabel Shift_Karyawan
+    insertQuery := `
+        INSERT INTO Shift_Karyawan (id_poli, id_shift, id_karyawan, custom_jam_mulai, custom_jam_selesai, tanggal)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `
+    res, err := tx.Exec(insertQuery, idPoli, idShift, idKaryawan, jamMulai, jamSelesai, tanggal)
+    if err != nil {
+        tx.Rollback()
+        return 0, err
+    }
+    idShiftKaryawan, err := res.LastInsertId()
+    if err != nil {
+        tx.Rollback()
+        return 0, err
+    }
+
+    // Insert ke tabel Management_Shift_Karyawan
+    insertManagementShiftQuery := `
+        INSERT INTO Management_Shift_Karyawan (id_management, id_shift_karyawan, created_by, updated_by, deleted_by)
+        VALUES (?, ?, ?, ?, ?)
+    `
+    _, err = tx.Exec(insertManagementShiftQuery, idManagement, idShiftKaryawan, idManagement, idManagement, 0)
+    if err != nil {
+        tx.Rollback()
+        return 0, err
+    }
+
+    // Commit transaction
+    if err = tx.Commit(); err != nil {
+        return 0, err
+    }
+
+    return idShiftKaryawan, nil
 }
 
-// GetKaryawanByShiftAndPoli mengembalikan daftar karyawan berdasarkan shift dan poliklinik.
-func (s *ShiftService) GetKaryawanByShiftAndPoli(shiftID int, poliID int) ([]map[string]interface{}, error) {
+func (s *ShiftService) UpdateCustomShift(idShiftKaryawan int, newCustomMulai, newCustomSelesai string) error {
+	// Parse waktu custom yang baru dengan format "15:04:05"
+	newMulai, err := time.Parse("15:04:05", newCustomMulai)
+	if err != nil {
+		return fmt.Errorf("format custom_jam_mulai tidak valid: %v", err)
+	}
+	newSelesai, err := time.Parse("15:04:05", newCustomSelesai)
+	if err != nil {
+		return fmt.Errorf("format custom_jam_selesai tidak valid: %v", err)
+	}
+
+	// Ambil default waktu shift dari tabel Shift berdasarkan id_shift dari Shift_Karyawan
+	var shiftJamMulai, shiftJamSelesai string
 	query := `
-		SELECT k.ID_Karyawan, k.Nama, k.Username, k.No_Telp, sk.Tanggal
+		SELECT s.jam_mulai, s.jam_selesai 
 		FROM Shift_Karyawan sk
-		JOIN Karyawan k ON sk.ID_Karyawan = k.ID_Karyawan
-		WHERE sk.ID_Shift = ? AND sk.ID_Poli = ?
-		ORDER BY sk.Tanggal DESC
+		JOIN Shift s ON sk.id_shift = s.id_shift
+		WHERE sk.id_shift_karyawan = ?
 	`
-	rows, err := s.DB.Query(query, shiftID, poliID)
+	err = s.DB.QueryRow(query, idShiftKaryawan).Scan(&shiftJamMulai, &shiftJamSelesai)
 	if err != nil {
-		return nil, err
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("record Shift_Karyawan dengan id %d tidak ditemukan", idShiftKaryawan)
+		}
+		return err
 	}
-	defer rows.Close()
 
-	var results []map[string]interface{}
-	for rows.Next() {
-		var idKaryawan int
-		var nama, username, noTelp string
-		var tanggal string // atau time.Time, tergantung kebutuhan; di sini gunakan string
-		if err := rows.Scan(&idKaryawan, &nama, &username, &noTelp, &tanggal); err != nil {
-			return nil, err
-		}
-		record := map[string]interface{}{
-			"ID_Karyawan": idKaryawan,
-			"Nama":        nama,
-			"Username":    username,
-			"No_Telp":     noTelp,
-			"Tanggal":     tanggal,
-		}
-		results = append(results, record)
+	// Parse default waktu shift
+	defaultMulai, err := time.Parse("15:04:05", shiftJamMulai)
+	if err != nil {
+		return fmt.Errorf("format default jam_mulai tidak valid: %v", err)
 	}
-	return results, nil
+	defaultSelesai, err := time.Parse("15:04:05", shiftJamSelesai)
+	if err != nil {
+		return fmt.Errorf("format default jam_selesai tidak valid: %v", err)
+	}
+
+	// Validasi: custom_jam_mulai tidak boleh sebelum default dan custom_jam_selesai tidak boleh melewati default
+	if newMulai.Before(defaultMulai) || newSelesai.After(defaultSelesai) {
+		return fmt.Errorf("custom shift harus berada dalam rentang waktu %s - %s", shiftJamMulai, shiftJamSelesai)
+	}
+
+	// Update record Shift_Karyawan dengan waktu custom yang baru
+	updateQuery := `
+		UPDATE Shift_Karyawan 
+		SET custom_jam_mulai = ?, custom_jam_selesai = ?
+		WHERE id_shift_karyawan = ?
+	`
+	res, err := s.DB.Exec(updateQuery, newCustomMulai, newCustomSelesai, idShiftKaryawan)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("tidak ada record yang diupdate")
+	}
+	return nil
 }
 
-// GetShiftSummaryByPoli mengembalikan ringkasan shift untuk suatu poliklinik.
-// Hasilnya mencakup Nama_Shift, Jam_Mulai, Jam_Selesai, dan Jumlah_Tenaga_Kerja.
-func (s *ShiftService) GetShiftSummaryByPoli(poliID int) ([]map[string]interface{}, error) {
-	query := `
-		SELECT 
-			s.ID_Shift,
-			CASE 
-				WHEN s.Jam_Mulai BETWEEN '08:00:00' AND '14:59:59' THEN 'Shift Pagi'
-				WHEN s.Jam_Mulai BETWEEN '15:00:00' AND '22:59:59' THEN 'Shift Sore'
-				ELSE 'Shift Malam'
-			END AS Nama_Shift,
-			s.Jam_Mulai,
-			s.Jam_Selesai,
-			COUNT(sk.ID_Karyawan) AS Jumlah_Tenaga_Kerja
-		FROM Shift s
-		JOIN Shift_Karyawan sk ON s.ID_Shift = sk.ID_Shift
-		WHERE sk.ID_Poli = ?
-		GROUP BY s.ID_Shift, s.Jam_Mulai, s.Jam_Selesai
-		ORDER BY s.Jam_Mulai ASC
+func (s *ShiftService) SoftDeleteShiftKaryawan(idShiftKaryawan int, idManagement int) error {
+	// Update deleted_by dari NULL menjadi idManagement untuk record yang belum dihapus
+	updateQuery := `
+		UPDATE Management_Shift_Karyawan 
+		SET deleted_by = ? 
+		WHERE id_shift_karyawan = ? AND deleted_by IS NULL
 	`
-	rows, err := s.DB.Query(query, poliID)
+	res, err := s.DB.Exec(updateQuery, idManagement, idShiftKaryawan)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer rows.Close()
-
-	var results []map[string]interface{}
-	for rows.Next() {
-		var idShift int
-		var namaShift string
-		var jamMulai, jamSelesai string
-		var jumlah int
-		if err := rows.Scan(&idShift, &namaShift, &jamMulai, &jamSelesai, &jumlah); err != nil {
-			return nil, err
-		}
-		record := map[string]interface{}{
-			"Nama_Shift":             namaShift,
-			"Jam_Mulai":              jamMulai,
-			"Jam_Selesai":            jamSelesai,
-			"Jumlah_Tenaga_Kerja":    jumlah,
-		}
-		results = append(results, record)
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
 	}
-	return results, nil
+	if rowsAffected == 0 {
+		return fmt.Errorf("tidak ada record yang di soft delete atau record sudah di soft delete")
+	}
+	return nil
 }

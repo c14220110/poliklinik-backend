@@ -1,138 +1,234 @@
 package controllers
 
 import (
-	"database/sql"
-	"encoding/json"
 	"net/http"
 	"strconv"
 
+	"github.com/c14220110/poliklinik-backend/internal/common/middlewares"
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/services"
+	"github.com/c14220110/poliklinik-backend/pkg/utils"
+	"github.com/labstack/echo/v4"
 )
 
 type ShiftController struct {
 	Service *services.ShiftService
-	DB      *sql.DB // untuk mengambil data poliklinik
+	// Jika tidak ingin menerima DB langsung, sebaiknya dependency db dihapus
+	// Namun jika diperlukan untuk fungsi tertentu, sebaiknya dipisahkan
+	// DB *sql.DB
 }
 
-func NewShiftController(service *services.ShiftService, db *sql.DB) *ShiftController {
+func NewShiftController(service *services.ShiftService /*, db *sql.DB */) *ShiftController {
 	return &ShiftController{
 		Service: service,
-		DB:      db,
+		// DB: db,
 	}
 }
 
-// GetPoliklinikListHandler returns the list of poliklinik.
-func (sc *ShiftController) GetPoliklinikListHandler(w http.ResponseWriter, r *http.Request) {
-	data, err := sc.Service.GetPoliklinikList()
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusInternalServerError,
-			"message": "Failed to retrieve poliklinik list: " + err.Error(),
+// AssignShiftHandler menerima query parameter id_poli, id_karyawan, id_role,
+// dan request body berisi tanggal dan id_shift.
+// id_management diambil dari JWT.
+func (sc *ShiftController) AssignShiftHandler(c echo.Context) error {
+	// Ambil query parameter
+	idPoliStr := c.QueryParam("id_poli")
+	idKaryawanStr := c.QueryParam("id_karyawan")
+	idRoleStr := c.QueryParam("id_role")
+	if idPoliStr == "" || idKaryawanStr == "" || idRoleStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_poli, id_karyawan, dan id_role harus disediakan",
 			"data":    nil,
 		})
-		return
 	}
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+
+	idPoli, err := strconv.Atoi(idPoliStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_poli harus berupa angka",
+			"data":    nil,
+		})
+	}
+	idKaryawan, err := strconv.Atoi(idKaryawanStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_karyawan harus berupa angka",
+			"data":    nil,
+		})
+	}
+	idRole, err := strconv.Atoi(idRoleStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_role harus berupa angka",
+			"data":    nil,
+		})
+	}
+
+	// Ambil data dari request body: tanggal dan id_shift
+	var req struct {
+		Tanggal string `json:"tanggal"` // Format "YYYY-MM-DD"
+		IdShift int    `json:"id_shift"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "invalid request payload: " + err.Error(),
+			"data":    nil,
+		})
+	}
+	if req.Tanggal == "" || req.IdShift == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "tanggal dan id_shift harus disediakan",
+			"data":    nil,
+		})
+	}
+
+	// Ambil id_management dari JWT
+	claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
+	if !ok || claims == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "invalid or missing token claims",
+			"data":    nil,
+		})
+	}
+	idManagement, err := strconv.Atoi(claims.IDKaryawan)
+	if err != nil || idManagement <= 0 {
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "invalid management id in token",
+			"data":    nil,
+		})
+	}
+
+	// Panggil fungsi service untuk assign shift dan insert ke Management_Shift_Karyawan
+	idShiftKaryawan, err := sc.Service.AssignShift(idPoli, idKaryawan, idRole, req.IdShift, idManagement, req.Tanggal)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "failed to assign shift: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
-		"message": "Poliklinik list retrieved successfully",
-		"data":    data,
+		"message": "shift berhasil ditambahkan",
+		"data": map[string]interface{}{
+			"id_shift_karyawan": idShiftKaryawan,
+		},
 	})
 }
 
-func (sc *ShiftController) GetKaryawanByShiftAndPoliHandler(w http.ResponseWriter, r *http.Request) {
-	shiftIDParam := r.URL.Query().Get("shift_id")
-	poliIDParam := r.URL.Query().Get("poli_id")
-	if shiftIDParam == "" || poliIDParam == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+// UpdateCustomShiftHandler menerima query parameter id_shift_karyawan dan request body berisi
+// custom_jam_mulai dan custom_jam_selesai. Handler akan melakukan validasi agar waktu custom berada dalam rentang shift.
+func (sc *ShiftController) UpdateCustomShiftHandler(c echo.Context) error {
+	// Ambil id_shift_karyawan dari query parameter
+	idShiftKaryawanStr := c.QueryParam("id_shift_karyawan")
+	if idShiftKaryawanStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "Both shift_id and poli_id parameters are required",
+			"message": "id_shift_karyawan harus disediakan",
 			"data":    nil,
 		})
-		return
 	}
-
-	shiftID, err := strconv.Atoi(shiftIDParam)
+	idShiftKaryawan, err := strconv.Atoi(idShiftKaryawanStr)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "shift_id must be a number",
+			"message": "id_shift_karyawan harus berupa angka",
 			"data":    nil,
 		})
-		return
 	}
 
-	poliID, err := strconv.Atoi(poliIDParam)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+	// Ambil data dari request body
+	var req struct {
+		CustomJamMulai   string `json:"custom_jam_mulai"`   // Format "15:04:05"
+		CustomJamSelesai string `json:"custom_jam_selesai"` // Format "15:04:05"
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "poli_id must be a number",
+			"message": "invalid request payload: " + err.Error(),
 			"data":    nil,
 		})
-		return
+	}
+	if req.CustomJamMulai == "" || req.CustomJamSelesai == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "custom_jam_mulai dan custom_jam_selesai harus disediakan",
+			"data":    nil,
+		})
 	}
 
-	data, err := sc.Service.GetKaryawanByShiftAndPoli(shiftID, poliID)
+	// Panggil fungsi service untuk update custom shift
+	err = sc.Service.UpdateCustomShift(idShiftKaryawan, req.CustomJamMulai, req.CustomJamSelesai)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
-			"message": "Failed to retrieve karyawan by shift: " + err.Error(),
+			"message": "failed to update custom shift: " + err.Error(),
 			"data":    nil,
 		})
-		return
 	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
-		"message": "Karyawan retrieved successfully",
-		"data":    data,
+		"message": "custom shift berhasil diperbarui",
+		"data":    nil,
 	})
 }
 
-// GetShiftSummaryHandler mengembalikan ringkasan shift berdasarkan poli_id yang diberikan.
-func (sc *ShiftController) GetShiftSummaryHandler(w http.ResponseWriter, r *http.Request) {
-	poliIDParam := r.URL.Query().Get("poli_id")
-	if poliIDParam == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+func (sc *ShiftController) SoftDeleteShiftHandler(c echo.Context) error {
+	// Ambil id_shift_karyawan dari query parameter
+	idShiftKaryawanStr := c.QueryParam("id_shift_karyawan")
+	if idShiftKaryawanStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "poli_id parameter is required",
+			"message": "id_shift_karyawan harus disediakan",
 			"data":    nil,
 		})
-		return
 	}
-	poliID, err := strconv.Atoi(poliIDParam)
+	idShiftKaryawan, err := strconv.Atoi(idShiftKaryawanStr)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "poli_id must be a number",
+			"message": "id_shift_karyawan harus berupa angka",
 			"data":    nil,
 		})
-		return
 	}
 
-	data, err := sc.Service.GetShiftSummaryByPoli(poliID)
+	// Ambil id_management dari JWT
+	claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
+	if !ok || claims == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "invalid or missing token claims",
+			"data":    nil,
+		})
+	}
+	idManagement, err := strconv.Atoi(claims.IDKaryawan)
+	if err != nil || idManagement <= 0 {
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "invalid management id in token",
+			"data":    nil,
+		})
+	}
+
+	// Panggil fungsi service untuk soft delete
+	err = sc.Service.SoftDeleteShiftKaryawan(idShiftKaryawan, idManagement)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
-			"message": "Failed to retrieve shift summary: " + err.Error(),
+			"message": "failed to soft delete shift: " + err.Error(),
 			"data":    nil,
 		})
-		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
-		"message": "Shift summary retrieved successfully",
-		"data":    data,
+		"message": "Shift karyawan berhasil di soft delete",
+		"data":    nil,
 	})
 }

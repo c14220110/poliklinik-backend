@@ -6,6 +6,7 @@ type Karyawan struct {
 	IDKaryawan   int64     `json:"id_karyawan"`
 	NIK          string    `json:"nik"`
 	Nama         string    `json:"nama"`
+	JenisKelamin string    `json:"jenis_kelamin"`
 	Username     string    `json:"username"`
 	Password     string    `json:"password"`
 	TanggalLahir time.Time `json:"tanggal_lahir"`

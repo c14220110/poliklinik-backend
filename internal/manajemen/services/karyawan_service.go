@@ -11,33 +11,45 @@ import (
 )
 
 
-func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, idManagement int, createdBy, updatedBy string) (int64, error) {
+func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, idManagement, createdBy, updatedBy int) (int64, error) {
+	// Mulai transaksi
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+
+	// Pastikan rollback jika terjadi error
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
 	// 1. Cek apakah NIK sudah terdaftar
 	var existingID int64
-	err := s.DB.QueryRow("SELECT id_karyawan FROM Karyawan WHERE nik = ?", karyawan.NIK).Scan(&existingID)
+	err = tx.QueryRow("SELECT id_karyawan FROM Karyawan WHERE nik = ?", karyawan.NIK).Scan(&existingID)
 	if err != sql.ErrNoRows {
-		// Jika tidak menghasilkan ErrNoRows (atau err == nil), berarti NIK sudah terdaftar atau terjadi error
 		return 0, fmt.Errorf("NIK %s sudah terdaftar", karyawan.NIK)
 	}
 
 	// 1b. Cek apakah Username sudah terdaftar
 	var existingUsername int64
-	err = s.DB.QueryRow("SELECT id_karyawan FROM Karyawan WHERE username = ?", karyawan.Username).Scan(&existingUsername)
+	err = tx.QueryRow("SELECT id_karyawan FROM Karyawan WHERE username = ?", karyawan.Username).Scan(&existingUsername)
 	if err != sql.ErrNoRows {
 		return 0, fmt.Errorf("username %s sudah terdaftar", karyawan.Username)
 	}
 
 	// 2. Cek apakah Role sudah ada
 	var idRole int64
-	err = s.DB.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", role).Scan(&idRole)
+	err = tx.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", role).Scan(&idRole)
 	if err == sql.ErrNoRows {
 		// Jika tidak ada, insert role baru
 		insertRole := "INSERT INTO Role (nama_role) VALUES (?)"
-		result, err := s.DB.Exec(insertRole, role)
+		res, err := tx.Exec(insertRole, role)
 		if err != nil {
 			return 0, fmt.Errorf("gagal menambahkan role: %v", err)
 		}
-		idRole, err = result.LastInsertId()
+		idRole, err = res.LastInsertId()
 		if err != nil {
 			return 0, fmt.Errorf("gagal mendapatkan ID Role: %v", err)
 		}
@@ -45,8 +57,8 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 		return 0, fmt.Errorf("gagal memeriksa role: %v", err)
 	}
 
-	// 3. Set id_role pada objek karyawan
-	karyawan.IDRole = idRole
+	// 3. Set id_role pada objek karyawan (tidak disimpan di tabel Karyawan)
+	//karyawan.IDRole = idRole
 
 	// 4. Hash password sebelum disimpan
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(karyawan.Password), bcrypt.DefaultCost)
@@ -55,12 +67,12 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 	}
 	karyawan.Password = string(hashedPassword)
 
-	// 5. Insert data karyawan ke tabel Karyawan, termasuk id_role
+	// 5. Insert data karyawan ke tabel Karyawan (tanpa id_role)
 	insertKaryawan := `
-		INSERT INTO Karyawan (nama, username, password, nik, tanggal_lahir, alamat, no_telp, id_role)
+		INSERT INTO Karyawan (nama, username, password, nik, tanggal_lahir, alamat, no_telp, jenis_kelamin)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	result, err := s.DB.Exec(insertKaryawan,
+	res, err := tx.Exec(insertKaryawan,
 		karyawan.Nama,
 		karyawan.Username,
 		karyawan.Password,
@@ -68,35 +80,64 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 		karyawan.TanggalLahir,
 		karyawan.Alamat,
 		karyawan.NoTelp,
-		karyawan.IDRole,
+		karyawan.JenisKelamin,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("gagal menambahkan karyawan: %v", err)
 	}
 
-	newID, err := result.LastInsertId()
+	newID, err := res.LastInsertId()
 	if err != nil {
 		return 0, fmt.Errorf("gagal mendapatkan ID Karyawan: %v", err)
 	}
 
-	// 6. Insert record di Management_Karyawan untuk mencatat siapa yang menambahkan karyawan
+	// 6. Insert record di Management_Karyawan (deleted_by diset NULL)
 	insertManagement := `
-		INSERT INTO Management_Karyawan (id_management, id_karyawan, Created_By, Updated_By)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO Management_Karyawan (id_management, id_karyawan, created_by, updated_by, deleted_by)
+		VALUES (?, ?, ?, ?, ?)
 	`
-	_, err = s.DB.Exec(insertManagement, idManagement, newID, createdBy, updatedBy)
+	_, err = tx.Exec(insertManagement, idManagement, newID, createdBy, updatedBy, nil)
 	if err != nil {
 		return 0, fmt.Errorf("gagal mencatat di Management_Karyawan: %v", err)
+	}
+
+	// 7. Insert record di Detail_Role_Karyawan untuk mengaitkan karyawan dengan role
+	insertDetailRole := `
+		INSERT INTO Detail_Role_Karyawan (id_role, id_karyawan)
+		VALUES (?, ?)
+	`
+	_, err = tx.Exec(insertDetailRole, idRole, newID)
+	if err != nil {
+		return 0, fmt.Errorf("gagal mencatat di Detail_Role_Karyawan: %v", err)
+	}
+
+	// Commit transaksi
+	if err = tx.Commit(); err != nil {
+		return 0, err
 	}
 
 	return newID, nil
 }
 
 
-func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string, idManagement int, updatedBy string) (int64, error) {
-	// 1. Cek apakah ID_Karyawan valid
-	var idKaryawan int64
-	err := s.DB.QueryRow("SELECT id_karyawan FROM Karyawan WHERE id_karyawan = ?", karyawan.IDKaryawan).Scan(&idKaryawan)
+
+func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string, idManagement int) (int64, error) {
+	// Mulai transaksi
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+
+	// Pastikan rollback jika terjadi error
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// 1. Cek apakah karyawan dengan ID tersebut ada
+	var existingID int64
+	err = tx.QueryRow("SELECT id_karyawan FROM Karyawan WHERE id_karyawan = ?", karyawan.IDKaryawan).Scan(&existingID)
 	if err == sql.ErrNoRows {
 		return 0, fmt.Errorf("karyawan dengan ID %d tidak ditemukan", karyawan.IDKaryawan)
 	} else if err != nil {
@@ -105,7 +146,7 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 
 	// 2. Cek duplikasi username (selain record ini)
 	var count int
-	err = s.DB.QueryRow("SELECT COUNT(*) FROM Karyawan WHERE username = ? AND id_karyawan <> ?", karyawan.Username, karyawan.IDKaryawan).Scan(&count)
+	err = tx.QueryRow("SELECT COUNT(*) FROM Karyawan WHERE username = ? AND id_karyawan <> ?", karyawan.Username, karyawan.IDKaryawan).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("gagal memeriksa duplikasi username: %v", err)
 	}
@@ -115,7 +156,7 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 
 	// 3. Cek duplikasi NIK (selain record ini)
 	count = 0
-	err = s.DB.QueryRow("SELECT COUNT(*) FROM Karyawan WHERE nik = ? AND id_karyawan <> ?", karyawan.NIK, karyawan.IDKaryawan).Scan(&count)
+	err = tx.QueryRow("SELECT COUNT(*) FROM Karyawan WHERE nik = ? AND id_karyawan <> ?", karyawan.NIK, karyawan.IDKaryawan).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("gagal memeriksa duplikasi NIK: %v", err)
 	}
@@ -130,31 +171,22 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 	}
 	karyawan.Password = string(hashedPassword)
 
-	// 5. Cari atau buat Role yang sesuai
+	// 5. Cari Role yang sesuai (role harus sudah ada, jangan buat baru)
 	var idRole int64
-	err = s.DB.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", role).Scan(&idRole)
+	err = tx.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", role).Scan(&idRole)
 	if err == sql.ErrNoRows {
-		// Insert Role jika tidak ada
-		insertRole := "INSERT INTO Role (nama_role) VALUES (?)"
-		result, err := s.DB.Exec(insertRole, role)
-		if err != nil {
-			return 0, fmt.Errorf("gagal menambahkan role: %v", err)
-		}
-		idRole, err = result.LastInsertId()
-		if err != nil {
-			return 0, fmt.Errorf("gagal mendapatkan ID Role: %v", err)
-		}
+		return 0, fmt.Errorf("role %s tidak ditemukan", role)
 	} else if err != nil {
 		return 0, fmt.Errorf("gagal memeriksa role: %v", err)
 	}
 
-	// 6. Update record Karyawan termasuk kolom id_role
+	// 6. Update record Karyawan (tidak ada kolom id_role)
 	updateKaryawan := `
 		UPDATE Karyawan 
-		SET nama = ?, username = ?, password = ?, nik = ?, tanggal_lahir = ?, alamat = ?, no_telp = ?, id_role = ?
+		SET nama = ?, username = ?, password = ?, nik = ?, tanggal_lahir = ?, alamat = ?, no_telp = ?
 		WHERE id_karyawan = ?
 	`
-	_, err = s.DB.Exec(updateKaryawan,
+	_, err = tx.Exec(updateKaryawan,
 		karyawan.Nama,
 		karyawan.Username,
 		karyawan.Password,
@@ -162,7 +194,6 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 		karyawan.TanggalLahir,
 		karyawan.Alamat,
 		karyawan.NoTelp,
-		idRole,
 		karyawan.IDKaryawan,
 	)
 	if err != nil {
@@ -172,22 +203,45 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 	// 7. Update Management_Karyawan untuk mencatat siapa yang melakukan pembaruan
 	updateManagement := `
 		UPDATE Management_Karyawan 
-		SET Updated_By = ?
+		SET updated_by = ?
 		WHERE id_karyawan = ?
 	`
-	_, err = s.DB.Exec(updateManagement, updatedBy, karyawan.IDKaryawan)
+	_, err = tx.Exec(updateManagement, idManagement, karyawan.IDKaryawan)
 	if err != nil {
 		return 0, fmt.Errorf("gagal mencatat di Management_Karyawan: %v", err)
+	}
+
+	// 8. Update Detail_Role_Karyawan:
+	// Hapus record role lama dan masukkan record baru untuk karyawan tersebut
+	_, err = tx.Exec("DELETE FROM Detail_Role_Karyawan WHERE id_karyawan = ?", karyawan.IDKaryawan)
+	if err != nil {
+		return 0, fmt.Errorf("gagal menghapus detail role lama: %v", err)
+	}
+
+	insertDetailRole := `
+		INSERT INTO Detail_Role_Karyawan (id_role, id_karyawan)
+		VALUES (?, ?)
+	`
+	_, err = tx.Exec(insertDetailRole, idRole, karyawan.IDKaryawan)
+	if err != nil {
+		return 0, fmt.Errorf("gagal mencatat detail role baru: %v", err)
+	}
+
+	// Commit transaksi
+	if err = tx.Commit(); err != nil {
+		return 0, err
 	}
 
 	return karyawan.IDKaryawan, nil
 }
 
+
+
 func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusFilter string) ([]map[string]interface{}, error) {
 	baseQuery := `
 		SELECT 
 			k.id_karyawan, 
-			k.id_role,
+			drk.id_role,
 			r.nama_role,
 			k.nama,
 			k.username,
@@ -196,7 +250,8 @@ func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusF
 			k.alamat,
 			k.no_telp
 		FROM Karyawan k
-		JOIN Role r ON k.id_role = r.id_role
+		JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
+		JOIN Role r ON drk.id_role = r.id_role
 	`
 	conditions := []string{}
 	params := []interface{}{}
@@ -207,7 +262,7 @@ func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusF
 		if err != nil {
 			return nil, fmt.Errorf("invalid id_role value: %v", err)
 		}
-		conditions = append(conditions, "k.id_role = ?")
+		conditions = append(conditions, "drk.id_role = ?")
 		params = append(params, idRoleInt)
 	}
 
@@ -247,15 +302,15 @@ func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusF
 		}
 
 		record := map[string]interface{}{
-			"id_karyawan":  idKaryawan,
-			"id_role":      idRole,
-			"nama_role":    nil,
-			"nama":         nama,
-			"username":     username,
-			"nik":          nik,
+			"id_karyawan":   idKaryawan,
+			"id_role":       idRole,
+			"nama_role":     nil,
+			"nama":          nama,
+			"username":      username,
+			"nik":           nik,
 			"tanggal_lahir": nil,
-			"alamat":       alamat,
-			"no_telp":      noTelp,
+			"alamat":        alamat,
+			"no_telp":       noTelp,
 		}
 		if namaRole.Valid {
 			record["nama_role"] = namaRole.String
@@ -267,6 +322,7 @@ func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusF
 	}
 	return list, nil
 }
+
 
 func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy string) error {
 	// 1. Update kolom deleted_at di tabel Karyawan

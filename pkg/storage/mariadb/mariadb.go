@@ -40,6 +40,13 @@ func Connect() *sql.DB {
 	return db
 }
 
+func Close() error {
+    if db != nil {
+        return db.Close()
+    }
+    return nil
+}
+
 // GetDB mengembalikan instance koneksi database yang sudah terbentuk.
 func GetDB() *sql.DB {
 	return db

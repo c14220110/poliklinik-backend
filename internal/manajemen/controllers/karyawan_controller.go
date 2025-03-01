@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,11 +9,13 @@ import (
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/models"
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/services"
 	"github.com/c14220110/poliklinik-backend/pkg/utils"
+	"github.com/labstack/echo/v4"
 )
 
 type AddKaryawanRequest struct {
 	NIK          string `json:"nik"`
 	Nama         string `json:"nama"`
+	JenisKelamin string `json:"jenis_kelamin"`  // ditambahkan
 	TanggalLahir string `json:"tanggal_lahir"`
 	Alamat       string `json:"alamat"`
 	NoTelp       string `json:"no_telp"`
@@ -22,54 +23,53 @@ type AddKaryawanRequest struct {
 	Username     string `json:"username"`
 	Password     string `json:"password"`
 }
+
+
 type UpdateKaryawanRequest struct {
-	IDKaryawan   int64  `json:"id_karyawan"`
-	NIK          string `json:"nik"`
-	Nama         string `json:"nama"`
-	Username     string `json:"username"`
-	Password     string `json:"password"`
-	TanggalLahir string `json:"tanggal_lahir"`
-	Alamat       string `json:"alamat"`
-	NoTelp       string `json:"no_telp"`
-	Role         string `json:"role"`
+    IDKaryawan   int64  `json:"id_karyawan"`
+    NIK          string `json:"nik"`
+    Nama         string `json:"nama"`
+    Username     string `json:"username"`
+    Password     string `json:"password"`
+    TanggalLahir string `json:"tanggal_lahir"`
+    Alamat       string `json:"alamat"`
+    NoTelp       string `json:"no_telp"`
+    Role         string `json:"role"`
 }
 
 type KaryawanController struct {
-	Service *services.ManagementService
+    Service *services.ManagementService
 }
 
 func NewKaryawanController(service *services.ManagementService) *KaryawanController {
-	return &KaryawanController{Service: service}
+    return &KaryawanController{Service: service}
 }
 
-func (kc *KaryawanController) AddKaryawan(w http.ResponseWriter, r *http.Request) {
+func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 	var req AddKaryawanRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
 			"message": "Invalid request payload: " + err.Error(),
 			"data":    nil,
 		})
-		return
 	}
 
 	// Parse tanggal lahir
 	parsedDate, err := time.Parse("2006-01-02", req.TanggalLahir)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
 			"message": "Invalid date format for tanggal_lahir. Use YYYY-MM-DD",
 			"data":    nil,
 		})
-		return
 	}
 
-	// Buat objek Karyawan
+	// Buat objek Karyawan, termasuk field jenis_kelamin
 	karyawan := models.Karyawan{
 		NIK:          req.NIK,
 		Nama:         req.Nama,
+		JenisKelamin: req.JenisKelamin,
 		TanggalLahir: parsedDate,
 		Alamat:       req.Alamat,
 		NoTelp:       req.NoTelp,
@@ -77,43 +77,37 @@ func (kc *KaryawanController) AddKaryawan(w http.ResponseWriter, r *http.Request
 		Password:     req.Password,
 	}
 
-	// Ambil klaim JWT dari context untuk mendapatkan id_management dan username management yang sedang login
-	claims, ok := r.Context().Value(middlewares.ContextKeyClaims).(*utils.Claims)
+	// Ambil klaim JWT dari context
+	claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
 	if !ok || claims == nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,
 			"message": "Invalid or missing token claims",
 			"data":    nil,
 		})
-		return
 	}
 
+	// Konversi id_management dari JWT ke integer
 	idManagement, err := strconv.Atoi(claims.IDKaryawan)
 	if err != nil || idManagement <= 0 {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,
 			"message": "Invalid management ID in token",
 			"data":    nil,
 		})
-		return
 	}
 
-	// Panggil service untuk menambahkan karyawan
-	idKaryawan, err := kc.Service.AddKaryawan(karyawan, req.Role, idManagement, claims.Username, claims.Username)
+	// Panggil service untuk menambahkan karyawan dengan created_by dan updated_by sebagai idManagement
+	idKaryawan, err := kc.Service.AddKaryawan(karyawan, req.Role, idManagement, idManagement, idManagement)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
 			"message": "Failed to add karyawan: " + err.Error(),
 			"data":    nil,
 		})
-		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Karyawan added successfully",
 		"data": map[string]interface{}{
@@ -124,67 +118,59 @@ func (kc *KaryawanController) AddKaryawan(w http.ResponseWriter, r *http.Request
 
 
 
-// GetKaryawanListHandler mengembalikan daftar karyawan dengan field: id_karyawan, nama, nik, tanggal_lahir, role, tahun_kerja.
-func (kc *KaryawanController) GetKaryawanListHandler(w http.ResponseWriter, r *http.Request) {
-	// Ambil query parameters: id_role dan status
-	idRole := r.URL.Query().Get("id_role")
-	status := r.URL.Query().Get("status")
+
+func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
+	idRole := c.QueryParam("id_role")
+	status := c.QueryParam("status")
 
 	list, err := kc.Service.GetKaryawanListFiltered(idRole, status)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
 			"message": "Failed to retrieve karyawan list: " + err.Error(),
 			"data":    nil,
 		})
-		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Karyawan list retrieved successfully",
 		"data":    list,
 	})
 }
 
-func (kc *KaryawanController) UpdateKaryawanHandler(w http.ResponseWriter, r *http.Request) {
+
+
+func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 	var req UpdateKaryawanRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
 			"message": "Invalid request payload: " + err.Error(),
 			"data":    nil,
 		})
-		return
 	}
 
 	// Validasi minimal field
 	if req.IDKaryawan == 0 || req.NIK == "" || req.Nama == "" || req.Username == "" || req.Password == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
 			"message": "id_karyawan, nik, nama, username, and password are required",
 			"data":    nil,
 		})
-		return
 	}
 
-	// Parse tanggal_lahir dengan format "YYYY-MM-DD"
+	// Parse tanggal_lahir
 	parsedDate, err := time.Parse("2006-01-02", req.TanggalLahir)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
 			"message": "Invalid date format for tanggal_lahir. Use YYYY-MM-DD",
 			"data":    nil,
 		})
-		return
 	}
 
-	// Buat objek Karyawan untuk update; NIK tidak boleh diubah
+	// Buat objek Karyawan untuk update (catatan: field jenis_kelamin tidak diupdate jika tidak disediakan)
 	karyawan := models.Karyawan{
 		IDKaryawan:   req.IDKaryawan,
 		NIK:          req.NIK,
@@ -196,45 +182,37 @@ func (kc *KaryawanController) UpdateKaryawanHandler(w http.ResponseWriter, r *ht
 		NoTelp:       req.NoTelp,
 	}
 
-	// Ambil klaim JWT dari context untuk mendapatkan informasi management yang sedang login
-	claims, ok := r.Context().Value(middlewares.ContextKeyClaims).(*utils.Claims)
+	// Ambil klaim JWT dari context
+	claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
 	if !ok || claims == nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,
 			"message": "Invalid or missing token claims",
 			"data":    nil,
 		})
-		return
 	}
 
-	// Ambil id_management dari token (di sini menggunakan klaim id_karyawan sebagai id_management)
+	// Konversi id_management dari JWT ke integer
 	idManagement, err := strconv.Atoi(claims.IDKaryawan)
 	if err != nil || idManagement <= 0 {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,
 			"message": "Invalid management ID in token",
 			"data":    nil,
 		})
-		return
 	}
 
-	// Panggil service untuk update karyawan; gunakan claims.Username sebagai updated_by
-	updatedID, err := kc.Service.UpdateKaryawan(karyawan, req.Role, idManagement, claims.Username)
+	// Panggil service untuk update karyawan
+	updatedID, err := kc.Service.UpdateKaryawan(karyawan, req.Role, idManagement)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
 			"message": "Failed to update karyawan: " + err.Error(),
 			"data":    nil,
 		})
-		return
 	}
 
-	// Kembalikan respons sukses
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Karyawan updated successfully",
 		"data": map[string]interface{}{
@@ -243,69 +221,49 @@ func (kc *KaryawanController) UpdateKaryawanHandler(w http.ResponseWriter, r *ht
 	})
 }
 
-// SoftDeleteKaryawanHandler melakukan soft delete dengan mengupdate deleted_at di Karyawan 
-// dan deleted_by di Management_Karyawan.
-func (kc *KaryawanController) SoftDeleteKaryawanHandler(w http.ResponseWriter, r *http.Request) {
-	// Pastikan metode PUT
-	if r.Method != http.MethodPut {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusMethodNotAllowed,
-			"message": "Method not allowed",
-			"data":    nil,
-		})
-		return
-	}
 
-	idStr := r.URL.Query().Get("id_karyawan")
-	if idStr == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusBadRequest,
-			"message": "id_karyawan parameter is required",
-			"data":    nil,
-		})
-		return
-	}
 
-	idKaryawan, err := strconv.Atoi(idStr)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusBadRequest,
-			"message": "id_karyawan must be a number",
-			"data":    nil,
-		})
-		return
-	}
+func (kc *KaryawanController) SoftDeleteKaryawanHandler(c echo.Context) error {
+    idStr := c.QueryParam("id_karyawan")
+    if idStr == "" {
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{
+            "status":  http.StatusBadRequest,
+            "message": "id_karyawan parameter is required",
+            "data":    nil,
+        })
+    }
 
-	// Ambil klaim JWT untuk mendapatkan username management
-	claims, ok := r.Context().Value(middlewares.ContextKeyClaims).(*utils.Claims)
-	if !ok || claims == nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusUnauthorized,
-			"message": "Invalid or missing token claims",
-			"data":    nil,
-		})
-		return
-	}
+    idKaryawan, err := strconv.Atoi(idStr)
+    if err != nil {
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{
+            "status":  http.StatusBadRequest,
+            "message": "id_karyawan must be a number",
+            "data":    nil,
+        })
+    }
 
-	err = kc.Service.SoftDeleteKaryawan(idKaryawan, claims.Username)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  http.StatusInternalServerError,
-			"message": "Failed to soft delete karyawan: " + err.Error(),
-			"data":    nil,
-		})
-		return
-	}
+    // Ambil klaim JWT dari context
+    claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
+    if !ok || claims == nil {
+        return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+            "status":  http.StatusUnauthorized,
+            "message": "Invalid or missing token claims",
+            "data":    nil,
+        })
+    }
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  http.StatusOK,
-		"message": "Karyawan soft-deleted successfully",
-		"data":    nil,
-	})
+    err = kc.Service.SoftDeleteKaryawan(idKaryawan, claims.Username)
+    if err != nil {
+        return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+            "status":  http.StatusInternalServerError,
+            "message": "Failed to soft delete karyawan: " + err.Error(),
+            "data":    nil,
+        })
+    }
+
+    return c.JSON(http.StatusOK, map[string]interface{}{
+        "status":  http.StatusOK,
+        "message": "Karyawan soft-deleted successfully",
+        "data":    nil,
+    })
 }
