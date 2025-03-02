@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/c14220110/poliklinik-backend/pkg/utils"
 	"github.com/labstack/echo/v4"
 )
 
@@ -19,8 +20,28 @@ func RequirePrivilege(requiredPriv int) echo.MiddlewareFunc {
 					"data":    nil,
 				})
 			}
-			claims, ok := rawClaims.(map[string]interface{})
-			if !ok {
+
+			var privSlice []interface{}
+			// Cek apakah claims disimpan sebagai *utils.Claims
+			if claimStruct, ok := rawClaims.(*utils.Claims); ok {
+				for _, p := range claimStruct.Privileges {
+					privSlice = append(privSlice, p)
+				}
+			} else if claimsMap, ok := rawClaims.(map[string]interface{}); ok {
+				// Jika claims disimpan sebagai map[string]interface{}
+				if privVal, exists := claimsMap["privileges"]; exists {
+					switch v := privVal.(type) {
+					case []interface{}:
+						privSlice = v
+					case map[string]interface{}:
+						if arr, exists := v["privileges"]; exists {
+							if arrSlice, ok := arr.([]interface{}); ok {
+								privSlice = arrSlice
+							}
+						}
+					}
+				}
+			} else {
 				return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 					"status":  http.StatusUnauthorized,
 					"message": "Invalid JWT claims format",
@@ -28,21 +49,7 @@ func RequirePrivilege(requiredPriv int) echo.MiddlewareFunc {
 				})
 			}
 
-			// Cek key "privileges" dalam klaim
-			var privSlice []interface{}
-			if privVal, exists := claims["privileges"]; exists {
-				switch v := privVal.(type) {
-				case []interface{}:
-					privSlice = v
-				case map[string]interface{}:
-					if arr, exists := v["privileges"]; exists {
-						if arrSlice, ok := arr.([]interface{}); ok {
-							privSlice = arrSlice
-						}
-					}
-				}
-			}
-			if privSlice == nil {
+			if len(privSlice) == 0 {
 				return c.JSON(http.StatusForbidden, map[string]interface{}{
 					"status":  http.StatusForbidden,
 					"message": "User does not have privileges",
@@ -55,6 +62,11 @@ func RequirePrivilege(requiredPriv int) echo.MiddlewareFunc {
 				switch val := item.(type) {
 				case float64:
 					if int(val) == requiredPriv {
+						found = true
+						break
+					}
+				case int:
+					if val == requiredPriv {
 						found = true
 						break
 					}
