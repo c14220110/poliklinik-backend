@@ -7,8 +7,10 @@ import (
 
 	adminControllers "github.com/c14220110/poliklinik-backend/internal/administrasi/controllers"
 	adminServices "github.com/c14220110/poliklinik-backend/internal/administrasi/services"
+
 	manajemenControllers "github.com/c14220110/poliklinik-backend/internal/manajemen/controllers"
 	manajemenServices "github.com/c14220110/poliklinik-backend/internal/manajemen/services"
+
 	screeningControllers "github.com/c14220110/poliklinik-backend/internal/screening/controllers"
 	screeningServices "github.com/c14220110/poliklinik-backend/internal/screening/services"
 
@@ -19,45 +21,47 @@ import (
 )
 
 func Init(e *echo.Echo, db *sql.DB) {
-	// Inisialisasi service
+	// Inisialisasi service untuk masing-masing modul
+	// Administrasi
 	adminService := adminServices.NewAdministrasiService(db)
 	pendaftaranService := adminServices.NewPendaftaranService(db)
 	billingService := adminServices.NewBillingService(db)
-	poliklinikService := adminServices.NewPoliklinikService(db)
+	// Untuk poliklinik, gunakan service dari manajemen
+	poliklinikService := manajemenServices.NewPoliklinikService(db)
 
+	// Management
 	managementService := manajemenServices.NewManagementService(db)
+	roleService := manajemenServices.NewRoleService(db)
 	shiftService := manajemenServices.NewShiftService(db)
 	cmsService := manajemenServices.NewCMSService(db)
-	roleService := manajemenServices.NewRoleService(db)
+	privilegeService := manajemenServices.NewPrivilegeService(db)
 
+	// Screening / Suster
 	screeningService := screeningServices.NewScreeningService(db)
 	antrianService := screeningServices.NewAntrianService(db)
 	susterService := screeningServices.NewSusterService(db)
 
-	dokterService := dokterServices.NewDokterService(db) // Asumsi
-
-	privilegeService := manajemenServices.NewPrivilegeService(db)
-
+	// Dokter
+	dokterService := dokterServices.NewDokterService(db)
 
 	// Inisialisasi controller
+	// Administrasi
 	adminController := adminControllers.NewAdministrasiController(adminService)
 	pasienController := adminControllers.NewPasienController(pendaftaranService)
 	billingController := adminControllers.NewBillingController(billingService)
-	poliklinikController := adminControllers.NewPoliklinikController(poliklinikService)
-
+	// Management (poliklinik, karyawan, role, shift, CMS, privilege)
 	managementController := manajemenControllers.NewManagementController(managementService)
 	karyawanController := manajemenControllers.NewKaryawanController(managementService)
 	roleController := manajemenControllers.NewRoleController(roleService)
 	shiftController := manajemenControllers.NewShiftController(shiftService)
 	cmsController := manajemenControllers.NewCMSController(cmsService)
-
+	poliklinikController := manajemenControllers.NewPoliklinikController(poliklinikService)
+	privilegeController := manajemenControllers.NewPrivilegeController(privilegeService)
+	// Screening / Suster
 	susterController := screeningControllers.NewSusterController(susterService)
 	screeningController := screeningControllers.NewScreeningController(screeningService)
 	antrianController := screeningControllers.NewAntrianController(antrianService)
-
-	privilegeController := manajemenControllers.NewPrivilegeController(privilegeService)
-
-
+	// Dokter
 	dokterController := dokterControllers.NewDokterController(dokterService)
 
 	// Grup API utama
@@ -66,26 +70,14 @@ func Init(e *echo.Echo, db *sql.DB) {
 	// 1. Administrasi (Aplikasi Pendaftaran & Administrasi)
 	administrasi := api.Group("/administrasi")
 	administrasi.POST("/login", adminController.Login) // Tidak pakai JWT
-
-	administrasi.GET("/polikliniklist", poliklinikController.GetPoliklinikList, middlewares.JWTMiddleware())
 	administrasi.GET("/pasiendata", pasienController.GetAllPasienData, middlewares.JWTMiddleware())
 	administrasi.GET("/pasien", pasienController.ListPasien, middlewares.JWTMiddleware())
-
-	// Register, Kunjungan
-	// Terapkan JWTMiddleware terlebih dahulu, lalu RequirePrivilege dengan nilai 1
 	administrasi.POST("/pasien/register", pasienController.RegisterPasien, middlewares.JWTMiddleware(), middlewares.RequirePrivilege(1))
 	administrasi.PUT("/kunjungan", pasienController.UpdateKunjungan, middlewares.JWTMiddleware(), middlewares.RequirePrivilege(1))
-
-
-	//Resched, tunda
 	administrasi.PUT("/kunjungan/reschedule", pasienController.RescheduleAntrianHandler, middlewares.JWTMiddleware())
 	administrasi.PUT("/kunjungan/tunda", pasienController.TundaPasienHandler, middlewares.JWTMiddleware())
-
-	// Antrian
 	administrasi.GET("/antrian/today", pasienController.GetAntrianTodayHandler, middlewares.JWTMiddleware())
 	administrasi.GET("/status_antrian", pasienController.GetAllStatusAntrianHandler, middlewares.JWTMiddleware())
-
-	// Billing
 	billing := administrasi.Group("/billing")
 	billing.GET("/recent", billingController.ListBilling, middlewares.JWTMiddleware())
 	billing.GET("/detail", billingController.BillingDetail, middlewares.JWTMiddleware())
@@ -100,12 +92,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 
 	// 3. Dokter (Website untuk Dokter)
 	dokter := api.Group("/dokter")
-	dokter.POST("/login", dokterController.LoginDokter)         // Tidak pakai JWT
-	// dokter.GET("/antrian", dokterController.GetAntrianList, middlewares.JWTMiddleware())  // List antrian
-	// dokter.GET("/detail", dokterController.GetPasienDetail, middlewares.JWTMiddleware())  // Rincian data pasien
-	// dokter.POST("/assessment", dokterController.AddAssessment, middlewares.JWTMiddleware()) // Tambah assessment
-	// dokter.POST("/e-resep", dokterController.AddEresep, middlewares.JWTMiddleware())      // Tambah e-resep
-	// dokter.PUT("/pulangkan", dokterController.PulangkanPasien, middlewares.JWTMiddleware()) // Pulangkan pasien
+	dokter.POST("/login", dokterController.LoginDokter) // Tidak pakai JWT
 	// Tambahkan endpoint dokter lain sesuai kebutuhan
 
 	// 4. Management (Website untuk Manajemen)
@@ -117,6 +104,14 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.GET("/karyawan", karyawanController.GetKaryawanListHandler, middlewares.JWTMiddleware())
 	management.PUT("/karyawan/update", karyawanController.UpdateKaryawanHandler, middlewares.JWTMiddleware())
 	management.PUT("/karyawan/delete", karyawanController.SoftDeleteKaryawanHandler, middlewares.JWTMiddleware())
+	management.POST("/karyawan/addRole", karyawanController.AddRoleHandler, middlewares.JWTMiddleware())
+
+	// Manajemen Poliklinik
+	management.GET("/poliklinik", poliklinikController.GetPoliklinikList, middlewares.JWTMiddleware())
+	management.POST("/poliklinik/add", poliklinikController.AddPoliklinikHandler, middlewares.JWTMiddleware())
+	management.PUT("/poliklinik/update", poliklinikController.UpdatePoliklinikHandler, middlewares.JWTMiddleware())
+	management.PUT("/poliklinik/soft-delete", poliklinikController.SoftDeletePoliklinikHandler, middlewares.JWTMiddleware())
+
 
 	// Manajemen Role
 	management.POST("/role/add", roleController.AddRoleHandler, middlewares.JWTMiddleware())
@@ -124,20 +119,15 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.PUT("/role/nonaktifkan", roleController.SoftDeleteRoleHandler, middlewares.JWTMiddleware())
 	management.PUT("/role/aktifkan", roleController.ActivateRoleHandler, middlewares.JWTMiddleware())
 	management.GET("/role/list", roleController.GetRoleListHandler, middlewares.JWTMiddleware())
-	management.POST("/karyawan/addRole", karyawanController.AddRoleHandler, middlewares.JWTMiddleware())
-
 
 	// Manajemen Privilege
 	management.POST("/privilege/add", karyawanController.AddPrivilegeHandler, middlewares.JWTMiddleware())
 	management.GET("/privilege", privilegeController.GetAllPrivilegesHandler, middlewares.JWTMiddleware())
 
-
-
 	// Manajemen Shift & CMS
 	management.POST("/shift/assign", shiftController.AssignShiftHandler, middlewares.JWTMiddleware())
 	management.PUT("/shift/updateCustom", shiftController.UpdateCustomShiftHandler, middlewares.JWTMiddleware())
 	management.PUT("/shift/soft-delete", shiftController.SoftDeleteShiftHandler, middlewares.JWTMiddleware())
-
 	management.GET("/cms", cmsController.GetCMSByPoliklinikHandler, middlewares.JWTMiddleware())
 	management.GET("/cms/all", cmsController.GetAllCMSHandler, middlewares.JWTMiddleware())
 	management.POST("/cms/create", cmsController.CreateCMSHandler, middlewares.JWTMiddleware())
