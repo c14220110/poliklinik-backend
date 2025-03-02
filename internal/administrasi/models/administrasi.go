@@ -2,11 +2,12 @@ package models
 
 import "time"
 
-// Administrasi mewakili data admin yang diambil dari tabel Karyawan.
 type Administrasi struct {
-	ID_Admin  int       `json:"id" db:"ID_Admin"` // Akan menyimpan ID_Karyawan
-	Nama      string    `json:"nama" db:"Nama"`
-	Username  string    `json:"username" db:"Username"`
-	Password  string    `json:"-" db:"Password"`
-	CreatedAt time.Time `json:"created_at" db:"Created_At"`
+	ID_Admin    int       `json:"id_karyawan"` // menggunakan id_karyawan sebagai ID_Admin
+	Nama        string    `json:"nama"`
+	Username    string    `json:"username"`
+	Password    string    `json:"-"`
+	CreatedAt   time.Time `json:"created_at"`
+	ID_Role     int       `json:"id_role"`      // role yang dimiliki
+	Privileges  []int     `json:"privileges"`   // daftar id_privilege
 }

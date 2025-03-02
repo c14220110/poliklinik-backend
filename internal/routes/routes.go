@@ -117,6 +117,8 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.PUT("/role/nonaktifkan", roleController.SoftDeleteRoleHandler, middlewares.JWTMiddleware())
 	management.PUT("/role/aktifkan", roleController.ActivateRoleHandler, middlewares.JWTMiddleware())
 	management.GET("/role/list", roleController.GetRoleListHandler, middlewares.JWTMiddleware())
+	management.POST("/karyawan/addRole", karyawanController.AddRoleHandler, middlewares.JWTMiddleware())
+
 
 	// Manajemen Privilege
 	management.POST("/privilege/add", karyawanController.AddPrivilegeHandler, middlewares.JWTMiddleware())

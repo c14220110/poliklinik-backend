@@ -193,3 +193,58 @@ func (rc *RoleController) ActivateRoleHandler(c echo.Context) error {
         "data":    map[string]interface{}{"id_role": idRole},
     })
 }
+
+func (kc *KaryawanController) AddRoleHandler(c echo.Context) error {
+	// Ambil id_karyawan dari query parameter
+	idKaryawanStr := c.QueryParam("id_karyawan")
+	if idKaryawanStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_karyawan harus disediakan",
+			"data":    nil,
+		})
+	}
+	idKaryawan, err := strconv.Atoi(idKaryawanStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_karyawan harus berupa angka",
+			"data":    nil,
+		})
+	}
+
+	// Parsing request body yang berisi array id_role
+	var req struct {
+		Roles []int `json:"roles"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Invalid request body: " + err.Error(),
+			"data":    nil,
+		})
+	}
+	if len(req.Roles) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Setidaknya satu role harus disediakan",
+			"data":    nil,
+		})
+	}
+
+	// Panggil service untuk menambahkan role ke karyawan
+	err = kc.Service.AddRolesToKaryawan(idKaryawan, req.Roles)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to add roles: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Roles added successfully",
+		"data":    nil,
+	})
+}

@@ -20,15 +20,17 @@ func NewAdministrasiService(db *sql.DB) *AdministrasiService {
 func (s *AdministrasiService) AuthenticateAdmin(username, password string) (*models.Administrasi, error) {
 	var admin models.Administrasi
 	var roleName string
+	var roleID int
 
-	// Query untuk mengambil data karyawan beserta role langsung dari tabel Role
+	// Query diperbarui untuk join dengan Detail_Role_Karyawan dan Role
 	query := `
-		SELECT k.id_karyawan, k.nama, k.username, k.password, k.created_at, r.nama_role
+		SELECT k.id_karyawan, k.nama, k.username, k.password, k.created_at, drk.id_role, r.nama_role
 		FROM Karyawan k
-		JOIN Role r ON k.id_role = r.id_role
+		JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
+		JOIN Role r ON drk.id_role = r.id_role
 		WHERE k.username = ?
 	`
-	err := s.DB.QueryRow(query, username).Scan(&admin.ID_Admin, &admin.Nama, &admin.Username, &admin.Password, &admin.CreatedAt, &roleName)
+	err := s.DB.QueryRow(query, username).Scan(&admin.ID_Admin, &admin.Nama, &admin.Username, &admin.Password, &admin.CreatedAt, &roleID, &roleName)
 	if err != nil {
 		return nil, err
 	}
@@ -42,6 +44,25 @@ func (s *AdministrasiService) AuthenticateAdmin(username, password string) (*mod
 	if roleName != "Administrasi" {
 		return nil, errors.New("user does not have administrasi privileges")
 	}
+
+	admin.ID_Role = roleID
+
+	// Ambil daftar privilege yang dimiliki karyawan
+	rows, err := s.DB.Query("SELECT id_privilege FROM Detail_Privilege_Karyawan WHERE id_karyawan = ?", admin.ID_Admin)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var privileges []int
+	for rows.Next() {
+		var priv int
+		if err := rows.Scan(&priv); err != nil {
+			return nil, err
+		}
+		privileges = append(privileges, priv)
+	}
+	admin.Privileges = privileges
 
 	return &admin, nil
 }

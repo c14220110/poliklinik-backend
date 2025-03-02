@@ -117,3 +117,43 @@ func (rs *RoleService) ActivateRole(idRole int) error {
 	}
 	return nil
 }
+
+func (s *ManagementService) AddRolesToKaryawan(idKaryawan int, roles []int) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+
+	// Pastikan rollback jika terjadi error
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Loop setiap id_role yang ingin ditambahkan
+	for _, roleID := range roles {
+		// Cek apakah role sudah pernah di-assign ke karyawan tersebut
+		var count int
+		err = tx.QueryRow("SELECT COUNT(*) FROM Detail_Role_Karyawan WHERE id_role = ? AND id_karyawan = ?", roleID, idKaryawan).Scan(&count)
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			// Jika sudah ada, lewati (atau bisa juga mengembalikan error jika diperlukan)
+			continue
+		}
+
+		// Insert record ke Detail_Role_Karyawan
+		_, err = tx.Exec("INSERT INTO Detail_Role_Karyawan (id_role, id_karyawan) VALUES (?, ?)", roleID, idKaryawan)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
+}
