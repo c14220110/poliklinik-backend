@@ -203,7 +203,7 @@ func (ps *PoliklinikService) UpdatePoliklinikWithOptionalLogo(idPoli int, namaPo
 		return fmt.Errorf("failed to get affected rows: %v", err)
 	}
 	if rowsAffected == 0 {
-		return fmt.Errorf("Poliklinik with id %d not found", idPoli)
+		return fmt.Errorf("poliklinik with id %d not found", idPoli)
 	}
 
 	// Catat update di tabel Management_Poli: set updated_by = idManagement

@@ -68,14 +68,15 @@ func (cs *CMSService) CreateCMSWithElements(cms models.CMS, elements []models.CM
 
 	// 3. Insert ke tabel Management_CMS
 	managementInsert := `
-		INSERT INTO Management_CMS (id_management, id_cms, created_by, updated_by)
-		VALUES (?, ?, ?, ?)
+	INSERT INTO Management_CMS (id_management, id_cms, created_by, updated_by)
+	VALUES (?, ?, ?, ?)
 	`
-	_, err = tx.Exec(managementInsert, managementInfo.IDManagement, idCMS, managementInfo.CreatedBy, managementInfo.UpdatedBy)
+	_, err = tx.Exec(managementInsert, managementInfo.IDManagement, idCMS, managementInfo.IDManagement, managementInfo.IDManagement)
 	if err != nil {
-		tx.Rollback()
-		return 0, fmt.Errorf("failed to insert into Management_CMS: %v", err)
+	tx.Rollback()
+	return 0, fmt.Errorf("failed to insert into Management_CMS: %v", err)
 	}
+
 
 	if err = tx.Commit(); err != nil {
 		return 0, err
@@ -186,9 +187,6 @@ func (cs *CMSService) GetAllCMS() ([]models.CMSGroup, error) {
 }
 
 
-// UpdateCMSWithElements mengupdate record CMS, CMS_Elements, dan Management_CMS.
-// Pendekatan: update CMS (title dan updated_at), hapus elemen lama, insert elemen baru,
-// dan update kolom updated_by di Management_CMS berdasarkan token JWT saat ini.
 func (cs *CMSService) UpdateCMSWithElements(idCMS int, newTitle string, elements []models.CMSElement, managementInfo models.ManagementCMS) error {
 	tx, err := cs.DB.Begin()
 	if err != nil {
@@ -229,13 +227,13 @@ func (cs *CMSService) UpdateCMSWithElements(idCMS int, newTitle string, elements
 		}
 	}
 
-	// 4. Update Management_CMS: hanya update kolom updated_by berdasarkan token JWT
+	// 4. Update Management_CMS: set updated_by dengan id_management (integer) dari managementInfo
 	updateManagementQuery := `
 		UPDATE Management_CMS
 		SET updated_by = ?
 		WHERE id_cms = ?
 	`
-	_, err = tx.Exec(updateManagementQuery, managementInfo.UpdatedBy, idCMS)
+	_, err = tx.Exec(updateManagementQuery, managementInfo.IDManagement, idCMS)
 	if err != nil {
 		tx.Rollback()
 		return fmt.Errorf("failed to update Management_CMS: %v", err)
