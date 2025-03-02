@@ -341,3 +341,39 @@ func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy string)
 
 	return nil
 }
+
+func (s *ManagementService) AddPrivilegesToKaryawan(idKaryawan int, privileges []int) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	// Pastikan rollback jika terjadi error
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+	
+	// Loop untuk setiap privilege yang akan ditambahkan
+	for _, priv := range privileges {
+		// Opsional: cek apakah privilege sudah ada untuk mencegah duplikasi
+		var exists int
+		err = tx.QueryRow("SELECT COUNT(*) FROM Detail_Privilege_Karyawan WHERE id_privilege = ? AND id_karyawan = ?", priv, idKaryawan).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("gagal memeriksa privilege: %v", err)
+		}
+		if exists > 0 {
+			// Lewati jika privilege sudah terdaftar (atau bisa mengembalikan error sesuai kebutuhan)
+			continue
+		}
+		_, err = tx.Exec("INSERT INTO Detail_Privilege_Karyawan (id_privilege, id_karyawan) VALUES (?, ?)", priv, idKaryawan)
+		if err != nil {
+			return fmt.Errorf("gagal menambahkan privilege %d untuk karyawan %d: %v", priv, idKaryawan, err)
+		}
+	}
+	
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}

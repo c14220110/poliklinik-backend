@@ -267,3 +267,58 @@ func (kc *KaryawanController) SoftDeleteKaryawanHandler(c echo.Context) error {
         "data":    nil,
     })
 }
+
+func (kc *KaryawanController) AddPrivilegeHandler(c echo.Context) error {
+	// Ambil id_karyawan dari query parameter
+	idKaryawanStr := c.QueryParam("id_karyawan")
+	if idKaryawanStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_karyawan harus disediakan",
+			"data":    nil,
+		})
+	}
+	idKaryawan, err := strconv.Atoi(idKaryawanStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_karyawan harus berupa angka",
+			"data":    nil,
+		})
+	}
+	
+	// Parsing request body berupa array privilege
+	var req struct {
+		Privileges []int `json:"privileges"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Invalid request body: " + err.Error(),
+			"data":    nil,
+		})
+	}
+	if len(req.Privileges) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Setidaknya satu privilege harus disediakan",
+			"data":    nil,
+		})
+	}
+	
+	// Panggil service untuk menambahkan privilege
+	err = kc.Service.AddPrivilegesToKaryawan(idKaryawan, req.Privileges)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to add privileges: " + err.Error(),
+			"data":    nil,
+		})
+	}
+	
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Privileges added successfully",
+		"data":    nil,
+	})
+}

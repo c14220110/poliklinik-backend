@@ -37,6 +37,9 @@ func Init(e *echo.Echo, db *sql.DB) {
 
 	//dokterService := dokterServices.NewDokterService(db) // Asumsi
 
+	privilegeService := manajemenServices.NewPrivilegeService(db)
+
+
 	// Inisialisasi controller
 	adminController := adminControllers.NewAdministrasiController(adminService)
 	pasienController := adminControllers.NewPasienController(pendaftaranService)
@@ -52,6 +55,9 @@ func Init(e *echo.Echo, db *sql.DB) {
 	susterController := screeningControllers.NewSusterController(susterService)
 	screeningController := screeningControllers.NewScreeningController(screeningService)
 	antrianController := screeningControllers.NewAntrianController(antrianService)
+
+	privilegeController := manajemenControllers.NewPrivilegeController(privilegeService)
+
 
 	//dokterController := dokterControllers.NewDokterController(dokterService)
 
@@ -111,6 +117,12 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.PUT("/role/nonaktifkan", roleController.SoftDeleteRoleHandler, middlewares.JWTMiddleware())
 	management.PUT("/role/aktifkan", roleController.ActivateRoleHandler, middlewares.JWTMiddleware())
 	management.GET("/role/list", roleController.GetRoleListHandler, middlewares.JWTMiddleware())
+
+	// Manajemen Privilege
+	management.POST("/privilege/add", karyawanController.AddPrivilegeHandler, middlewares.JWTMiddleware())
+	management.GET("/privilege", privilegeController.GetAllPrivilegesHandler, middlewares.JWTMiddleware())
+
+
 
 	// Manajemen Shift & CMS
 	management.POST("/shift/assign", shiftController.AssignShiftHandler, middlewares.JWTMiddleware())
