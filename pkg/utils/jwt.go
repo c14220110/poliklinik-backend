@@ -8,28 +8,28 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 )
 
-// Claims terpadu untuk semua role
+// Claims terpadu dengan field flat untuk id_role dan privileges.
 type Claims struct {
-	IDKaryawan string      `json:"id_karyawan"`
-	Role       string      `json:"role"`
-	Privileges interface{} `json:"privileges"` // bisa berupa slice atau map, sesuai kebutuhan
-	IDPoli     int         `json:"id_poli,omitempty"`
-	Username   string      `json:"username"`
+	IDKaryawan string   `json:"id_karyawan"`
+	Role       string   `json:"role"`
+	IDRole     int      `json:"id_role"`
+	Privileges []int    `json:"privileges"`
+	IDPoli     int      `json:"id_poli,omitempty"`
+	Username   string   `json:"username"`
 	jwt.RegisteredClaims
 }
 
-// GenerateJWTToken membuat token JWT dengan klaim terpadu.
-func GenerateJWTToken(idKaryawan string, role string, privileges interface{}, idPoli int, username string) (string, error) {
-	// Ambil secret key dari environment (pastikan sudah di-set)
+// GenerateJWTToken membuat token JWT dengan payload flat.
+func GenerateJWTToken(idKaryawan string, role string, idRole int, privileges []int, idPoli int, username string) (string, error) {
 	jwtKey := []byte(os.Getenv("JWT_SECRET_KEY"))
 	if len(jwtKey) == 0 {
 		return "", fmt.Errorf("JWT secret key is missing")
 	}
 
-	// Buat klaim
 	claims := Claims{
 		IDKaryawan: idKaryawan,
 		Role:       role,
+		IDRole:     idRole,
 		Privileges: privileges,
 		IDPoli:     idPoli,
 		Username:   username,
@@ -44,7 +44,6 @@ func GenerateJWTToken(idKaryawan string, role string, privileges interface{}, id
 	if err != nil {
 		return "", err
 	}
-
 	return tokenString, nil
 }
 
@@ -69,6 +68,5 @@ func ValidateJWTToken(tokenString string) (*Claims, error) {
 	if !token.Valid {
 		return nil, fmt.Errorf("invalid token")
 	}
-
 	return claims, nil
 }

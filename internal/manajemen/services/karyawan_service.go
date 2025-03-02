@@ -171,7 +171,7 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 	}
 	karyawan.Password = string(hashedPassword)
 
-	// 5. Cari Role yang sesuai (role harus sudah ada, jangan buat baru)
+	// 5. Cari Role yang sesuai (role harus sudah ada, tidak membuat role baru)
 	var idRole int64
 	err = tx.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", role).Scan(&idRole)
 	if err == sql.ErrNoRows {

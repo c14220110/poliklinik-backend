@@ -26,15 +26,15 @@ type AddKaryawanRequest struct {
 
 
 type UpdateKaryawanRequest struct {
-    IDKaryawan   int64  `json:"id_karyawan"`
-    NIK          string `json:"nik"`
-    Nama         string `json:"nama"`
-    Username     string `json:"username"`
-    Password     string `json:"password"`
-    TanggalLahir string `json:"tanggal_lahir"`
-    Alamat       string `json:"alamat"`
-    NoTelp       string `json:"no_telp"`
-    Role         string `json:"role"`
+	// Tidak perlu menyertakan id_karyawan di body, karena diambil dari query
+	NIK          string `json:"nik"`
+	Nama         string `json:"nama"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+	TanggalLahir string `json:"tanggal_lahir"`
+	Alamat       string `json:"alamat"`
+	NoTelp       string `json:"no_telp"`
+	Role         string `json:"role"`
 }
 
 type KaryawanController struct {
@@ -142,6 +142,26 @@ func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
 
 
 func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
+	// Ambil id_karyawan dari query parameter
+	idKaryawanStr := c.QueryParam("id_karyawan")
+	if idKaryawanStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_karyawan query parameter is required",
+			"data":    nil,
+		})
+	}
+	idKaryawanInt, err := strconv.Atoi(idKaryawanStr)
+	if err != nil || idKaryawanInt <= 0 {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_karyawan must be a valid number",
+			"data":    nil,
+		})
+	}
+	// Konversi ke int64
+	idKaryawan := int64(idKaryawanInt)
+
 	var req UpdateKaryawanRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
@@ -152,15 +172,14 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 	}
 
 	// Validasi minimal field
-	if req.IDKaryawan == 0 || req.NIK == "" || req.Nama == "" || req.Username == "" || req.Password == "" {
+	if req.NIK == "" || req.Nama == "" || req.Username == "" || req.Password == "" {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "id_karyawan, nik, nama, username, and password are required",
+			"message": "nik, nama, username, and password are required",
 			"data":    nil,
 		})
 	}
 
-	// Parse tanggal_lahir
 	parsedDate, err := time.Parse("2006-01-02", req.TanggalLahir)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
@@ -170,9 +189,9 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 		})
 	}
 
-	// Buat objek Karyawan untuk update (catatan: field jenis_kelamin tidak diupdate jika tidak disediakan)
+	// Buat objek Karyawan untuk update; IDKaryawan diisi dari query parameter yang telah dikonversi
 	karyawan := models.Karyawan{
-		IDKaryawan:   req.IDKaryawan,
+		IDKaryawan:   idKaryawan,
 		NIK:          req.NIK,
 		Nama:         req.Nama,
 		Username:     req.Username,
@@ -193,14 +212,15 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 	}
 
 	// Konversi id_management dari JWT ke integer
-	idManagement, err := strconv.Atoi(claims.IDKaryawan)
-	if err != nil || idManagement <= 0 {
+	idManagementInt, err := strconv.Atoi(claims.IDKaryawan)
+	if err != nil || idManagementInt <= 0 {
 		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,
 			"message": "Invalid management ID in token",
 			"data":    nil,
 		})
 	}
+	idManagement := idManagementInt
 
 	// Panggil service untuk update karyawan
 	updatedID, err := kc.Service.UpdateKaryawan(karyawan, req.Role, idManagement)
@@ -220,6 +240,7 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 		},
 	})
 }
+
 
 
 

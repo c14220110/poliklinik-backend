@@ -12,9 +12,8 @@ import (
 	screeningControllers "github.com/c14220110/poliklinik-backend/internal/screening/controllers"
 	screeningServices "github.com/c14220110/poliklinik-backend/internal/screening/services"
 
-	// Asumsi package dokter sudah ada
-	//dokterControllers "github.com/c14220110/poliklinik-backend/internal/dokter/controllers"
-	//dokterServices "github.com/c14220110/poliklinik-backend/internal/dokter/services"
+	dokterControllers "github.com/c14220110/poliklinik-backend/internal/dokter/controllers"
+	dokterServices "github.com/c14220110/poliklinik-backend/internal/dokter/services"
 
 	"github.com/c14220110/poliklinik-backend/internal/common/middlewares"
 )
@@ -35,7 +34,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	antrianService := screeningServices.NewAntrianService(db)
 	susterService := screeningServices.NewSusterService(db)
 
-	//dokterService := dokterServices.NewDokterService(db) // Asumsi
+	dokterService := dokterServices.NewDokterService(db) // Asumsi
 
 	privilegeService := manajemenServices.NewPrivilegeService(db)
 
@@ -59,7 +58,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	privilegeController := manajemenControllers.NewPrivilegeController(privilegeService)
 
 
-	//dokterController := dokterControllers.NewDokterController(dokterService)
+	dokterController := dokterControllers.NewDokterController(dokterService)
 
 	// Grup API utama
 	api := e.Group("/api")
@@ -67,14 +66,22 @@ func Init(e *echo.Echo, db *sql.DB) {
 	// 1. Administrasi (Aplikasi Pendaftaran & Administrasi)
 	administrasi := api.Group("/administrasi")
 	administrasi.POST("/login", adminController.Login) // Tidak pakai JWT
+
 	administrasi.GET("/polikliniklist", poliklinikController.GetPoliklinikList, middlewares.JWTMiddleware())
 	administrasi.GET("/pasiendata", pasienController.GetAllPasienData, middlewares.JWTMiddleware())
 	administrasi.GET("/pasien", pasienController.ListPasien, middlewares.JWTMiddleware())
 
-	// Kunjungan & antrian
-	administrasi.PUT("/kunjungan", pasienController.UpdateKunjungan, middlewares.JWTMiddleware())
+	// Register, Kunjungan
+	// Terapkan JWTMiddleware terlebih dahulu, lalu RequirePrivilege dengan nilai 1
+	administrasi.POST("/pasien/register", pasienController.RegisterPasien, middlewares.JWTMiddleware(), middlewares.RequirePrivilege(1))
+	administrasi.PUT("/kunjungan", pasienController.UpdateKunjungan, middlewares.JWTMiddleware(), middlewares.RequirePrivilege(1))
+
+
+	//Resched, tunda
 	administrasi.PUT("/kunjungan/reschedule", pasienController.RescheduleAntrianHandler, middlewares.JWTMiddleware())
 	administrasi.PUT("/kunjungan/tunda", pasienController.TundaPasienHandler, middlewares.JWTMiddleware())
+
+	// Antrian
 	administrasi.GET("/antrian/today", pasienController.GetAntrianTodayHandler, middlewares.JWTMiddleware())
 	administrasi.GET("/status_antrian", pasienController.GetAllStatusAntrianHandler, middlewares.JWTMiddleware())
 
@@ -92,8 +99,8 @@ func Init(e *echo.Echo, db *sql.DB) {
 	screening.POST("/masukkan", antrianController.MasukkanPasienHandler, middlewares.JWTMiddleware())
 
 	// 3. Dokter (Website untuk Dokter)
-	// dokter := api.Group("/dokter")
-	// dokter.POST("/login", dokterController.Login, middlewares.JWTMiddleware())         // Dokter login
+	dokter := api.Group("/dokter")
+	dokter.POST("/login", dokterController.LoginDokter)         // Tidak pakai JWT
 	// dokter.GET("/antrian", dokterController.GetAntrianList, middlewares.JWTMiddleware())  // List antrian
 	// dokter.GET("/detail", dokterController.GetPasienDetail, middlewares.JWTMiddleware())  // Rincian data pasien
 	// dokter.POST("/assessment", dokterController.AddAssessment, middlewares.JWTMiddleware()) // Tambah assessment

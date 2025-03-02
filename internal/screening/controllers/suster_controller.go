@@ -49,16 +49,12 @@ func (sc *SusterController) LoginSuster(c echo.Context) error {
 		})
 	}
 
-	extraClaims := map[string]interface{}{
-		"id_karyawan": suster.ID_Suster,
-		"id_role":     suster.ID_Role,
-		"privileges":  suster.Privileges,
-	}
-
+	// Generate token JWT secara flat
 	token, err := utils.GenerateJWTToken(
 		strconv.Itoa(suster.ID_Suster),
 		"Suster",
-		extraClaims,
+		suster.ID_Role,
+		suster.Privileges,
 		req.IDPoli,
 		suster.Username,
 	)

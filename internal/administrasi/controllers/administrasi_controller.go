@@ -41,18 +41,13 @@ func (ac *AdministrasiController) Login(c echo.Context) error {
 		})
 	}
 
-	// Buat klaim tambahan sebagai map
-	extraClaims := map[string]interface{}{
-		"id_karyawan": admin.ID_Admin,
-		"id_role":     admin.ID_Role,
-		"privileges":  admin.Privileges,
-	}
-
+	// Gunakan fungsi GenerateJWTToken dengan parameter flat
 	token, err := utils.GenerateJWTToken(
 		strconv.Itoa(admin.ID_Admin),
 		"Administrasi",
-		extraClaims,
-		0,
+		admin.ID_Role,
+		admin.Privileges,
+		0, // idPoli tidak berlaku untuk administrasi
 		admin.Username,
 	)
 	if err != nil {

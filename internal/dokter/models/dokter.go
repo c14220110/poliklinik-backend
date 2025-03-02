@@ -2,13 +2,16 @@ package models
 
 import "time"
 
-// Dokter mewakili data Karyawan yang memiliki peran Dokter.
+// Dokter merepresentasikan data dokter pada sistem.
+// Field Password biasanya tidak dikirim dalam response (disembunyikan dengan tag JSON "-").
 type Dokter struct {
-	ID_Dokter int       `json:"id_dokter" db:"ID_Karyawan"` // gunakan ID_Karyawan sebagai ID_Dokter
-	Nama      string    `json:"nama" db:"Nama"`
-	Username  string    `json:"username" db:"Username"`
-	Password  string    `json:"password" db:"Password"`
-	// Spesialisasi bisa ditentukan dari Detail_Role_Karyawan atau di-set default
-	Spesialisasi string    `json:"spesialisasi" db:"Spesialisasi"`
-	CreatedAt    time.Time `json:"created_at" db:"Created_At"`
+	ID_Dokter  int        `json:"id_dokter"`
+	Nama       string     `json:"nama"`
+	Username   string     `json:"username"`
+	Password   string     `json:"-"` // tidak akan di-encode dalam JSON
+	ID_Role    int        `json:"id_role"`
+	Privileges []int      `json:"privileges"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	DeletedAt  *time.Time `json:"deleted_at,omitempty"`
 }
