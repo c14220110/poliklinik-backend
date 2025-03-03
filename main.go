@@ -21,7 +21,7 @@ import (
 
 func main() {
 	// Load file .env
-	if err := godotenv.Load("app.env"); err != nil {
+	if err := godotenv.Load(".env"); err != nil {
 		slog.Error("Error loading app.env file", "reason", err)
 		os.Exit(1)
 	}
