@@ -15,8 +15,6 @@ func NewScreeningService(db *sql.DB) *ScreeningService {
 	return &ScreeningService{DB: db}
 }
 
-// InputScreening menyimpan data screening dan mengaitkan record screening tersebut ke record Riwayat_Kunjungan
-// untuk pasien yang belum diisi screening (ID_Screening masih NULL) pada kunjungan terbaru.
 func (s *ScreeningService) InputScreening(screening models.Screening) (int64, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -51,7 +49,7 @@ func (s *ScreeningService) InputScreening(screening models.Screening) (int64, er
 	}
 
 	// 2. Cari record Riwayat_Kunjungan untuk pasien yang belum diisi screening.
-	// Pertama, ambil ID_RM dari Rekam_Medis untuk pasien tersebut (record terbaru)
+	// Ambil ID_RM dari Rekam_Medis untuk pasien tersebut (record terbaru)
 	var idRM int64
 	err = tx.QueryRow(`
 		SELECT ID_RM FROM Rekam_Medis 
@@ -63,7 +61,7 @@ func (s *ScreeningService) InputScreening(screening models.Screening) (int64, er
 		return 0, fmt.Errorf("failed to get ID_RM: %v", err)
 	}
 
-	// Kemudian, cari record Riwayat_Kunjungan dengan ID_RM tersebut dan di mana ID_Screening masih NULL,
+	// Cari record Riwayat_Kunjungan dengan ID_RM tersebut dan di mana ID_Screening masih NULL,
 	// ambil record terbaru.
 	var idKunjungan int64
 	err = tx.QueryRow(`
@@ -85,6 +83,27 @@ func (s *ScreeningService) InputScreening(screening models.Screening) (int64, er
 	if err != nil {
 		tx.Rollback()
 		return 0, err
+	}
+
+	// 4. Update status di tabel Antrian: ambil id_antrian dari Riwayat_Kunjungan dan set id_status menjadi 4
+	var idAntrian int64
+	err = tx.QueryRow(`
+		SELECT ID_Antrian FROM Riwayat_Kunjungan 
+		WHERE ID_Kunjungan = ?
+	`, idKunjungan).Scan(&idAntrian)
+	if err != nil {
+		tx.Rollback()
+		return 0, fmt.Errorf("failed to get id_antrian from Riwayat_Kunjungan: %v", err)
+	}
+
+	_, err = tx.Exec(`
+		UPDATE Antrian 
+		SET id_status = 4 
+		WHERE id_antrian = ?
+	`, idAntrian)
+	if err != nil {
+		tx.Rollback()
+		return 0, fmt.Errorf("failed to update Antrian status: %v", err)
 	}
 
 	if err = tx.Commit(); err != nil {

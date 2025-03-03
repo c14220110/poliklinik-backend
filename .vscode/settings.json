@@ -1,0 +1,6 @@
+{
+  "go.lintFlags": [
+    "--exclude-use-default=false",
+    "--exclude-files=/usr/local/go/src/*"
+  ]
+}

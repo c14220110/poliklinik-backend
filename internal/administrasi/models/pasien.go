@@ -2,17 +2,16 @@ package models
 
 import "time"
 
-// Pasien mewakili data pasien sesuai dengan tabel Pasien di database.
 type Pasien struct {
-	ID                int       `json:"id" db:"ID_Pasien"`
-	Nama              string    `json:"nama" db:"Nama"`
-	TanggalLahir      time.Time `json:"tanggal_lahir" db:"Tanggal_Lahir"`
-	JenisKelamin      string    `json:"jenis_kelamin" db:"Jenis_Kelamin"`
-	TempatLahir       string    `json:"tempat_lahir" db:"Tempat_Lahir"`
-	NIK               string    `json:"nik" db:"NIK"`
-	Kelurahan         string    `json:"kelurahan" db:"Kelurahan"`
-	Kecamatan         string    `json:"kecamatan" db:"Kecamatan"`
-	Alamat            string    `json:"alamat" db:"Alamat"`
-	NoTelp            string    `json:"no_telp" db:"No_Telp"`
-	TanggalRegistrasi time.Time `json:"tanggal_registrasi" db:"Tanggal_Registrasi"`
+	IDPasien      int       `json:"id_pasien"`
+	Nama          string    `json:"nama"`
+	TanggalLahir  time.Time `json:"tanggal_lahir"`
+	JenisKelamin  string    `json:"jenis_kelamin"`
+	TempatLahir   string    `json:"tempat_lahir"`
+	NIK           string    `json:"nik"`
+	Kelurahan     string    `json:"kelurahan"`
+	Kecamatan     string    `json:"kecamatan"`
+	KotaTinggal   string    `json:"kota_tinggal"`
+	Alamat        string    `json:"alamat"`
+	NoTelp        string    `json:"no_telp"`
 }
