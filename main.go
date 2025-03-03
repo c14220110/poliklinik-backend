@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/c14220110/poliklinik-backend/config"
-	"github.com/c14220110/poliklinik-backend/internal/common/middlewares"
+
 	"github.com/c14220110/poliklinik-backend/internal/routes"
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
+	sembarang "github.com/labstack/echo/v4/middleware"
 
 	"github.com/c14220110/poliklinik-backend/pkg/storage/mariadb"
 )
@@ -38,7 +39,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
 	// Terapkan middleware global (misalnya CORS)
-	e.Use(middlewares.CORSMiddleware())
+	e.Use(sembarang.CORSWithConfig(sembarang.DefaultCORSConfig))
 
 	// Daftarkan semua routes
 	routes.Init(e, db)
