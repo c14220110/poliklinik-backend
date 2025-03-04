@@ -70,17 +70,17 @@ func Init(e *echo.Echo, db *sql.DB) {
 	// 1. Administrasi (Aplikasi Pendaftaran & Administrasi)
 	administrasi := api.Group("/administrasi")
 	administrasi.POST("/login", adminController.Login) // Tidak pakai JWT
-	administrasi.GET("/pasiendata", pasienController.GetAllPasienData, middlewares.JWTMiddleware())
-	administrasi.GET("/pasien", pasienController.ListPasien, middlewares.JWTMiddleware())
+	administrasi.GET("/pasien", pasienController.GetAllPasienData, middlewares.JWTMiddleware())
 	administrasi.POST("/pasien/register", pasienController.RegisterPasien, middlewares.JWTMiddleware(), middlewares.RequirePrivilege(1))
 	administrasi.PUT("/kunjungan", pasienController.UpdateKunjungan, middlewares.JWTMiddleware(), middlewares.RequirePrivilege(1))
 	administrasi.PUT("/kunjungan/reschedule", pasienController.RescheduleAntrianHandler, middlewares.JWTMiddleware())
 	administrasi.PUT("/kunjungan/tunda", pasienController.TundaPasienHandler, middlewares.JWTMiddleware())
 	administrasi.GET("/antrian/today", pasienController.GetAntrianTodayHandler, middlewares.JWTMiddleware())
 	administrasi.GET("/status_antrian", pasienController.GetAllStatusAntrianHandler, middlewares.JWTMiddleware())
+	administrasi.GET("/poliklinik", poliklinikController.GetPoliklinikList, middlewares.JWTMiddleware())
+
 	billing := administrasi.Group("/billing")
-	billing.GET("/recent", billingController.ListBilling, middlewares.JWTMiddleware())
-	billing.GET("/detail", billingController.BillingDetail, middlewares.JWTMiddleware())
+	billing.GET("", billingController.ListBilling, middlewares.JWTMiddleware())
 
 	// 2. Screening / Suster (Aplikasi Screening)
 	screening := api.Group("/screening")

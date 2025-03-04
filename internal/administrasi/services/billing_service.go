@@ -2,10 +2,12 @@ package services
 
 import (
 	"database/sql"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
-// BillingService menangani logika bisnis untuk data Billing.
 type BillingService struct {
 	DB *sql.DB
 }
@@ -14,106 +16,81 @@ func NewBillingService(db *sql.DB) *BillingService {
 	return &BillingService{DB: db}
 }
 
-// GetRecentBilling mengambil data billing dengan kolom:
-// - nama (Pasien.Nama)
-// - id_rm (Rekam_Medis.ID_RM)
-// - nama_poli (Poliklinik.Nama_Poli, diambil dari join tabel Antrian)
-// - status (Billing.Status)
-// - id_billing (Billing.ID_Billing)
-// Jika filterStatus tidak nil, query akan membatasi data billing berdasarkan status.
-func (s *BillingService) GetRecentBilling(filterStatus *int) ([]map[string]interface{}, error) {
-	// Query untuk join antara Billing, Pasien, Rekam_Medis, Antrian, dan Poliklinik.
-	// Perhatikan: karena tabel Billing tidak langsung memiliki ID_Poli, kita join dengan tabel Antrian.
+// GetBillingData mengambil data billing dengan join ke Pasien, Rekam_Medis, dan Poliklinik.
+// Filter:
+//   - idPoliFilter: jika tidak kosong, filter berdasarkan poliklinik
+//   - statusFilter: jika tidak kosong, filter berdasarkan Billing.id_status (1=Belum, 2=Diproses, 3=Selesai, 4=Dibatalkan)
+// Jika salah satu kosong, ambil semua.
+func (s *BillingService) GetBillingData(idPoliFilter, statusFilter string) ([]map[string]interface{}, error) {
+	// Query dengan join ke tabel terkait dan Status_Billing untuk mendapatkan status text.
 	query := `
-		SELECT 
-			p.Nama, 
-			rm.ID_RM, 
-			pl.Nama_Poli, 
-			b.Status, 
-			b.ID_Billing
+		SELECT p.id_pasien, p.nama, rm.id_rm, pl.nama_poli, sb.status
 		FROM Billing b
-		JOIN Pasien p ON b.ID_Pasien = p.ID_Pasien
-		LEFT JOIN Rekam_Medis rm ON p.ID_Pasien = rm.ID_Pasien
-		LEFT JOIN Antrian a ON p.ID_Pasien = a.ID_Pasien
-		LEFT JOIN Poliklinik pl ON a.ID_Poli = pl.ID_Poli
+		JOIN Status_Billing sb ON b.id_status = sb.id_status
+		JOIN Riwayat_Kunjungan rk ON b.id_kunjungan = rk.id_kunjungan
+		JOIN Rekam_Medis rm ON rk.id_rm = rm.id_rm
+		JOIN Pasien p ON rm.id_pasien = p.id_pasien
+		JOIN Kunjungan_Poli kp ON rk.id_kunjungan = kp.id_kunjungan
+		JOIN Poliklinik pl ON kp.id_poli = pl.id_poli
 	`
-	// Jika ada filter berdasarkan status billing, tambahkan klausa WHERE.
-	if filterStatus != nil {
-		query += " WHERE b.Status = ?"
-	}
-	query += " ORDER BY b.Created_At DESC"
+	conditions := []string{}
+	args := []interface{}{}
 
-	var rows *sql.Rows
-	var err error
-	if filterStatus != nil {
-		rows, err = s.DB.Query(query, *filterStatus)
-	} else {
-		rows, err = s.DB.Query(query)
+	// Filter data Billing hanya untuk hari ini
+	today := time.Now().Format("2006-01-02")
+	conditions = append(conditions, "DATE(b.created_at) = ?")
+	args = append(args, today)
+
+	// Filter berdasarkan id_poli jika disediakan
+	if idPoliFilter != "" {
+		idPoli, err := strconv.Atoi(idPoliFilter)
+		if err != nil {
+			return nil, fmt.Errorf("invalid id_poli value: %v", err)
+		}
+		conditions = append(conditions, "pl.id_poli = ?")
+		args = append(args, idPoli)
 	}
+
+	// Filter berdasarkan status jika disediakan
+	if statusFilter != "" {
+		st, err := strconv.Atoi(statusFilter)
+		if err != nil {
+			return nil, fmt.Errorf("invalid status value: %v", err)
+		}
+		conditions = append(conditions, "b.id_status = ?")
+		args = append(args, st)
+	}
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	query += " ORDER BY p.id_pasien DESC"
+
+	rows, err := s.DB.Query(query, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query error: %v", err)
 	}
 	defer rows.Close()
 
-	var result []map[string]interface{}
+	var results []map[string]interface{}
 	for rows.Next() {
+		var idPasien int
 		var nama string
-		var idRM sql.NullInt64
-		var namaPoli sql.NullString
-		var status int
-		var idBilling int
-
-		if err := rows.Scan(&nama, &idRM, &namaPoli, &status, &idBilling); err != nil {
-			return nil, err
+		var idRM int
+		var namaPoli string
+		var statusStr string // Scan status as string
+		if err := rows.Scan(&idPasien, &nama, &idRM, &namaPoli, &statusStr); err != nil {
+			return nil, fmt.Errorf("scan error: %v", err)
 		}
-
 		record := map[string]interface{}{
-			"nama":       nama,
-			"id_rm":      nil,
-			"nama_poli":  nil,
-			"status":     status,
-			"id_billing": idBilling,
+			"id_pasien":   idPasien,
+			"nama_pasien": nama,
+			"id_rm":       idRM,
+			"nama_poli":   namaPoli,
+			"status":      statusStr,
 		}
-
-		if idRM.Valid {
-			record["id_rm"] = idRM.Int64
-		}
-		if namaPoli.Valid {
-			record["nama_poli"] = namaPoli.String
-		}
-
-		result = append(result, record)
+		results = append(results, record)
 	}
-
-	return result, nil
-}
-
-
-// GetBillingDetail mengambil detail billing untuk pasien tertentu.
-func (s *BillingService) GetBillingDetail(idPasien int) (map[string]interface{}, error) {
-	query := `
-		SELECT p.Nama, rm.ID_RM, d.Nama, b.Status, b.Created_At
-		FROM Billing b
-		JOIN Pasien p ON b.ID_Pasien = p.ID_Pasien
-		LEFT JOIN Rekam_Medis rm ON p.ID_Pasien = rm.ID_Pasien
-		LEFT JOIN Dokter d ON rm.ID_Dokter = d.ID_Dokter
-		WHERE p.ID_Pasien = ?
-		LIMIT 1
-	`
-	row := s.DB.QueryRow(query, idPasien)
-	var namaPasien, namaDokter string
-	var idRM sql.NullInt64
-	var status int
-	var createdAt time.Time
-	if err := row.Scan(&namaPasien, &idRM, &namaDokter, &status, &createdAt); err != nil {
-		return nil, err
-	}
-	detail := map[string]interface{}{
-		"nama_pasien": namaPasien,
-		"nomor_rm":    idRM.Int64,
-		"nama_dokter": namaDokter,
-		"status":      status,
-		"tanggal_jam": createdAt,
-	}
-	return detail, nil
+	return results, nil
 }

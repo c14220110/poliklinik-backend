@@ -105,23 +105,6 @@ func (pc *PasienController) RegisterPasien(c echo.Context) error {
 	})
 }
 
-
-func (pc *PasienController) ListPasien(c echo.Context) error {
-    list, err := pc.Service.GetListPasien()
-    if err != nil {
-        return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-            "status":  http.StatusInternalServerError,
-            "message": "Gagal mengambil data pasien: " + err.Error(),
-            "data":    nil,
-        })
-    }
-    return c.JSON(http.StatusOK, map[string]interface{}{
-        "status":  http.StatusOK,
-        "message": "Data pasien berhasil diambil",
-        "data":    list,
-    })
-}
-
 func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 	var req ExtendedPasienRequest
 	if err := c.Bind(&req); err != nil {

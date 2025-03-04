@@ -21,7 +21,7 @@ func (s *AntrianService) MasukkanPasien(idPoli int) error {
 	query := `
 		SELECT id_antrian 
 		FROM Antrian 
-		WHERE id_poli = ? AND id_status = 0 
+		WHERE id_poli = ? AND id_status = 1 
 		ORDER BY nomor_antrian ASC 
 		LIMIT 1
 	`
@@ -29,16 +29,16 @@ func (s *AntrianService) MasukkanPasien(idPoli int) error {
 	err := s.DB.QueryRow(query, idPoli).Scan(&idAntrian)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Tidak ditemukan baris dengan status 0 atau id_poli tidak ada.
-			return fmt.Errorf("tidak ada pasien dengan status 0 untuk poli dengan id %d", idPoli)
+			// Tidak ditemukan baris dengan status 1 atau id_poli tidak ada.
+			return fmt.Errorf("tidak ada pasien dengan status 1 untuk poli dengan id %d", idPoli)
 		}
 		return err
 	}
 
-	// Update baris yang ditemukan, ubah id_status menjadi 2.
+	// Update baris yang ditemukan, ubah id_status menjadi 3.
 	updateQuery := `
 		UPDATE Antrian 
-		SET id_status = 2 
+		SET id_status = 3 
 		WHERE id_antrian = ?
 	`
 	res, err := s.DB.Exec(updateQuery, idAntrian)
@@ -61,7 +61,7 @@ func (s *AntrianService) GetAntrianTerlama(idPoli int) (map[string]interface{}, 
 	query := `
 		SELECT id_antrian, nomor_antrian 
     FROM Antrian 
-    WHERE id_poli = ? AND id_status = 0 
+    WHERE id_poli = ? AND id_status = 1 
     ORDER BY nomor_antrian ASC 
     LIMIT 1
 		`
