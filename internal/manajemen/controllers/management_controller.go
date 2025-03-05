@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/services"
 	"github.com/c14220110/poliklinik-backend/pkg/utils"
@@ -51,6 +52,7 @@ func (mc *ManagementController) Login(c echo.Context) error {
 	}
 
 	// Karena management tidak memiliki role/privilege, kita set idRole = 0 dan privileges sebagai slice kosong.
+	// Gunakan exp yang lama (misalnya, 999999 jam ke depan).
 	token, err := utils.GenerateJWTToken(
 		strconv.Itoa(m.ID_Management),
 		"Manajemen",
@@ -58,6 +60,7 @@ func (mc *ManagementController) Login(c echo.Context) error {
 		[]int{},   // privileges kosong
 		0,         // idPoli tidak berlaku untuk management
 		m.Username,
+		time.Now().Add(999999 * time.Hour),
 	)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{

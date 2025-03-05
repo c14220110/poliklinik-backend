@@ -19,8 +19,8 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// GenerateJWTToken membuat token JWT dengan payload flat.
-func GenerateJWTToken(idKaryawan string, role string, idRole int, privileges []int, idPoli int, username string) (string, error) {
+// GenerateJWTToken membuat token JWT dengan payload flat dan exp sesuai parameter.
+func GenerateJWTToken(idKaryawan string, role string, idRole int, privileges []int, idPoli int, username string, exp time.Time) (string, error) {
 	jwtKey := []byte(os.Getenv("JWT_SECRET_KEY"))
 	if len(jwtKey) == 0 {
 		return "", fmt.Errorf("JWT secret key is missing")
@@ -34,7 +34,7 @@ func GenerateJWTToken(idKaryawan string, role string, idRole int, privileges []i
 		IDPoli:     idPoli,
 		Username:   username,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(999999 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(exp),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -46,6 +46,7 @@ func GenerateJWTToken(idKaryawan string, role string, idRole int, privileges []i
 	}
 	return tokenString, nil
 }
+
 
 // ValidateJWTToken memvalidasi token JWT dan mengembalikan klaim terpadu.
 func ValidateJWTToken(tokenString string) (*Claims, error) {

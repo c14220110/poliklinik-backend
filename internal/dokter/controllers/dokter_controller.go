@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/dokter/services"
 	"github.com/c14220110/poliklinik-backend/pkg/utils"
@@ -49,6 +50,15 @@ func (dc *DokterController) LoginDokter(c echo.Context) error {
 		})
 	}
 
+	// Hitung waktu expiration berdasarkan custom_jam_selesai shift aktif
+	today := time.Now().Format("2006-01-02")
+	expStr := today + " " + shift.CustomJamSelesai
+	expTime, err := time.Parse("2006-01-02 15:04:05", expStr)
+	if err != nil {
+		// Jika parsing gagal, fallback ke 1 jam dari sekarang
+		expTime = time.Now().Add(1 * time.Hour)
+	}
+
 	token, err := utils.GenerateJWTToken(
 		strconv.Itoa(dokter.ID_Dokter),
 		"Dokter",
@@ -56,6 +66,7 @@ func (dc *DokterController) LoginDokter(c echo.Context) error {
 		dokter.Privileges,
 		req.IDPoli,
 		dokter.Username,
+		expTime,
 	)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{

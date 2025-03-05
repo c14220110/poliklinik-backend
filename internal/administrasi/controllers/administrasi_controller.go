@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/administrasi/services"
 	"github.com/c14220110/poliklinik-backend/pkg/utils"
@@ -41,7 +42,8 @@ func (ac *AdministrasiController) Login(c echo.Context) error {
 		})
 	}
 
-	// Gunakan fungsi GenerateJWTToken dengan parameter flat
+	// Set exp token untuk administrasi dengan durasi yang lama
+	expTime := time.Now().Add(999999 * time.Hour)
 	token, err := utils.GenerateJWTToken(
 		strconv.Itoa(admin.ID_Admin),
 		"Administrasi",
@@ -49,6 +51,7 @@ func (ac *AdministrasiController) Login(c echo.Context) error {
 		admin.Privileges,
 		0, // idPoli tidak berlaku untuk administrasi
 		admin.Username,
+		expTime,
 	)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
