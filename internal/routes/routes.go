@@ -71,8 +71,8 @@ func Init(e *echo.Echo, db *sql.DB) {
 	administrasi := api.Group("/administrasi")
 	administrasi.POST("/login", adminController.Login) // Tidak pakai JWT
 	administrasi.GET("/pasien", pasienController.GetAllPasienData, middlewares.JWTMiddleware())
-	administrasi.POST("/pasien/register", pasienController.RegisterPasien, middlewares.JWTMiddleware(), middlewares.RequirePrivilege(1))
-	administrasi.PUT("/kunjungan", pasienController.UpdateKunjungan, middlewares.JWTMiddleware(), middlewares.RequirePrivilege(1))
+	administrasi.POST("/pasien/register", pasienController.RegisterPasien, middlewares.JWTMiddleware())
+	administrasi.PUT("/kunjungan", pasienController.UpdateKunjungan, middlewares.JWTMiddleware())
 	administrasi.PUT("/kunjungan/reschedule", pasienController.RescheduleAntrianHandler, middlewares.JWTMiddleware())
 	administrasi.PUT("/kunjungan/tunda", pasienController.TundaPasienHandler, middlewares.JWTMiddleware())
 	administrasi.GET("/antrian/today", pasienController.GetAntrianTodayHandler, middlewares.JWTMiddleware())
