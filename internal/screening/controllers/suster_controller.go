@@ -96,4 +96,3 @@ func (sc *SusterController) LoginSuster(c echo.Context) error {
 		},
 	})
 }
-
