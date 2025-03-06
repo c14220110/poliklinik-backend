@@ -66,6 +66,7 @@ func (dc *DokterController) LoginDokter(c echo.Context) error {
 		dokter.Privileges,
 		req.IDPoli,
 		dokter.Username,
+		dokter.Nama, // Menambahkan nama dokter ke token
 		expTime,
 	)
 	if err != nil {

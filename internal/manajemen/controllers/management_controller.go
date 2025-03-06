@@ -53,6 +53,7 @@ func (mc *ManagementController) Login(c echo.Context) error {
 
 	// Karena management tidak memiliki role/privilege, kita set idRole = 0 dan privileges sebagai slice kosong.
 	// Gunakan exp yang lama (misalnya, 999999 jam ke depan).
+	expTime := time.Now().Add(999999 * time.Hour)
 	token, err := utils.GenerateJWTToken(
 		strconv.Itoa(m.ID_Management),
 		"Manajemen",
@@ -60,7 +61,8 @@ func (mc *ManagementController) Login(c echo.Context) error {
 		[]int{},   // privileges kosong
 		0,         // idPoli tidak berlaku untuk management
 		m.Username,
-		time.Now().Add(999999 * time.Hour),
+		m.Nama,    // Menambahkan nama management ke payload
+		expTime,
 	)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{

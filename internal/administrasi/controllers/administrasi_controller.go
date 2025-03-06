@@ -42,7 +42,7 @@ func (ac *AdministrasiController) Login(c echo.Context) error {
 		})
 	}
 
-	// Set exp token untuk administrasi dengan durasi yang lama
+	// Set expiration token dengan durasi yang panjang untuk administrasi
 	expTime := time.Now().Add(999999 * time.Hour)
 	token, err := utils.GenerateJWTToken(
 		strconv.Itoa(admin.ID_Admin),
@@ -51,6 +51,7 @@ func (ac *AdministrasiController) Login(c echo.Context) error {
 		admin.Privileges,
 		0, // idPoli tidak berlaku untuk administrasi
 		admin.Username,
+		admin.Nama,
 		expTime,
 	)
 	if err != nil {
@@ -61,14 +62,10 @@ func (ac *AdministrasiController) Login(c echo.Context) error {
 		})
 	}
 
+	// Kembalikan hanya token saja
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Login successful",
-		"data": map[string]interface{}{
-			"id":       admin.ID_Admin,
-			"nama":     admin.Nama,
-			"username": admin.Username,
-			"token":    token,
-		},
+		"data":    token,
 	})
 }

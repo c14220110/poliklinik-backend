@@ -51,16 +51,15 @@ func (sc *SusterController) LoginSuster(c echo.Context) error {
 	}
 
 	// Hitung waktu expiration berdasarkan custom_jam_selesai shift aktif.
-	// Gabungkan tanggal hari ini dengan custom_jam_selesai.
 	today := time.Now().Format("2006-01-02")
 	expStr := today + " " + shift.CustomJamSelesai
 	expTime, err := time.Parse("2006-01-02 15:04:05", expStr)
 	if err != nil {
-		// Jika gagal parsing, fallback ke exp default (misalnya, 1 jam)
+		// Jika gagal parsing, fallback ke 1 jam dari sekarang.
 		expTime = time.Now().Add(1 * time.Hour)
 	}
 
-	// Generate token JWT dengan exp yang telah ditentukan.
+	// Generate token JWT dengan memasukkan nama suster ke dalam payload.
 	token, err := utils.GenerateJWTToken(
 		strconv.Itoa(suster.ID_Suster),
 		"Suster",
@@ -68,6 +67,7 @@ func (sc *SusterController) LoginSuster(c echo.Context) error {
 		suster.Privileges,
 		req.IDPoli,
 		suster.Username,
+		suster.Nama, // Menyertakan nama suster
 		expTime,
 	)
 	if err != nil {
