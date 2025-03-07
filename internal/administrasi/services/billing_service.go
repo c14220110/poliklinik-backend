@@ -22,9 +22,9 @@ func NewBillingService(db *sql.DB) *BillingService {
 //   - statusFilter: jika tidak kosong, filter berdasarkan Billing.id_status (1=Belum, 2=Diproses, 3=Selesai, 4=Dibatalkan)
 // Jika salah satu kosong, ambil semua.
 func (s *BillingService) GetBillingData(idPoliFilter, statusFilter string) ([]map[string]interface{}, error) {
-	// Query dengan join ke tabel terkait dan Status_Billing untuk mendapatkan status text.
+	// Query dengan join ke tabel terkait, termasuk Status_Billing dan Riwayat_Kunjungan untuk mengambil id_kunjungan.
 	query := `
-		SELECT p.id_pasien, p.nama, rm.id_rm, pl.nama_poli, sb.status
+		SELECT p.id_pasien, p.nama, rm.id_rm, pl.nama_poli, sb.status, rk.id_kunjungan
 		FROM Billing b
 		JOIN Status_Billing sb ON b.id_status = sb.id_status
 		JOIN Riwayat_Kunjungan rk ON b.id_kunjungan = rk.id_kunjungan
@@ -36,7 +36,7 @@ func (s *BillingService) GetBillingData(idPoliFilter, statusFilter string) ([]ma
 	conditions := []string{}
 	args := []interface{}{}
 
-	// Filter data Billing hanya untuk hari ini
+	// Filter data Billing hanya untuk hari ini (berdasarkan created_at Billing)
 	today := time.Now().Format("2006-01-02")
 	conditions = append(conditions, "DATE(b.created_at) = ?")
 	args = append(args, today)
@@ -79,16 +79,18 @@ func (s *BillingService) GetBillingData(idPoliFilter, statusFilter string) ([]ma
 		var nama string
 		var idRM int
 		var namaPoli string
-		var statusStr string // Scan status as string
-		if err := rows.Scan(&idPasien, &nama, &idRM, &namaPoli, &statusStr); err != nil {
+		var statusStr string
+		var idKunjungan int
+		if err := rows.Scan(&idPasien, &nama, &idRM, &namaPoli, &statusStr, &idKunjungan); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
 		record := map[string]interface{}{
-			"id_pasien":   idPasien,
-			"nama_pasien": nama,
-			"id_rm":       idRM,
-			"nama_poli":   namaPoli,
-			"status":      statusStr,
+			"id_pasien":    idPasien,
+			"nama_pasien":  nama,
+			"id_rm":        idRM,
+			"nama_poli":    namaPoli,
+			"status":       statusStr,
+			"id_kunjungan": idKunjungan,
 		}
 		results = append(results, record)
 	}
