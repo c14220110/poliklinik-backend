@@ -157,3 +157,50 @@ func (s *ShiftService) SoftDeleteShiftKaryawan(idShiftKaryawan int, idManagement
 	}
 	return nil
 }
+
+func (ps *ShiftService) GetShiftPoliList() ([]map[string]interface{}, error) {
+	// Query ini mengambil data shift dan menghitung jumlah tenaga kesehatan yang aktif di masing-masing shift hari ini.
+	query := `
+		SELECT 
+			s.id_shift, 
+			s.jam_mulai, 
+			s.jam_selesai,
+			CASE 
+				WHEN s.id_shift = 1 THEN 'Shift Pagi'
+				WHEN s.id_shift = 2 THEN 'Shift Sore'
+				ELSE 'Shift Lainnya'
+			END AS nama_shift,
+			COUNT(sk.id_karyawan) AS jumlah_tenkes
+		FROM Shift s
+		LEFT JOIN Shift_Karyawan sk 
+			ON s.id_shift = sk.id_shift 
+			AND sk.tanggal = CURDATE() 
+			AND CURTIME() BETWEEN sk.custom_jam_mulai AND sk.custom_jam_selesai
+		GROUP BY s.id_shift, s.jam_mulai, s.jam_selesai
+		ORDER BY s.id_shift
+	`
+	rows, err := ps.DB.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("query error: %v", err)
+	}
+	defer rows.Close()
+
+	var results []map[string]interface{}
+	for rows.Next() {
+		var idShift int
+		var jamMulai, jamSelesai, namaShift string
+		var jumlahTenkes int
+		if err := rows.Scan(&idShift, &jamMulai, &jamSelesai, &namaShift, &jumlahTenkes); err != nil {
+			return nil, fmt.Errorf("scan error: %v", err)
+		}
+		record := map[string]interface{}{
+			"id_shift":      idShift,
+			"nama_shift":    namaShift,
+			"jam_mulai":     jamMulai,
+			"jam_selesai":   jamSelesai,
+			"jumlah_tenkes": jumlahTenkes,
+		}
+		results = append(results, record)
+	}
+	return results, nil
+}

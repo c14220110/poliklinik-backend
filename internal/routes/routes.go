@@ -132,6 +132,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.POST("/shift/assign", shiftController.AssignShiftHandler, middlewares.JWTMiddleware())
 	management.PUT("/shift/updateCustom", shiftController.UpdateCustomShiftHandler, middlewares.JWTMiddleware())
 	management.PUT("/shift/soft-delete", shiftController.SoftDeleteShiftHandler, middlewares.JWTMiddleware())
+	management.GET("/shift", shiftController.GetShiftPoliList, middlewares.JWTMiddleware())
 	management.GET("/cms", cmsController.GetCMSByPoliklinikHandler, middlewares.JWTMiddleware())
 	management.GET("/cms/all", cmsController.GetAllCMSHandler, middlewares.JWTMiddleware())
 	management.POST("/cms/create", cmsController.CreateCMSHandler, middlewares.JWTMiddleware())

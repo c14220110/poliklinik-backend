@@ -232,3 +232,19 @@ func (sc *ShiftController) SoftDeleteShiftHandler(c echo.Context) error {
 		"data":    nil,
 	})
 }
+
+func (spc *ShiftController) GetShiftPoliList(c echo.Context) error {
+	list, err := spc.Service.GetShiftPoliList()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve shift poli list: " + err.Error(),
+			"data":    nil,
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Shift poli list retrieved successfully",
+		"data":    list,
+	})
+}
