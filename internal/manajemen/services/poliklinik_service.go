@@ -222,3 +222,33 @@ func (ps *PoliklinikService) UpdatePoliklinikWithOptionalLogo(idPoli int, namaPo
 	}
 	return nil
 }
+
+func (ps *PoliklinikService) GetActivePoliklinikList() ([]map[string]interface{}, error) {
+	// Query hanya mengambil poliklinik yang aktif (id_status = 1) dan hanya kolom id_poli dan nama_poli.
+	query := `
+		SELECT id_poli, nama_poli
+		FROM Poliklinik
+		WHERE id_status = ?
+		ORDER BY id_poli
+	`
+	rows, err := ps.DB.Query(query, 1)
+	if err != nil {
+		return nil, fmt.Errorf("query error: %v", err)
+	}
+	defer rows.Close()
+
+	var list []map[string]interface{}
+	for rows.Next() {
+		var idPoli int
+		var namaPoli string
+		if err := rows.Scan(&idPoli, &namaPoli); err != nil {
+			return nil, fmt.Errorf("scan error: %v", err)
+		}
+		record := map[string]interface{}{
+			"id_poli":   idPoli,
+			"nama_poli": namaPoli,
+		}
+		list = append(list, record)
+	}
+	return list, nil
+}

@@ -313,3 +313,19 @@ func (pc *PoliklinikController) UpdatePoliklinikHandler(c echo.Context) error {
 		},
 	})
 }
+
+func (pc *PoliklinikController) GetActivePoliklinikList(c echo.Context) error {
+	list, err := pc.Service.GetActivePoliklinikList()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve active poliklinik list: " + err.Error(),
+			"data":    nil,
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Active poliklinik list retrieved successfully",
+		"data":    list,
+	})
+}

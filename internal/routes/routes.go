@@ -89,10 +89,14 @@ func Init(e *echo.Echo, db *sql.DB) {
 	screening.GET("", screeningController.GetScreeningByPasienHandler, middlewares.JWTMiddleware())
 	screening.GET("/antrian/terlama", antrianController.GetAntrianTerlamaHandler) // Tidak pakai JWT
 	screening.POST("/masukkan", antrianController.MasukkanPasienHandler, middlewares.JWTMiddleware())
+	screening.GET("/poliklinik", poliklinikController.GetActivePoliklinikList)
 
 	// 3. Dokter (Website untuk Dokter)
 	dokter := api.Group("/dokter")
 	dokter.POST("/login", dokterController.LoginDokter) // Tidak pakai JWT
+	dokter.GET("/poliklinik", poliklinikController.GetActivePoliklinikList)
+
+
 	// Tambahkan endpoint dokter lain sesuai kebutuhan
 
 	// 4. Management (Website untuk Manajemen)
