@@ -329,10 +329,3 @@ func (pc *PoliklinikController) GetActivePoliklinikList(c echo.Context) error {
 		"data":    list,
 	})
 }
-
-func (fc *PoliklinikController) GetFile(c echo.Context) error {
-    filename := c.Param("filename")
-    // Pastikan filename aman (misalnya, dengan validasi atau menggunakan filepath.Clean)
-    filePath := filepath.Join("uploads", filename)
-    return c.File(filePath)
-}

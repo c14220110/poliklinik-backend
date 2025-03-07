@@ -44,6 +44,9 @@ func main() {
 	// Daftarkan semua routes
 	routes.Init(e, db)
 
+	e.Static("/uploads", "uploads")
+
+
 	// Jalankan server di goroutine
 	go func() {
 		slog.Info("Starting server", "port", cfg.Port)
