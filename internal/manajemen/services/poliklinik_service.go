@@ -3,7 +3,6 @@ package services
 import (
 	"database/sql"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -149,46 +148,27 @@ func (ps *PoliklinikService) AddPoliklinikWithManagement(namaPoli, keterangan, l
 		}
 	}()
 
-	// 1. Proses logoPath:
-	// Trim spasi awal/akhir.
+	// Proses logoPath:
 	logoPath = strings.TrimSpace(logoPath)
-	// Jika logoPath kosong, set ke "default.png"
 	if logoPath == "" {
+		// Jika tidak ada input, set ke "default.png"
 		logoPath = "default.png"
 	} else {
-		// Ganti semua spasi di dalam string dengan underscore.
+		// Ganti semua spasi dengan underscore
 		logoPath = strings.ReplaceAll(logoPath, " ", "_")
-
-		// Cek apakah sudah ada logo dengan nama yang sama.
+		// Cek apakah sudah ada logo dengan nama yang sama
 		var count int
 		queryCheck := "SELECT COUNT(*) FROM Poliklinik WHERE logo_poli = ?"
 		err = tx.QueryRow(queryCheck, logoPath).Scan(&count)
 		if err != nil {
 			return 0, fmt.Errorf("failed to check logo uniqueness: %v", err)
 		}
-
-		// Jika sudah ada, tambahkan suffix (1), (2), dst.
-		suffix := 1
-		originalLogo := logoPath
-		for count > 0 {
-			dotIndex := strings.LastIndex(originalLogo, ".")
-			if dotIndex == -1 {
-				// Jika tidak ada ekstensi, cukup tambahkan suffix.
-				logoPath = originalLogo + "(" + strconv.Itoa(suffix) + ")"
-			} else {
-				baseName := originalLogo[:dotIndex]
-				extension := originalLogo[dotIndex:]
-				logoPath = baseName + "(" + strconv.Itoa(suffix) + ")" + extension
-			}
-			err = tx.QueryRow(queryCheck, logoPath).Scan(&count)
-			if err != nil {
-				return 0, fmt.Errorf("failed to check logo uniqueness: %v", err)
-			}
-			suffix++
+		if count > 0 {
+			return 0, fmt.Errorf("Mohon ubah nama file anda! Nama file tidak boleh kembar!")
 		}
 	}
 
-	// 2. Insert ke tabel Poliklinik dengan id_status = 1 (aktif)
+	// Insert ke tabel Poliklinik dengan id_status = 1 (aktif)
 	queryPoli := `INSERT INTO Poliklinik (nama_poli, keterangan, logo_poli, id_status) VALUES (?, ?, ?, 1)`
 	res, err := tx.Exec(queryPoli, namaPoli, keterangan, logoPath)
 	if err != nil {
@@ -200,7 +180,7 @@ func (ps *PoliklinikService) AddPoliklinikWithManagement(namaPoli, keterangan, l
 	}
 	poliID := int(lastID)
 
-	// 3. Catat ke tabel Management_Poli
+	// Catat ke tabel Management_Poli
 	queryMgmt := `INSERT INTO Management_Poli (id_management, id_poli, created_by, updated_by, deleted_by) VALUES (?, ?, ?, ?, NULL)`
 	_, err = tx.Exec(queryMgmt, idManagement, poliID, idManagement, idManagement)
 	if err != nil {
@@ -213,6 +193,7 @@ func (ps *PoliklinikService) AddPoliklinikWithManagement(namaPoli, keterangan, l
 	return poliID, nil
 }
 
+
 func (ps *PoliklinikService) UpdatePoliklinikWithOptionalLogo(idPoli int, namaPoli, keterangan, logoPoli string, idManagement int) error {
 	tx, err := ps.DB.Begin()
 	if err != nil {
@@ -224,71 +205,44 @@ func (ps *PoliklinikService) UpdatePoliklinikWithOptionalLogo(idPoli int, namaPo
 		}
 	}()
 
-	// Proses logoPoli
-	logoPoli = strings.TrimSpace(logoPoli)
-	if logoPoli == "" {
-		// Jika tidak ada input, set ke default.png
-		logoPoli = "default.png"
-	} else {
-		// Ganti spasi dengan underscore
-		logoPoli = strings.ReplaceAll(logoPoli, " ", "_")
-		// Cek apakah sudah ada logo yang sama untuk record lain (tidak menghitung record yang sedang diupdate)
+	// Jika ada input logo (setelah trim), lakukan proses validasi dan update logo.
+	if trimmedLogo := strings.TrimSpace(logoPoli); trimmedLogo != "" {
+		// Ganti semua spasi dengan underscore.
+		logoPoli = strings.ReplaceAll(trimmedLogo, " ", "_")
+
+		// Cek apakah sudah ada logo dengan nama yang sama pada record lain (tidak menghitung record yang sedang diupdate).
 		var count int
 		queryCheck := "SELECT COUNT(*) FROM Poliklinik WHERE logo_poli = ? AND id_poli <> ?"
-		err = tx.QueryRow(queryCheck, logoPoli, idPoli).Scan(&count)
-		if err != nil {
+		if err = tx.QueryRow(queryCheck, logoPoli, idPoli).Scan(&count); err != nil {
 			return fmt.Errorf("failed to check logo uniqueness: %v", err)
 		}
-		// Jika sudah ada, tambahkan suffix untuk membuat nama unik
-		suffix := 1
-		originalLogo := logoPoli
-		for count > 0 {
-			dotIndex := strings.LastIndex(originalLogo, ".")
-			if dotIndex == -1 {
-				// Jika tidak ada ekstensi, cukup tambahkan suffix
-				logoPoli = originalLogo + "(" + strconv.Itoa(suffix) + ")"
-			} else {
-				baseName := originalLogo[:dotIndex]
-				extension := originalLogo[dotIndex:]
-				logoPoli = baseName + "(" + strconv.Itoa(suffix) + ")" + extension
-			}
-			err = tx.QueryRow(queryCheck, logoPoli, idPoli).Scan(&count)
-			if err != nil {
-				return fmt.Errorf("failed to check logo uniqueness: %v", err)
-			}
-			suffix++
+		if count > 0 {
+			return fmt.Errorf("Mohon ubah nama file anda! Nama file tidak boleh kembar!")
+		}
+
+		// Update Poliklinik termasuk kolom logo_poli.
+		_, err = tx.Exec(`UPDATE Poliklinik 
+		                  SET nama_poli = ?, keterangan = ?, logo_poli = ?, updated_at = NOW() 
+		                  WHERE id_poli = ?`, namaPoli, keterangan, logoPoli, idPoli)
+		if err != nil {
+			return fmt.Errorf("failed to update Poliklinik: %v", err)
+		}
+	} else {
+		// Jika tidak ada input logo, update hanya nama_poli dan keterangan.
+		_, err = tx.Exec(`UPDATE Poliklinik 
+		                  SET nama_poli = ?, keterangan = ?, updated_at = NOW() 
+		                  WHERE id_poli = ?`, namaPoli, keterangan, idPoli)
+		if err != nil {
+			return fmt.Errorf("failed to update Poliklinik: %v", err)
 		}
 	}
 
-	// Update Poliklinik
-	var query string
-	var args []interface{}
-
-	// Karena sekarang kita selalu meng-update logo_poli (baik dengan nilai baru atau default)
-	query = `UPDATE Poliklinik SET nama_poli = ?, keterangan = ?, logo_poli = ?, updated_at = NOW() WHERE id_poli = ?`
-	args = []interface{}{namaPoli, keterangan, logoPoli, idPoli}
-
-	res, err := tx.Exec(query, args...)
-	if err != nil {
-		return fmt.Errorf("failed to update Poliklinik: %v", err)
-	}
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get affected rows: %v", err)
-	}
-	if rowsAffected == 0 {
-		return fmt.Errorf("poliklinik with id %d not found", idPoli)
-	}
-
-	// Catat update di tabel Management_Poli: set updated_by = idManagement
-	queryMgmt := `UPDATE Management_Poli SET updated_by = ? WHERE id_poli = ?`
-	res, err = tx.Exec(queryMgmt, idManagement, idPoli)
+	// Catat update di tabel Management_Poli (update kolom updated_by).
+	_, err = tx.Exec(`UPDATE Management_Poli 
+	                  SET updated_by = ? 
+	                  WHERE id_poli = ?`, idManagement, idPoli)
 	if err != nil {
 		return fmt.Errorf("failed to update Management_Poli: %v", err)
-	}
-	_, err = res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get affected rows for Management_Poli: %v", err)
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -296,6 +250,7 @@ func (ps *PoliklinikService) UpdatePoliklinikWithOptionalLogo(idPoli int, namaPo
 	}
 	return nil
 }
+
 
 func (ps *PoliklinikService) GetActivePoliklinikList() ([]map[string]interface{}, error) {
 	// Query hanya mengambil poliklinik yang aktif (id_status = 1) dan hanya kolom id_poli dan nama_poli.
