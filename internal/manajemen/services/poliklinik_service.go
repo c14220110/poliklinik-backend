@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type PoliklinikService struct {
@@ -20,7 +21,7 @@ func NewPoliklinikService(db *sql.DB) *PoliklinikService {
 //   - status=nonaktif akan memfilter dengan id_status = 2
 func (ps *PoliklinikService) GetPoliklinikListFiltered(statusFilter string) ([]map[string]interface{}, error) {
 	baseQuery := `
-		SELECT id_poli, id_status, nama_poli, jumlah_tenkes, logo_poli, keterangan
+		SELECT id_poli, id_status, nama_poli, jumlah_tenkes, logo_poli, keterangan, created_at
 		FROM Poliklinik
 	`
 	conditions := []string{}
@@ -54,10 +55,14 @@ func (ps *PoliklinikService) GetPoliklinikListFiltered(statusFilter string) ([]m
 		var idPoli, idStatus, jumlahTenkes int
 		var namaPoli, keterangan string
 		var logoPoli sql.NullString
+		var createdAt time.Time
 
-		if err := rows.Scan(&idPoli, &idStatus, &namaPoli, &jumlahTenkes, &logoPoli, &keterangan); err != nil {
+		if err := rows.Scan(&idPoli, &idStatus, &namaPoli, &jumlahTenkes, &logoPoli, &keterangan, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
+
+		// Format tanggal dibuat ke "DD/MM/YYYY"
+		formattedDate := createdAt.Format("02/01/2006")
 
 		record := map[string]interface{}{
 			"id_poli":       idPoli,
@@ -66,6 +71,7 @@ func (ps *PoliklinikService) GetPoliklinikListFiltered(statusFilter string) ([]m
 			"jumlah_tenkes": jumlahTenkes,
 			"logo_poli":     nil,
 			"keterangan":    keterangan,
+			"created_at":    formattedDate,
 		}
 		if logoPoli.Valid {
 			record["logo_poli"] = logoPoli.String
@@ -75,6 +81,7 @@ func (ps *PoliklinikService) GetPoliklinikListFiltered(statusFilter string) ([]m
 
 	return list, nil
 }
+
 
 // SoftDeletePoliklinik melakukan soft delete dengan mengupdate kolom deleted_at,
 // mengubah id_status menjadi 0 (nonaktif) dan mencatat deleted_by di tabel Management_Poli.
