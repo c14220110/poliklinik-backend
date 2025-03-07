@@ -115,6 +115,8 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.POST("/poliklinik/add", poliklinikController.AddPoliklinikHandler, middlewares.JWTMiddleware())
 	management.PUT("/poliklinik/update", poliklinikController.UpdatePoliklinikHandler, middlewares.JWTMiddleware())
 	management.PUT("/poliklinik/soft-delete", poliklinikController.SoftDeletePoliklinikHandler, middlewares.JWTMiddleware())
+	management.GET("/api/uploads/:filename", poliklinikController.GetFile, middlewares.JWTMiddleware())
+
 
 
 	// Manajemen Role
