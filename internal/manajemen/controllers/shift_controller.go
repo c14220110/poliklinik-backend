@@ -251,13 +251,14 @@ func (spc *ShiftController) GetShiftPoliList(c echo.Context) error {
 	})
 }
 
-func (spc *ShiftController) GetKaryawanListHandler(c echo.Context) error {
-	// Ambil query parameter: id_poli, id_shift, dan id_role (opsional)
+func (sc *ShiftController) GetKaryawanListHandler(c echo.Context) error {
+	// Ambil query parameter: id_poli, id_shift, id_role (opsional), dan tanggal (opsional, format DD/MM/YYYY)
 	idPoli := c.QueryParam("id_poli")
 	idShift := c.QueryParam("id_shift")
-	idRole := c.QueryParam("id_role") // optional
+	idRole := c.QueryParam("id_role")
+	tanggal := c.QueryParam("tanggal") // Jika kosong, otomatis hari ini
 
-	list, err := spc.Service.GetListKaryawanFiltered(idPoli, idShift, idRole)
+	list, err := sc.Service.GetListKaryawanFiltered(idPoli, idShift, idRole, tanggal)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
