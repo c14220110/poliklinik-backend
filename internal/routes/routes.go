@@ -137,4 +137,6 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.GET("/cms/all", cmsController.GetAllCMSHandler, middlewares.JWTMiddleware())
 	management.POST("/cms/create", cmsController.CreateCMSHandler, middlewares.JWTMiddleware())
 	management.PUT("/cms/update", cmsController.UpdateCMSHandler, middlewares.JWTMiddleware())
+	management.GET("/shift/karyawan", shiftController.GetKaryawanListHandler, middlewares.JWTMiddleware())
+
 }

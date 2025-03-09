@@ -3,6 +3,8 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -14,66 +16,91 @@ func NewShiftService(db *sql.DB) *ShiftService {
 	return &ShiftService{DB: db}
 }
 
-// AssignShift melakukan insert ke tabel Shift_Karyawan dan Management_Shift_Karyawan.
-// Parameter id_management berasal dari JWT (dari management yang membuat record).
 func (s *ShiftService) AssignShift(idPoli, idKaryawan, idRole, idShift, idManagement int, tanggalStr string) (int64, error) {
-    // Parse tanggal dengan format "2006-01-02"
-    tanggal, err := time.Parse("2006-01-02", tanggalStr)
-    if err != nil {
-        return 0, fmt.Errorf("format tanggal tidak valid: %v", err)
-    }
+	// 0. Cek apakah karyawan memiliki role sesuai parameter (dilakukan di luar transaksi).
+	var roleCount int
+	err := s.DB.QueryRow("SELECT COUNT(*) FROM Detail_Role_Karyawan WHERE id_karyawan = ? AND id_role = ?", idKaryawan, idRole).Scan(&roleCount)
+	if err != nil {
+		return 0, fmt.Errorf("failed to check role for karyawan: %v", err)
+	}
+	if roleCount == 0 {
+		return 0, fmt.Errorf("karyawan dengan id %d tidak memiliki role %d", idKaryawan, idRole)
+	}
 
-    // Ambil data Shift untuk mendapatkan jam_mulai dan jam_selesai default
-    var jamMulai, jamSelesai string
-    queryShift := "SELECT jam_mulai, jam_selesai FROM Shift WHERE id_shift = ?"
-    err = s.DB.QueryRow(queryShift, idShift).Scan(&jamMulai, &jamSelesai)
-    if err != nil {
-        if err == sql.ErrNoRows {
-            return 0, fmt.Errorf("id_shift %d tidak ditemukan", idShift)
-        }
-        return 0, err
-    }
+	// 1. Validasi format tanggal
+	_, err = time.Parse("2006-01-02", tanggalStr)
+	if err != nil {
+		return 0, fmt.Errorf("format tanggal tidak valid: %v", err)
+	}
 
-    // Mulai transaction
-    tx, err := s.DB.Begin()
-    if err != nil {
-        return 0, err
-    }
+	// Mulai transaksi
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
 
-    // Insert ke tabel Shift_Karyawan
-    insertQuery := `
-        INSERT INTO Shift_Karyawan (id_poli, id_shift, id_karyawan, custom_jam_mulai, custom_jam_selesai, tanggal)
-        VALUES (?, ?, ?, ?, ?, ?)
-    `
-    res, err := tx.Exec(insertQuery, idPoli, idShift, idKaryawan, jamMulai, jamSelesai, tanggal)
-    if err != nil {
-        tx.Rollback()
-        return 0, err
-    }
-    idShiftKaryawan, err := res.LastInsertId()
-    if err != nil {
-        tx.Rollback()
-        return 0, err
-    }
+	// 2. Cek apakah karyawan sudah memiliki shift yang sama di poli pada tanggal ini
+	var existingCount int
+	err = tx.QueryRow(
+		"SELECT COUNT(*) FROM Shift_Karyawan WHERE id_karyawan = ? AND id_poli = ? AND id_shift = ? AND tanggal = ?",
+		idKaryawan, idPoli, idShift, tanggalStr,
+	).Scan(&existingCount)
+	if err != nil {
+		tx.Rollback()
+		return 0, fmt.Errorf("failed to check existing shift: %v", err)
+	}
+	if existingCount > 0 {
+		tx.Rollback()
+		return 0, fmt.Errorf("User dengan role %d sudah memiliki shift %d di poli %d pada tanggal %s", idRole, idShift, idPoli, tanggalStr)
+	}
 
-    // Insert ke tabel Management_Shift_Karyawan
-    insertManagementShiftQuery := `
-        INSERT INTO Management_Shift_Karyawan (id_management, id_shift_karyawan, created_by, updated_by, deleted_by)
-        VALUES (?, ?, ?, ?, ?)
-    `
-    _, err = tx.Exec(insertManagementShiftQuery, idManagement, idShiftKaryawan, idManagement, idManagement, 0)
-    if err != nil {
-        tx.Rollback()
-        return 0, err
-    }
+	// 3. Ambil data Shift untuk mendapatkan jam_mulai dan jam_selesai default
+	var jamMulai, jamSelesai string
+	queryShift := "SELECT jam_mulai, jam_selesai FROM Shift WHERE id_shift = ?"
+	err = tx.QueryRow(queryShift, idShift).Scan(&jamMulai, &jamSelesai)
+	if err != nil {
+		tx.Rollback()
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("id_shift %d tidak ditemukan", idShift)
+		}
+		return 0, err
+	}
 
-    // Commit transaction
-    if err = tx.Commit(); err != nil {
-        return 0, err
-    }
+	// 4. Insert ke tabel Shift_Karyawan
+	insertQuery := `
+		INSERT INTO Shift_Karyawan (id_poli, id_shift, id_karyawan, custom_jam_mulai, custom_jam_selesai, tanggal)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`
+	res, err := tx.Exec(insertQuery, idPoli, idShift, idKaryawan, jamMulai, jamSelesai, tanggalStr)
+	if err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	idShiftKaryawan, err := res.LastInsertId()
+	if err != nil {
+		tx.Rollback()
+		return 0, err
+	}
 
-    return idShiftKaryawan, nil
+	// 5. Insert ke tabel Management_Shift_Karyawan
+	insertManagementShiftQuery := `
+		INSERT INTO Management_Shift_Karyawan (id_management, id_shift_karyawan, created_by, updated_by, deleted_by)
+		VALUES (?, ?, ?, ?, ?)
+	`
+	_, err = tx.Exec(insertManagementShiftQuery, idManagement, idShiftKaryawan, idManagement, idManagement, 0)
+	if err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+
+	// Commit transaksi
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return idShiftKaryawan, nil
 }
+
 
 func (s *ShiftService) UpdateCustomShift(idShiftKaryawan int, newCustomMulai, newCustomSelesai string) error {
 	// Parse waktu custom yang baru dengan format "15:04:05"
@@ -158,10 +185,18 @@ func (s *ShiftService) SoftDeleteShiftKaryawan(idShiftKaryawan int, idManagement
 	return nil
 }
 
-func (ps *ShiftService) GetShiftPoliList(idPoliFilter string) ([]map[string]interface{}, error) {
-	// Query dasar mengambil data shift dan menghitung jumlah tenaga kesehatan aktif pada hari ini.
-	// Kondisi tambahan untuk id_poli akan ditambahkan pada LEFT JOIN jika disediakan.
-	query := `
+func (s *ShiftService) GetShiftPoliList(idPoliFilter string) ([]map[string]interface{}, error) {
+	// Kondisi join hanya berdasarkan id_shift dan tanggal, tanpa filter CURTIME()
+	joinCondition := "s.id_shift = sk.id_shift AND sk.tanggal = CURDATE()"
+	var args []interface{}
+
+	// Jika ada filter berdasarkan id_poli, tambahkan kondisi
+	if idPoliFilter != "" {
+		joinCondition += " AND sk.id_poli = ?"
+		args = append(args, idPoliFilter)
+	}
+
+	query := fmt.Sprintf(`
 		SELECT 
 			s.id_shift, 
 			s.jam_mulai, 
@@ -171,26 +206,15 @@ func (ps *ShiftService) GetShiftPoliList(idPoliFilter string) ([]map[string]inte
 				WHEN s.id_shift = 2 THEN 'Shift Sore'
 				ELSE 'Shift Lainnya'
 			END AS nama_shift,
-			COUNT(sk.id_karyawan) AS jumlah_tenkes
+			COUNT(DISTINCT sk.id_karyawan) AS jumlah_tenkes
 		FROM Shift s
 		LEFT JOIN Shift_Karyawan sk 
-			ON s.id_shift = sk.id_shift 
-			AND sk.tanggal = CURDATE() 
-			AND CURTIME() BETWEEN sk.custom_jam_mulai AND sk.custom_jam_selesai
-	`
-	var args []interface{}
-	if idPoliFilter != "" {
-		// Tambahkan filter untuk id_poli di dalam kondisi join
-		query += " AND sk.id_poli = ?"
-		args = append(args, idPoliFilter)
-	}
-
-	query += `
+			ON %s
 		GROUP BY s.id_shift, s.jam_mulai, s.jam_selesai
 		ORDER BY s.id_shift
-	`
-	
-	rows, err := ps.DB.Query(query, args...)
+	`, joinCondition)
+
+	rows, err := s.DB.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query error: %v", err)
 	}
@@ -213,5 +237,99 @@ func (ps *ShiftService) GetShiftPoliList(idPoliFilter string) ([]map[string]inte
 		}
 		results = append(results, record)
 	}
+	return results, nil
+}
+
+// GetListKaryawanFiltered mengambil daftar karyawan berdasarkan:
+// - id_poli (wajib)
+// - id_shift (wajib)
+// - id_role (opsional; jika tidak ada, tampilkan semua)
+func (s *ShiftService) GetListKaryawanFiltered(idPoliFilter, idShiftFilter, idRoleFilter string) ([]map[string]interface{}, error) {
+	// Pastikan id_poli dan id_shift wajib ada.
+	idPoli, err := strconv.Atoi(idPoliFilter)
+	if err != nil {
+		return nil, fmt.Errorf("invalid id_poli value: %v", err)
+	}
+	idShift, err := strconv.Atoi(idShiftFilter)
+	if err != nil {
+		return nil, fmt.Errorf("invalid id_shift value: %v", err)
+	}
+
+	baseQuery := `
+		SELECT 
+			k.id_karyawan,
+			k.nama,
+			k.nik,
+			k.username,
+			k.no_telp,
+			k.alamat,
+			sk.custom_jam_mulai,
+			sk.custom_jam_selesai,
+			GROUP_CONCAT(drk.id_role) AS roles
+		FROM Karyawan k
+		JOIN Shift_Karyawan sk ON k.id_karyawan = sk.id_karyawan 
+			AND sk.id_poli = ? 
+			AND sk.id_shift = ? 
+			AND sk.tanggal = CURDATE()
+	`
+	args := []interface{}{idPoli, idShift}
+
+	// Jika id_role filter diberikan, tambahkan kondisi di WHERE.
+	if idRoleFilter != "" {
+		idRole, err := strconv.Atoi(idRoleFilter)
+		if err != nil {
+			return nil, fmt.Errorf("invalid id_role value: %v", err)
+		}
+		baseQuery += " AND k.id_karyawan IN (SELECT id_karyawan FROM Detail_Role_Karyawan WHERE id_role = ?)"
+		args = append(args, idRole)
+	}
+
+	baseQuery += `
+		LEFT JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
+		GROUP BY k.id_karyawan, k.nama, k.nik, k.username, k.no_telp, k.alamat, sk.custom_jam_mulai, sk.custom_jam_selesai
+		ORDER BY k.id_karyawan
+	`
+
+	rows, err := s.DB.Query(baseQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query error: %v", err)
+	}
+	defer rows.Close()
+
+	var results []map[string]interface{}
+	for rows.Next() {
+		var idKaryawan int
+		var nama, nik, username, noTelp, alamat string
+		var customJamMulai, customJamSelesai string
+		var rolesStr sql.NullString
+
+		if err := rows.Scan(&idKaryawan, &nama, &nik, &username, &noTelp, &alamat, &customJamMulai, &customJamSelesai, &rolesStr); err != nil {
+			return nil, fmt.Errorf("scan error: %v", err)
+		}
+
+		var roles []int
+		if rolesStr.Valid && rolesStr.String != "" {
+			parts := strings.Split(rolesStr.String, ",")
+			for _, part := range parts {
+				if r, err := strconv.Atoi(part); err == nil {
+					roles = append(roles, r)
+				}
+			}
+		}
+
+		record := map[string]interface{}{
+			"id_karyawan":       idKaryawan,
+			"nama":              nama,
+			"NIK":               nik,
+			"username":          username,
+			"role":              roles,
+			"no_telp":           noTelp,
+			"alamat":            alamat,
+			"custom_jam_mulai":  customJamMulai,
+			"custom_jam_selesai": customJamSelesai,
+		}
+		results = append(results, record)
+	}
+
 	return results, nil
 }

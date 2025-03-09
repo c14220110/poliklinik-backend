@@ -250,3 +250,25 @@ func (spc *ShiftController) GetShiftPoliList(c echo.Context) error {
 		"data":    list,
 	})
 }
+
+func (spc *ShiftController) GetKaryawanListHandler(c echo.Context) error {
+	// Ambil query parameter: id_poli, id_shift, dan id_role (opsional)
+	idPoli := c.QueryParam("id_poli")
+	idShift := c.QueryParam("id_shift")
+	idRole := c.QueryParam("id_role") // optional
+
+	list, err := spc.Service.GetListKaryawanFiltered(idPoli, idShift, idRole)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve karyawan list: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Karyawan list retrieved successfully",
+		"data":    list,
+	})
+}
