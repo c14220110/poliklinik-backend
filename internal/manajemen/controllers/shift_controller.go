@@ -234,7 +234,9 @@ func (sc *ShiftController) SoftDeleteShiftHandler(c echo.Context) error {
 }
 
 func (spc *ShiftController) GetShiftPoliList(c echo.Context) error {
-	list, err := spc.Service.GetShiftPoliList()
+	// Ambil query parameter id_poli (opsional)
+	idPoli := c.QueryParam("id_poli")
+	list, err := spc.Service.GetShiftPoliList(idPoli)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,

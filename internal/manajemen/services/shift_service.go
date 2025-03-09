@@ -158,8 +158,9 @@ func (s *ShiftService) SoftDeleteShiftKaryawan(idShiftKaryawan int, idManagement
 	return nil
 }
 
-func (ps *ShiftService) GetShiftPoliList() ([]map[string]interface{}, error) {
-	// Query ini mengambil data shift dan menghitung jumlah tenaga kesehatan yang aktif di masing-masing shift hari ini.
+func (ps *ShiftService) GetShiftPoliList(idPoliFilter string) ([]map[string]interface{}, error) {
+	// Query dasar mengambil data shift dan menghitung jumlah tenaga kesehatan aktif pada hari ini.
+	// Kondisi tambahan untuk id_poli akan ditambahkan pada LEFT JOIN jika disediakan.
 	query := `
 		SELECT 
 			s.id_shift, 
@@ -176,10 +177,20 @@ func (ps *ShiftService) GetShiftPoliList() ([]map[string]interface{}, error) {
 			ON s.id_shift = sk.id_shift 
 			AND sk.tanggal = CURDATE() 
 			AND CURTIME() BETWEEN sk.custom_jam_mulai AND sk.custom_jam_selesai
+	`
+	var args []interface{}
+	if idPoliFilter != "" {
+		// Tambahkan filter untuk id_poli di dalam kondisi join
+		query += " AND sk.id_poli = ?"
+		args = append(args, idPoliFilter)
+	}
+
+	query += `
 		GROUP BY s.id_shift, s.jam_mulai, s.jam_selesai
 		ORDER BY s.id_shift
 	`
-	rows, err := ps.DB.Query(query)
+	
+	rows, err := ps.DB.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query error: %v", err)
 	}
