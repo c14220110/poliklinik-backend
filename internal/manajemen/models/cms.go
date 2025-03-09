@@ -10,6 +10,7 @@ type CMS struct {
 
 // CMSElement mewakili record di tabel CMS_Elements.
 type CMSElement struct {
+	SectionName    string `json:"section_name"`
 	IDEelements    int    `json:"id_elements"`
 	IDCMS          int    `json:"id_cms"`
 	ElementType    string `json:"element_type"`

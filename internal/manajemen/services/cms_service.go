@@ -54,17 +54,17 @@ func (cs *CMSService) CreateCMSWithElements(cms models.CMS, elements []models.CM
 	}
 
 	// 2. Insert setiap elemen ke tabel CMS_Elements
-	elemInsert := `
-		INSERT INTO CMS_Elements (id_cms, element_type, element_label, element_name, element_options, is_required)
-		VALUES (?, ?, ?, ?, ?, ?)
+ 	elemInsert := `
+    INSERT INTO CMS_Elements (id_cms, section_name, element_type, element_label, element_name, element_options, is_required)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 	for _, e := range elements {
-		_, err := tx.Exec(elemInsert, idCMS, e.ElementType, e.ElementLabel, e.ElementName, e.ElementOptions, e.IsRequired)
-		if err != nil {
-			tx.Rollback()
-			return 0, fmt.Errorf("failed to insert CMS element: %v", err)
-		}
-	}
+    _, err := tx.Exec(elemInsert, idCMS, e.SectionName, e.ElementType, e.ElementLabel, e.ElementName, e.ElementOptions, e.IsRequired)
+    if err != nil {
+        tx.Rollback()
+        return 0, fmt.Errorf("failed to insert CMS element: %v", err)
+    }
+}
 
 	// 3. Insert ke tabel Management_CMS
 	managementInsert := `
@@ -188,56 +188,56 @@ func (cs *CMSService) GetAllCMS() ([]models.CMSGroup, error) {
 
 
 func (cs *CMSService) UpdateCMSWithElements(idCMS int, newTitle string, elements []models.CMSElement, managementInfo models.ManagementCMS) error {
-	tx, err := cs.DB.Begin()
-	if err != nil {
-		return err
-	}
+    tx, err := cs.DB.Begin()
+    if err != nil {
+        return err
+    }
 
-	// 1. Update record CMS (title dan updated_at)
-	updateCMSQuery := `
-		UPDATE CMS
-		SET title = ?, updated_at = ?
-		WHERE id_cms = ?
-	`
-	now := time.Now()
-	_, err = tx.Exec(updateCMSQuery, newTitle, now, idCMS)
-	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("failed to update CMS: %v", err)
-	}
+    // 1. Update record CMS (title dan updated_at)
+    updateCMSQuery := `
+        UPDATE CMS
+        SET title = ?, updated_at = ?
+        WHERE id_cms = ?
+    `
+    now := time.Now()
+    _, err = tx.Exec(updateCMSQuery, newTitle, now, idCMS)
+    if err != nil {
+        tx.Rollback()
+        return fmt.Errorf("failed to update CMS: %v", err)
+    }
 
-	// 2. Hapus elemen lama di CMS_Elements
-	deleteElementsQuery := `DELETE FROM CMS_Elements WHERE id_cms = ?`
-	_, err = tx.Exec(deleteElementsQuery, idCMS)
-	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("failed to delete old CMS elements: %v", err)
-	}
+    // 2. Hapus elemen lama di CMS_Elements
+    deleteElementsQuery := `DELETE FROM CMS_Elements WHERE id_cms = ?`
+    _, err = tx.Exec(deleteElementsQuery, idCMS)
+    if err != nil {
+        tx.Rollback()
+        return fmt.Errorf("failed to delete old CMS elements: %v", err)
+    }
 
-	// 3. Insert elemen baru ke CMS_Elements
-	elemInsert := `
-		INSERT INTO CMS_Elements (id_cms, element_type, element_label, element_name, element_options, is_required)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`
-	for _, e := range elements {
-		_, err := tx.Exec(elemInsert, idCMS, e.ElementType, e.ElementLabel, e.ElementName, e.ElementOptions, e.IsRequired)
-		if err != nil {
-			tx.Rollback()
-			return fmt.Errorf("failed to insert CMS element: %v", err)
-		}
-	}
+    // 3. Insert elemen baru ke CMS_Elements
+    elemInsert := `
+        INSERT INTO CMS_Elements (id_cms, section_name, element_type, element_label, element_name, element_options, is_required)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    `
+    for _, e := range elements {
+        _, err := tx.Exec(elemInsert, idCMS, e.SectionName, e.ElementType, e.ElementLabel, e.ElementName, e.ElementOptions, e.IsRequired)
+        if err != nil {
+            tx.Rollback()
+            return fmt.Errorf("failed to insert CMS element: %v", err)
+        }
+    }
 
-	// 4. Update Management_CMS: set updated_by dengan id_management (integer) dari managementInfo
-	updateManagementQuery := `
-		UPDATE Management_CMS
-		SET updated_by = ?
-		WHERE id_cms = ?
-	`
-	_, err = tx.Exec(updateManagementQuery, managementInfo.IDManagement, idCMS)
-	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("failed to update Management_CMS: %v", err)
-	}
+    // 4. Update Management_CMS: set updated_by dengan id_management (integer) dari managementInfo
+    updateManagementQuery := `
+        UPDATE Management_CMS
+        SET updated_by = ?
+        WHERE id_cms = ?
+    `
+    _, err = tx.Exec(updateManagementQuery, managementInfo.IDManagement, idCMS)
+    if err != nil {
+        tx.Rollback()
+        return fmt.Errorf("failed to update Management_CMS: %v", err)
+    }
 
-	return tx.Commit()
+    return tx.Commit()
 }
