@@ -3,7 +3,6 @@ package services
 import (
 	"database/sql"
 	"errors"
-	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -26,11 +25,15 @@ func (s *DokterService) AuthenticateDokterUsingKaryawan(username, password strin
 	queryKaryawan := "SELECT ID_Karyawan, Nama, Username, Password FROM Karyawan WHERE Username = ?"
 	err := s.DB.QueryRow(queryKaryawan, username).Scan(&dokter.ID_Dokter, &dokter.Nama, &dokter.Username, &dokter.Password)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil, errors.New("username tidak ditemukan")
+		}
 		return nil, nil, err
 	}
+	
 	// Verifikasi password menggunakan bcrypt
 	if err := bcrypt.CompareHashAndPassword([]byte(dokter.Password), []byte(password)); err != nil {
-		return nil, nil, errors.New("invalid credentials")
+		return nil, nil, errors.New("password salah")
 	}
 
 	// Ambil role dari Detail_Role_Karyawan dan Role (harus "Dokter")
@@ -45,10 +48,10 @@ func (s *DokterService) AuthenticateDokterUsingKaryawan(username, password strin
 	`
 	err = s.DB.QueryRow(queryRole, dokter.ID_Dokter).Scan(&roleName, &roleID)
 	if err != nil {
-		return nil, nil, errors.New("failed to retrieve role")
+		return nil, nil, errors.New("gagal mengambil role")
 	}
 	if roleName != "Dokter" {
-		return nil, nil, errors.New("user is not a Dokter")
+		return nil, nil, errors.New("user bukan Dokter")
 	}
 	dokter.ID_Role = roleID
 
@@ -86,48 +89,8 @@ func (s *DokterService) AuthenticateDokterUsingKaryawan(username, password strin
 		Scan(&shift.ID_Shift_Karyawan, &shift.CustomJamMulai, &shift.CustomJamSelesai, &shift.ID_Poli)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Jika tidak ada shift aktif, cek apakah ada shift di poli lain atau shift belum aktif
-			var shiftRecord commonModels.ShiftKaryawan
-			queryAny := `
-				SELECT sk.ID_Shift_Karyawan, sk.custom_jam_mulai, sk.custom_jam_selesai, sk.ID_Poli
-				FROM Shift_Karyawan sk
-				WHERE sk.ID_Karyawan = ?
-				  AND sk.ID_Poli = ?
-				  AND sk.Tanggal = CURDATE()
-				LIMIT 1
-			`
-			err = s.DB.QueryRow(queryAny, dokter.ID_Dokter, selectedPoli).
-				Scan(&shiftRecord.ID_Shift_Karyawan, &shiftRecord.CustomJamMulai, &shiftRecord.CustomJamSelesai, &shiftRecord.ID_Poli)
-			if err == sql.ErrNoRows {
-				// Tidak ada shift di poli tersebut hari ini, cek di poli lain
-				var otherPoli int
-				queryOther := `
-					SELECT sk.ID_Poli
-					FROM Shift_Karyawan sk
-					WHERE sk.ID_Karyawan = ? AND sk.Tanggal = CURDATE()
-					LIMIT 1
-				`
-				err = s.DB.QueryRow(queryOther, dokter.ID_Dokter).Scan(&otherPoli)
-				if err == nil {
-					return nil, nil, errors.New("shift aktif di poli lain")
-				}
-				return nil, nil, errors.New("tidak ada shift aktif hari ini untuk poli yang dipilih")
-			}
-
-			// Ada shift, tapi tidak aktif saat ini: bandingkan waktu
-			currentTime := time.Now()
-			parsedMulai, err1 := time.Parse("15:04:05", shiftRecord.CustomJamMulai)
-			parsedSelesai, err2 := time.Parse("15:04:05", shiftRecord.CustomJamSelesai)
-			if err1 != nil || err2 != nil {
-				return nil, nil, errors.New("format waktu shift tidak valid")
-			}
-			if currentTime.Before(parsedMulai) {
-				return nil, nil, errors.New("shift akan aktif nanti pada pukul " + shiftRecord.CustomJamMulai)
-			} else if currentTime.After(parsedSelesai) {
-				return nil, nil, errors.New("shift sudah berakhir")
-			}
-			// Fallback (meskipun seharusnya sudah tercakup)
-			return nil, nil, errors.New("shift tidak aktif saat ini")
+			// Penanganan untuk kasus tidak ada shift aktif
+			return nil, nil, errors.New("tidak ada shift aktif hari ini untuk poli yang dipilih")
 		}
 		return nil, nil, err
 	}
@@ -137,6 +100,7 @@ func (s *DokterService) AuthenticateDokterUsingKaryawan(username, password strin
 
 	return &dokter, &shift, nil
 }
+
 
 
 

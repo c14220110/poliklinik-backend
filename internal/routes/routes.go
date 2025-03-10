@@ -87,7 +87,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	screening.POST("/suster/login", susterController.LoginSuster) // Tidak pakai JWT
 	screening.POST("/input", screeningController.InputScreening, middlewares.JWTMiddleware())
 	screening.GET("", screeningController.GetScreeningByPasienHandler, middlewares.JWTMiddleware())
-	screening.GET("/antrian/terlama", antrianController.GetAntrianTerlamaHandler) // Tidak pakai JWT
+	screening.GET("/antrian/terlama", antrianController.GetAntrianTerlamaHandler, middlewares.JWTMiddleware())
 	screening.POST("/masukkan", antrianController.MasukkanPasienHandler, middlewares.JWTMiddleware())
 	screening.GET("/poliklinik", poliklinikController.GetActivePoliklinikList)
 
@@ -95,6 +95,8 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter := api.Group("/dokter")
 	dokter.POST("/login", dokterController.LoginDokter) // Tidak pakai JWT
 	dokter.GET("/poliklinik", poliklinikController.GetActivePoliklinikList)
+	dokter.GET("/antrian/terlama", antrianController.GetAntrianTerlamaHandler, middlewares.JWTMiddleware())
+
 
 
 	// Tambahkan endpoint dokter lain sesuai kebutuhan
