@@ -59,7 +59,7 @@ func (s *AntrianService) GetAntrianTerlama(idPoli int) (map[string]interface{}, 
 	query := `
 		SELECT id_antrian, nomor_antrian 
 		FROM Antrian 
-		WHERE id_poli = ? AND id_status = 1 AND DATE(tanggal) = CURDATE()
+		WHERE id_poli = ? AND id_status = 1 AND DATE(created_at) = CURDATE()
 		ORDER BY nomor_antrian ASC 
 		LIMIT 1
 	`
