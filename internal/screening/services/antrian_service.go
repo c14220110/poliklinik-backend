@@ -14,14 +14,12 @@ func NewAntrianService(db *sql.DB) *AntrianService {
 	return &AntrianService{DB: db}
 }
 
-// MasukkanPasien mencari baris antrian dengan id_status = 0 (misal, "Menunggu")
-// untuk poli dengan idPoli tertentu dan mengubah id_status menjadi 2.
 func (s *AntrianService) MasukkanPasien(idPoli int) error {
-	// Cari baris antrian teratas dengan id_status = 0 untuk id_poli yang diberikan.
+	// Cari baris antrian teratas dengan id_status = 1 untuk id_poli yang diberikan dan untuk hari ini.
 	query := `
 		SELECT id_antrian 
 		FROM Antrian 
-		WHERE id_poli = ? AND id_status = 1 
+		WHERE id_poli = ? AND id_status = 1 AND DATE(created_at) = CURDATE()
 		ORDER BY nomor_antrian ASC 
 		LIMIT 1
 	`
@@ -29,8 +27,7 @@ func (s *AntrianService) MasukkanPasien(idPoli int) error {
 	err := s.DB.QueryRow(query, idPoli).Scan(&idAntrian)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Tidak ditemukan baris dengan status 1 atau id_poli tidak ada.
-			return fmt.Errorf("tidak ada pasien dengan status 1 untuk poli dengan id %d", idPoli)
+			return fmt.Errorf("tidak ada pasien dengan status 1 untuk poli dengan id %d pada hari ini", idPoli)
 		}
 		return err
 	}
@@ -56,15 +53,16 @@ func (s *AntrianService) MasukkanPasien(idPoli int) error {
 }
 
 
-// GetAntrianTerlama mengambil ID_Antrian dan Nomor_Antrian dari pasien dengan antrian paling lama (status = 0)
+
+// GetAntrianTerlama mengambil ID_Antrian dan Nomor_Antrian dari pasien dengan antrian paling lama (status = 1) pada hari ini
 func (s *AntrianService) GetAntrianTerlama(idPoli int) (map[string]interface{}, error) {
 	query := `
 		SELECT id_antrian, nomor_antrian 
-    FROM Antrian 
-    WHERE id_poli = ? AND id_status = 1 
-    ORDER BY nomor_antrian ASC 
-    LIMIT 1
-		`
+		FROM Antrian 
+		WHERE id_poli = ? AND id_status = 1 AND DATE(tanggal) = CURDATE()
+		ORDER BY nomor_antrian ASC 
+		LIMIT 1
+	`
 	var idAntrian int
 	var nomorAntrian int
 
