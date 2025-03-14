@@ -51,9 +51,9 @@ func (s *AntrianService) MasukkanPasien(idPoli int) (map[string]interface{}, err
 		return nil, fmt.Errorf("gagal mengupdate antrian, baris tidak ditemukan")
 	}
 
-	// 3. Ambil data tambahan: id_pasien, nama pasien, jenis_kelamin, id_rm, dan tanggal_lahir dari pasien
+	// 3. Ambil data tambahan: id_pasien, nama pasien, jenis_kelamin, id_rm, tanggal_lahir, dan nomor_antrian
 	queryDetails := `
-		SELECT p.id_pasien, p.nama, p.jenis_kelamin, rm.id_rm, p.tanggal_lahir
+		SELECT p.id_pasien, p.nama, p.jenis_kelamin, rm.id_rm, p.tanggal_lahir, a.nomor_antrian
 		FROM Antrian a
 		JOIN Pasien p ON a.id_pasien = p.id_pasien
 		JOIN Rekam_Medis rm ON p.id_pasien = rm.id_pasien
@@ -64,16 +64,20 @@ func (s *AntrianService) MasukkanPasien(idPoli int) (map[string]interface{}, err
 	var idPasien int
 	var nama, jenisKelamin, tanggalLahirStr string
 	var idRM int
-	err = s.DB.QueryRow(queryDetails, idAntrian).Scan(&idPasien, &nama, &jenisKelamin, &idRM, &tanggalLahirStr)
+	var nomorAntrian int
+
+	err = s.DB.QueryRow(queryDetails, idAntrian).Scan(&idPasien, &nama, &jenisKelamin, &idRM, &tanggalLahirStr, &nomorAntrian)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get detail data: %v", err)
 	}
 
-	// Parse tanggal_lahir dan hitung umur.
+	// Parse tanggal_lahir; gunakan layout RFC3339 karena format di database misalnya "1995-08-15T00:00:00+07:00"
 	tanggalLahir, err := time.Parse(time.RFC3339, tanggalLahirStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse tanggal_lahir: %v", err)
 	}
+
+	// Hitung umur
 	now := time.Now()
 	umur := now.Year() - tanggalLahir.Year()
 	if now.YearDay() < tanggalLahir.YearDay() {
@@ -81,16 +85,18 @@ func (s *AntrianService) MasukkanPasien(idPoli int) (map[string]interface{}, err
 	}
 
 	result := map[string]interface{}{
-		"id_antrian":    idAntrian,
-		"id_pasien":     idPasien,
-		"nama_pasien":   nama,
-		"jenis_kelamin": jenisKelamin,
-		"id_rm":         idRM,
-		"umur":          umur,
+		"id_antrian":     idAntrian,
+		"id_pasien":      idPasien,
+		"nama_pasien":    nama,
+		"jenis_kelamin":  jenisKelamin,
+		"id_rm":          idRM,
+		"nomor_antrian":  nomorAntrian,
+		"umur":           umur,
 	}
 
 	return result, nil
 }
+
 
 
 // GetAntrianTerlama mengambil ID_Antrian dan Nomor_Antrian dari pasien dengan antrian paling lama (status = 1) pada hari ini
