@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/administrasi/models"
@@ -342,15 +343,35 @@ func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(p models.Pasien, i
 
 
 
-func (s *PendaftaranService) GetAllPasienData() ([]map[string]interface{}, error) {
+func (s *PendaftaranService) GetAllPasienDataFiltered(namaFilter string, page, limit int) ([]map[string]interface{}, error) {
+	// Base query untuk mengambil data pasien
 	query := `
 		SELECT id_pasien, nama, tanggal_lahir, jenis_kelamin, tempat_lahir, nik, kelurahan, kecamatan, kota_tinggal, alamat, no_telp, tanggal_regist
 		FROM Pasien
-		ORDER BY tanggal_regist DESC
 	`
-	rows, err := s.DB.Query(query)
+	conditions := []string{}
+	args := []interface{}{}
+
+	// Jika ada filter nama, tambahkan kondisi WHERE
+	if strings.TrimSpace(namaFilter) != "" {
+		conditions = append(conditions, "nama LIKE ?")
+		args = append(args, "%"+namaFilter+"%")
+	}
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	query += " ORDER BY tanggal_regist DESC"
+
+	// Hitung offset berdasarkan page dan limit
+	offset := (page - 1) * limit
+	query += " LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	rows, err := s.DB.Query(query, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query error: %v", err)
 	}
 	defer rows.Close()
 
@@ -358,27 +379,29 @@ func (s *PendaftaranService) GetAllPasienData() ([]map[string]interface{}, error
 	for rows.Next() {
 		var idPasien int
 		var nama string
-		var tanggalLahir string // atau time.Time, jika diinginkan
+		var tanggalLahir string
 		var jenisKelamin, tempatLahir, nik, kelurahan, kecamatan, kotaTinggal, alamat, noTelp string
 		var tanggalRegist string
-		err = rows.Scan(&idPasien, &nama, &tanggalLahir, &jenisKelamin, &tempatLahir, &nik, &kelurahan, &kecamatan, &kotaTinggal, &alamat, &noTelp, &tanggalRegist)
-		if err != nil {
-			return nil, err
+
+		if err := rows.Scan(&idPasien, &nama, &tanggalLahir, &jenisKelamin, &tempatLahir, &nik, &kelurahan, &kecamatan, &kotaTinggal, &alamat, &noTelp, &tanggalRegist); err != nil {
+			return nil, fmt.Errorf("scan error: %v", err)
 		}
-		results = append(results, map[string]interface{}{
-			"ID_Pasien":         idPasien,
-			"Nama":              nama,
-			"Tanggal_Lahir":     tanggalLahir,
-			"Jenis_Kelamin":     jenisKelamin,
-			"Tempat_Lahir":      tempatLahir,
-			"NIK":               nik,
-			"Kelurahan":         kelurahan,
-			"Kecamatan":         kecamatan,
-			"Kota_Tinggal":      kotaTinggal,
-			"Alamat":            alamat,
-			"No_Telp":           noTelp,
-			"Tanggal_Regist":    tanggalRegist,
-		})
+
+		record := map[string]interface{}{
+			"ID_Pasien":      idPasien,
+			"Nama":           nama,
+			"Tanggal_Lahir":  tanggalLahir,
+			"Jenis_Kelamin":  jenisKelamin,
+			"Tempat_Lahir":   tempatLahir,
+			"NIK":            nik,
+			"Kelurahan":      kelurahan,
+			"Kecamatan":      kecamatan,
+			"Kota_Tinggal":   kotaTinggal,
+			"Alamat":         alamat,
+			"No_Telp":        noTelp,
+			"Tanggal_Regist": tanggalRegist,
+		}
+		results = append(results, record)
 	}
 	return results, nil
 }

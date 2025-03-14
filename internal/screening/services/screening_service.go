@@ -15,25 +15,36 @@ func NewScreeningService(db *sql.DB) *ScreeningService {
 	return &ScreeningService{DB: db}
 }
 
-func (s *ScreeningService) InputScreening(screening models.Screening) (int64, error) {
+func (s *ScreeningService) InputScreening(screening models.Screening, idAntrian int) (int64, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return 0, err
 	}
 
-	// 1. Insert data screening ke tabel Screening
+	// 1. Insert data screening ke tabel Screening (sesuai schema baru)
 	queryScreening := `
-		INSERT INTO Screening (ID_Pasien, ID_Karyawan, Tensi, Berat_Badan, Suhu_Tubuh, Tinggi_Badan, Gula_Darah, Detak_Nadi, Laju_Respirasi, Keterangan)
+		INSERT INTO Screening (
+			ID_Pasien, 
+			ID_Karyawan, 
+			systolic, 
+			diastolic, 
+			berat_badan, 
+			suhu_tubuh, 
+			tinggi_badan, 
+			detak_nadi, 
+			laju_respirasi, 
+			keterangan
+		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	res, err := tx.Exec(queryScreening,
 		screening.ID_Pasien,
 		screening.ID_Karyawan,
-		screening.Tensi,
+		screening.Systolic,
+		screening.Diastolic,
 		screening.Berat_Badan,
 		screening.Suhu_Tubuh,
 		screening.Tinggi_Badan,
-		screening.Gula_Darah,
 		screening.Detak_Nadi,
 		screening.Laju_Respirasi,
 		screening.Keterangan,
@@ -48,62 +59,46 @@ func (s *ScreeningService) InputScreening(screening models.Screening) (int64, er
 		return 0, err
 	}
 
-	// 2. Cari record Riwayat_Kunjungan untuk pasien yang belum diisi screening.
-	// Ambil ID_RM dari Rekam_Medis untuk pasien tersebut (record terbaru)
-	var idRM int64
-	err = tx.QueryRow(`
-		SELECT ID_RM FROM Rekam_Medis 
-		WHERE ID_Pasien = ? 
-		ORDER BY Created_At DESC LIMIT 1
-	`, screening.ID_Pasien).Scan(&idRM)
-	if err != nil {
-		tx.Rollback()
-		return 0, fmt.Errorf("failed to get ID_RM: %v", err)
-	}
-
-	// Cari record Riwayat_Kunjungan dengan ID_RM tersebut dan di mana ID_Screening masih NULL,
-	// ambil record terbaru.
-	var idKunjungan int64
-	err = tx.QueryRow(`
-		SELECT ID_Kunjungan FROM Riwayat_Kunjungan 
-		WHERE ID_RM = ? AND ID_Screening IS NULL 
-		ORDER BY Created_At DESC LIMIT 1
-	`, idRM).Scan(&idKunjungan)
-	if err != nil {
-		tx.Rollback()
-		return 0, fmt.Errorf("failed to get Riwayat_Kunjungan: %v", err)
-	}
-
-	// 3. Update record Riwayat_Kunjungan dengan memasukkan ID_Screening yang baru dibuat.
-	_, err = tx.Exec(`
-		UPDATE Riwayat_Kunjungan 
-		SET ID_Screening = ? 
-		WHERE ID_Kunjungan = ?
-	`, screeningID, idKunjungan)
+	// 2. Update Riwayat_Kunjungan record (gunakan query parameter id_antrian)
+	updateRK := `
+		UPDATE Riwayat_Kunjungan
+		SET ID_Screening = ?
+		WHERE id_antrian = ? AND ID_Screening IS NULL
+	`
+	res, err = tx.Exec(updateRK, screeningID, idAntrian)
 	if err != nil {
 		tx.Rollback()
 		return 0, err
 	}
-
-	// 4. Update status di tabel Antrian: ambil id_antrian dari Riwayat_Kunjungan dan set id_status menjadi 4
-	var idAntrian int64
-	err = tx.QueryRow(`
-		SELECT ID_Antrian FROM Riwayat_Kunjungan 
-		WHERE ID_Kunjungan = ?
-	`, idKunjungan).Scan(&idAntrian)
+	affected, err := res.RowsAffected()
 	if err != nil {
 		tx.Rollback()
-		return 0, fmt.Errorf("failed to get id_antrian from Riwayat_Kunjungan: %v", err)
+		return 0, err
+	}
+	if affected == 0 {
+		tx.Rollback()
+		return 0, fmt.Errorf("failed to update Riwayat_Kunjungan with screening ID")
 	}
 
-	_, err = tx.Exec(`
+	// 3. Update status di tabel Antrian (set id_status menjadi 4)
+	updateAntrian := `
 		UPDATE Antrian 
 		SET id_status = 4 
 		WHERE id_antrian = ?
-	`, idAntrian)
+	`
+	res, err = tx.Exec(updateAntrian, idAntrian)
 	if err != nil {
 		tx.Rollback()
 		return 0, fmt.Errorf("failed to update Antrian status: %v", err)
+	}
+	affected, err = res.RowsAffected()
+	if err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	if affected == 0 {
+		tx.Rollback()
+		return 0, fmt.Errorf("failed to update Antrian status")
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -116,11 +111,11 @@ func (s *ScreeningService) InputScreening(screening models.Screening) (int64, er
 // GetScreeningByPasien mengembalikan daftar record screening untuk pasien dengan ID_Pasien tertentu.
 func (s *ScreeningService) GetScreeningByPasien(idPasien int) ([]models.Screening, error) {
 	query := `
-		SELECT ID_Screening, ID_Pasien, ID_Karyawan, Tensi, Berat_Badan, Suhu_Tubuh, 
-		       Tinggi_Badan, Gula_Darah, Detak_Nadi, Laju_Respirasi, Keterangan, Created_At
+		SELECT id_screening, id_pasien, id_karyawan, systolic, diastolic, berat_badan, suhu_tubuh, 
+		       tinggi_badan, detak_nadi, laju_respirasi, keterangan, created_at
 		FROM Screening
-		WHERE ID_Pasien = ?
-		ORDER BY Created_At DESC
+		WHERE id_pasien = ?
+		ORDER BY created_at DESC
 	`
 	rows, err := s.DB.Query(query, idPasien)
 	if err != nil {
@@ -135,11 +130,11 @@ func (s *ScreeningService) GetScreeningByPasien(idPasien int) ([]models.Screenin
 			&rec.ID_Screening,
 			&rec.ID_Pasien,
 			&rec.ID_Karyawan,
-			&rec.Tensi,
+			&rec.Systolic,
+			&rec.Diastolic,
 			&rec.Berat_Badan,
 			&rec.Suhu_Tubuh,
 			&rec.Tinggi_Badan,
-			&rec.Gula_Darah,
 			&rec.Detak_Nadi,
 			&rec.Laju_Respirasi,
 			&rec.Keterangan,

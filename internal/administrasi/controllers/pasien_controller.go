@@ -171,20 +171,44 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 }
 
 func (pc *PasienController) GetAllPasienData(c echo.Context) error {
-    list, err := pc.Service.GetAllPasienData()
-    if err != nil {
-        return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-            "status":  http.StatusInternalServerError,
-            "message": "Failed to retrieve pasien data: " + err.Error(),
-            "data":    nil,
-        })
-    }
-    return c.JSON(http.StatusOK, map[string]interface{}{
-        "status":  http.StatusOK,
-        "message": "Data pasien retrieved successfully",
-        "data":    list,
-    })
+	// Ambil query parameter "nama", "page", dan "limit"
+	namaFilter := c.QueryParam("nama")
+	pageStr := c.QueryParam("page")
+	limitStr := c.QueryParam("limit")
+
+	// Set default pagination: page = 1, limit = 20 jika tidak disediakan
+	page := 1
+	limit := 20
+	var err error
+	if pageStr != "" {
+		page, err = strconv.Atoi(pageStr)
+		if err != nil || page < 1 {
+			page = 1
+		}
+	}
+	if limitStr != "" {
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil || limit < 1 {
+			limit = 20
+		}
+	}
+
+	list, err := pc.Service.GetAllPasienDataFiltered(namaFilter, page, limit)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve pasien data: " + err.Error(),
+			"data":    nil,
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Data pasien retrieved successfully",
+		"data":    list,
+	})
 }
+
+
 
 func (pc *PasienController) TundaPasienHandler(c echo.Context) error {
     idAntrianStr := c.QueryParam("id_antrian")

@@ -96,6 +96,10 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter.POST("/login", dokterController.LoginDokter) // Tidak pakai JWT
 	dokter.GET("/poliklinik", poliklinikController.GetActivePoliklinikList)
 	dokter.GET("/antrian/terlama", antrianController.GetAntrianTerlamaHandler, middlewares.JWTMiddleware())
+	dokter.POST("/input-screening", screeningController.InputScreening, middlewares.JWTMiddleware())
+	dokter.GET("/screening", screeningController.GetScreeningByPasienHandler, middlewares.JWTMiddleware())
+
+
 
 
 
