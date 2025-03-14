@@ -51,10 +51,9 @@ func (s *AntrianService) MasukkanPasien(idPoli int) (map[string]interface{}, err
 		return nil, fmt.Errorf("gagal mengupdate antrian, baris tidak ditemukan")
 	}
 
-	// 3. Ambil data tambahan: id_pasien, nama pasien, id_rm, dan tanggal_lahir dengan format YYYY-MM-DD
-	// Gunakan DATE_FORMAT di SQL untuk mengeluarkan tanggal lahir dalam format yang diinginkan.
+	// 3. Ambil data tambahan: id_pasien, nama pasien, jenis_kelamin, id_rm, dan tanggal_lahir dari pasien
 	queryDetails := `
-		SELECT p.id_pasien, p.nama, rm.id_rm, DATE_FORMAT(p.tanggal_lahir, '%Y-%m-%d') AS tanggal_lahir
+		SELECT p.id_pasien, p.nama, p.jenis_kelamin, rm.id_rm, p.tanggal_lahir
 		FROM Antrian a
 		JOIN Pasien p ON a.id_pasien = p.id_pasien
 		JOIN Rekam_Medis rm ON p.id_pasien = rm.id_pasien
@@ -63,14 +62,14 @@ func (s *AntrianService) MasukkanPasien(idPoli int) (map[string]interface{}, err
 		LIMIT 1
 	`
 	var idPasien int
-	var nama, tanggalLahirStr string
+	var nama, jenisKelamin, tanggalLahirStr string
 	var idRM int
-	err = s.DB.QueryRow(queryDetails, idAntrian).Scan(&idPasien, &nama, &idRM, &tanggalLahirStr)
+	err = s.DB.QueryRow(queryDetails, idAntrian).Scan(&idPasien, &nama, &jenisKelamin, &idRM, &tanggalLahirStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get detail data: %v", err)
 	}
 
-	// 4. Parse tanggal_lahir dan hitung umur.
+	// Parse tanggal_lahir dan hitung umur.
 	tanggalLahir, err := time.Parse("2006-01-02", tanggalLahirStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse tanggal_lahir: %v", err)
@@ -85,14 +84,13 @@ func (s *AntrianService) MasukkanPasien(idPoli int) (map[string]interface{}, err
 		"id_antrian":    idAntrian,
 		"id_pasien":     idPasien,
 		"nama_pasien":   nama,
+		"jenis_kelamin": jenisKelamin,
 		"id_rm":         idRM,
 		"umur":          umur,
 	}
 
 	return result, nil
 }
-
-
 
 
 // GetAntrianTerlama mengambil ID_Antrian dan Nomor_Antrian dari pasien dengan antrian paling lama (status = 1) pada hari ini
