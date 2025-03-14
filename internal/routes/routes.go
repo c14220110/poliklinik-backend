@@ -98,9 +98,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter.GET("/antrian/terlama", antrianController.GetAntrianTerlamaHandler, middlewares.JWTMiddleware())
 	dokter.POST("/input-screening", screeningController.InputScreening, middlewares.JWTMiddleware())
 	dokter.GET("/screening", screeningController.GetScreeningByPasienHandler, middlewares.JWTMiddleware())
-
-
-
+	dokter.POST("/masukkan", antrianController.MasukkanPasienHandler, middlewares.JWTMiddleware())
 
 
 	// Tambahkan endpoint dokter lain sesuai kebutuhan

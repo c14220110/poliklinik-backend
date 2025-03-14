@@ -38,11 +38,12 @@ func (ac *AntrianController) MasukkanPasienHandler(c echo.Context) error {
 		})
 	}
 
-	// Panggil service untuk melakukan update status antrian.
-	err = ac.AntrianService.MasukkanPasien(idPoli)
+	// Panggil service yang sudah diperbarui untuk mengubah status antrian
+	// dan mengembalikan detail data pasien.
+	result, err := ac.AntrianService.MasukkanPasien(idPoli)
 	if err != nil {
-		// Jika error mengindikasikan tidak ada baris yang ditemukan, kembalikan status 404.
-		if strings.Contains(err.Error(), "tidak ada pasien dengan status 0") {
+		// Jika error mengindikasikan tidak ada data yang ditemukan, kembalikan 404.
+		if strings.Contains(err.Error(), "tidak ada pasien") {
 			return c.JSON(http.StatusNotFound, map[string]interface{}{
 				"status":  http.StatusNotFound,
 				"message": err.Error(),
@@ -60,10 +61,9 @@ func (ac *AntrianController) MasukkanPasienHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Pasien berhasil dimasukkan",
-		"data":    nil,
+		"data":    result,
 	})
 }
-
 
 
 // GetAntrianTerlamaHandler menangani request untuk mendapatkan antrian pasien paling lama dengan status = 0
