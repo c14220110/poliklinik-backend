@@ -70,7 +70,7 @@ func (s *AntrianService) MasukkanPasien(idPoli int) (map[string]interface{}, err
 	}
 
 	// Parse tanggal_lahir dan hitung umur.
-	tanggalLahir, err := time.Parse("2006-01-02", tanggalLahirStr)
+	tanggalLahir, err := time.Parse(time.RFC3339, tanggalLahirStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse tanggal_lahir: %v", err)
 	}
