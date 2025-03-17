@@ -21,6 +21,7 @@ require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/golang-jwt/jwt/v4 v4.5.1
+	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo v3.3.10+incompatible
 	github.com/labstack/echo/v4 v4.13.3
 	github.com/square/go-jose/v3 v3.0.0-20200630053402-0a67ce9b0693

@@ -38,9 +38,9 @@ func (cs *CMSService) CreateCMSWithElements(cms models.CMS, elements []models.CM
 
 	// 1. Insert ke tabel CMS
 	cmsInsert := `
-		INSERT INTO CMS (id_poli, title, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
-	`
+        INSERT INTO CMS (id_poli, title, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+    `
 	now := time.Now()
 	res, err := tx.Exec(cmsInsert, cms.IDPoli, cms.Title, now, now)
 	if err != nil {
@@ -54,29 +54,42 @@ func (cs *CMSService) CreateCMSWithElements(cms models.CMS, elements []models.CM
 	}
 
 	// 2. Insert setiap elemen ke tabel CMS_Elements
- 	elemInsert := `
-    INSERT INTO CMS_Elements (id_cms, section_name, element_type, element_label, element_name, element_options, is_required)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-	`
+	elemInsert := `
+        INSERT INTO CMS_Elements (id_cms, section_name, sub_section_name, element_type, element_label, element_name, element_options, element_size, element_hint, is_required)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
 	for _, e := range elements {
-    _, err := tx.Exec(elemInsert, idCMS, e.SectionName, e.ElementType, e.ElementLabel, e.ElementName, e.ElementOptions, e.IsRequired)
-    if err != nil {
-        tx.Rollback()
-        return 0, fmt.Errorf("failed to insert CMS element: %v", err)
-    }
-}
+		var elementOptions interface{}
+		if e.ElementOptions == "" {
+			elementOptions = nil // Set NULL jika kosong
+		} else {
+			elementOptions = e.ElementOptions
+		}
+
+		var elementSize interface{}
+		if e.ElementSize == "" {
+			elementSize = nil // Set NULL jika kosong
+		} else {
+			elementSize = e.ElementSize
+		}
+
+		_, err := tx.Exec(elemInsert, idCMS, e.SectionName, e.SubSectionName, e.ElementType, e.ElementLabel, e.ElementName, elementOptions, elementSize, e.ElementHint, e.IsRequired)
+		if err != nil {
+			tx.Rollback()
+			return 0, fmt.Errorf("failed to insert CMS element: %v", err)
+		}
+	}
 
 	// 3. Insert ke tabel Management_CMS
 	managementInsert := `
-	INSERT INTO Management_CMS (id_management, id_cms, created_by, updated_by)
-	VALUES (?, ?, ?, ?)
-	`
+        INSERT INTO Management_CMS (id_management, id_cms, created_by, updated_by)
+        VALUES (?, ?, ?, ?)
+    `
 	_, err = tx.Exec(managementInsert, managementInfo.IDManagement, idCMS, managementInfo.IDManagement, managementInfo.IDManagement)
 	if err != nil {
-	tx.Rollback()
-	return 0, fmt.Errorf("failed to insert into Management_CMS: %v", err)
+		tx.Rollback()
+		return 0, fmt.Errorf("failed to insert into Management_CMS: %v", err)
 	}
-
 
 	if err = tx.Commit(); err != nil {
 		return 0, err

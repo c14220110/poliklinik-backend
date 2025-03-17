@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,11 +28,14 @@ type CreateCMSRequest struct {
 }
 
 type CMSElementRequest struct {
-    SectionName    string `json:"section_name"` // Tambahkan ini
+    SectionName    string `json:"section_name"`
+    SubSectionName string `json:"sub_section_name"` // Kolom baru
     ElementType    string `json:"element_type"`
     ElementLabel   string `json:"element_label"`
-    ElementOptions string `json:"element_options"`
-    IsRequired     bool   `json:"is_required"`
+    ElementOptions string `json:"element_options"` // Bisa kosong
+    ElementSize    string `json:"element_size"`    // Kolom baru
+    ElementHint    string `json:"element_hint"`    // Kolom baru
+    IsRequired     bool   `json:"is_required"`     // Default false
 }
 
 type UpdateCMSRequest struct {
@@ -77,6 +81,23 @@ func (cc *CMSController) CreateCMSHandler(c echo.Context) error {
 		})
 	}
 
+	// Validasi element_size
+	validSizes := map[string]bool{
+		"25%":  true,
+		"50%":  true,
+		"75%":  true,
+		"100%": true,
+	}
+	for _, e := range req.Elements {
+		if e.ElementSize != "" && !validSizes[e.ElementSize] {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status":  http.StatusBadRequest,
+				"message": fmt.Sprintf("Invalid element_size: %s. Must be '25%%', '50%%', '75%%', or '100%%'", e.ElementSize),
+				"data":    nil,
+			})
+		}
+	}
+
 	// Buat objek CMS
 	cms := models.CMS{
 		IDPoli: idPoli,
@@ -90,11 +111,14 @@ func (cc *CMSController) CreateCMSHandler(c echo.Context) error {
 		// lowercase dan spasi diganti dengan underscore
 		elementName := strings.ToLower(strings.ReplaceAll(e.ElementLabel, " ", "_"))
 		elem := models.CMSElement{
-			SectionName:    e.SectionName, // Tambahkan ini
+			SectionName:    e.SectionName,
+			SubSectionName: e.SubSectionName,
 			ElementType:    e.ElementType,
 			ElementLabel:   e.ElementLabel,
 			ElementName:    elementName,
 			ElementOptions: e.ElementOptions,
+			ElementSize:    e.ElementSize,
+			ElementHint:    e.ElementHint,
 			IsRequired:     e.IsRequired,
 		}
 		elements = append(elements, elem)
@@ -135,7 +159,6 @@ func (cc *CMSController) CreateCMSHandler(c echo.Context) error {
 		},
 	})
 }
-
 
 func (cc *CMSController) GetCMSByPoliklinikHandler(c echo.Context) error {
     poliIDStr := c.QueryParam("id_poli")

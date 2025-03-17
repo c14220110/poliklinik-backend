@@ -1,12 +1,15 @@
 package controllers
 
 import (
+	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/administrasi/models"
 	"github.com/c14220110/poliklinik-backend/internal/administrasi/services"
+	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 )
 
@@ -31,6 +34,11 @@ type PasienController struct {
 
 func NewPasienController(service *services.PendaftaranService) *PasienController {
 	return &PasienController{Service: service}
+}
+
+var upgrader = websocket.Upgrader{
+	// Izinkan origin apa saja; sesuaikan untuk production
+	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
 func (pc *PasienController) RegisterPasien(c echo.Context) error {
@@ -320,4 +328,46 @@ func (pc *PasienController) GetAllStatusAntrianHandler(c echo.Context) error {
         "message": "Status antrian retrieved successfully",
         "data":    list,
     })
+}
+
+func (pc *PasienController) GetAntrianTodayWebSocket(c echo.Context) error {
+	// Upgrade koneksi HTTP ke WebSocket
+	ws, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	if err != nil {
+		return err
+	}
+	defer ws.Close()
+
+	// Buat ticker untuk mengirim data tiap 10 detik
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Ambil parameter status jika ada
+			statusFilter := c.QueryParam("status")
+			// Panggil service untuk mendapatkan data antrian hari ini
+			list, err := pc.Service.GetAntrianToday(statusFilter)
+			if err != nil {
+				ws.WriteMessage(websocket.TextMessage, []byte("Error: "+err.Error()))
+				continue
+			}
+
+			// Serialisasi data ke JSON
+			message, err := json.Marshal(list)
+			if err != nil {
+				ws.WriteMessage(websocket.TextMessage, []byte("Error: "+err.Error()))
+				continue
+			}
+
+			// Kirim data melalui WebSocket
+			if err := ws.WriteMessage(websocket.TextMessage, message); err != nil {
+				return err
+			}
+
+			// Cetak notifikasi di terminal
+			log.Printf("API GetAntrianToday berhasil dipanggil pada %s", time.Now().Format("15:04:05"))
+		}
+	}
 }
