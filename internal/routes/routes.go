@@ -79,9 +79,6 @@ func Init(e *echo.Echo, db *sql.DB) {
 	administrasi.GET("/status_antrian", pasienController.GetAllStatusAntrianHandler, middlewares.JWTMiddleware())
 	administrasi.GET("/poliklinik", poliklinikController.GetPoliklinikList, middlewares.JWTMiddleware())
 
-	//COBA WEBSOKETTT
-	administrasi.GET("/antrian/today/ws", pasienController.GetAntrianTodayWebSocket)
-
 
 	billing := administrasi.Group("/billing")
 	billing.GET("", billingController.ListBilling, middlewares.JWTMiddleware())
