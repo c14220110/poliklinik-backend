@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/administrasi/models"
@@ -216,7 +217,7 @@ func (pc *PasienController) TundaPasienHandler(c echo.Context) error {
     if idAntrianStr == "" {
         return c.JSON(http.StatusBadRequest, map[string]interface{}{
             "status":  http.StatusBadRequest,
-            "message": "id_antrian parameter is required",
+            "message": "parameter id_antrian wajib diisi",
             "data":    nil,
         })
     }
@@ -224,23 +225,30 @@ func (pc *PasienController) TundaPasienHandler(c echo.Context) error {
     if err != nil {
         return c.JSON(http.StatusBadRequest, map[string]interface{}{
             "status":  http.StatusBadRequest,
-            "message": "id_antrian must be a number",
+            "message": "id_antrian harus berupa angka",
             "data":    nil,
         })
     }
 
     err = pc.Service.TundaPasien(idAntrian)
     if err != nil {
+        if strings.Contains(err.Error(), "tidak ditemukan") {
+            return c.JSON(http.StatusNotFound, map[string]interface{}{
+                "status":  http.StatusNotFound,
+                "message": err.Error(),
+                "data":    nil,
+            })
+        }
         return c.JSON(http.StatusInternalServerError, map[string]interface{}{
             "status":  http.StatusInternalServerError,
-            "message": "Failed to tunda pasien: " + err.Error(),
+            "message": "Gagal menunda pasien: " + err.Error(),
             "data":    nil,
         })
     }
 
     return c.JSON(http.StatusOK, map[string]interface{}{
         "status":  http.StatusOK,
-        "message": "Pasien successfully tunda",
+        "message": "Pasien berhasil ditunda",
         "data":    nil,
     })
 }
@@ -251,7 +259,7 @@ func (pc *PasienController) RescheduleAntrianHandler(c echo.Context) error {
     if idAntrianStr == "" || idPoliStr == "" {
         return c.JSON(http.StatusBadRequest, map[string]interface{}{
             "status":  http.StatusBadRequest,
-            "message": "id_antrian and id_poli parameters are required",
+            "message": "parameter id_antrian dan id_poli wajib diisi",
             "data":    nil,
         })
     }
@@ -259,7 +267,7 @@ func (pc *PasienController) RescheduleAntrianHandler(c echo.Context) error {
     if err != nil {
         return c.JSON(http.StatusBadRequest, map[string]interface{}{
             "status":  http.StatusBadRequest,
-            "message": "id_antrian must be a number",
+            "message": "id_antrian harus berupa angka",
             "data":    nil,
         })
     }
@@ -267,23 +275,30 @@ func (pc *PasienController) RescheduleAntrianHandler(c echo.Context) error {
     if err != nil {
         return c.JSON(http.StatusBadRequest, map[string]interface{}{
             "status":  http.StatusBadRequest,
-            "message": "id_poli must be a number",
+            "message": "id_poli harus berupa angka",
             "data":    nil,
         })
     }
 
     newPriority, err := pc.Service.RescheduleAntrianPriority(idAntrian, idPoli)
     if err != nil {
+        if strings.Contains(err.Error(), "tidak ditemukan") || strings.Contains(err.Error(), "tidak dalam status 'Ditunda'") {
+            return c.JSON(http.StatusBadRequest, map[string]interface{}{
+                "status":  http.StatusBadRequest,
+                "message": err.Error(),
+                "data":    nil,
+            })
+        }
         return c.JSON(http.StatusInternalServerError, map[string]interface{}{
             "status":  http.StatusInternalServerError,
-            "message": "Failed to reschedule antrian: " + err.Error(),
+            "message": "Gagal mereschedule antrian: " + err.Error(),
             "data":    nil,
         })
     }
 
     return c.JSON(http.StatusOK, map[string]interface{}{
         "status":  http.StatusOK,
-        "message": "Antrian rescheduled successfully",
+        "message": "Antrian berhasil di-reschedule",
         "data": map[string]interface{}{
             "new_priority_order": newPriority,
         },

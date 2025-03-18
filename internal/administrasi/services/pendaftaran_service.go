@@ -69,20 +69,39 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(p models.Pasien, idPoli
         return 0, 0, 0, err
     }
 
-    // 3. Buat Rekam Medis (insert ID_Pasien ke Rekam_Medis)
-    queryRM := `INSERT INTO Rekam_Medis (id_pasien) VALUES (?)`
-    _, err = tx.Exec(queryRM, patientID)
-    if err != nil {
+    // 3. Generate id_rm dengan format "RM(Tahun)(5 digit)"
+    tahun := time.Now().Year() // Misalnya, 2025
+    var count int
+    err = tx.QueryRow("SELECT count FROM Counter_RM WHERE tahun = ? FOR UPDATE", tahun).Scan(&count)
+    if err == sql.ErrNoRows {
+        // Jika belum ada record untuk tahun ini, buat baru dengan count = 1
+        _, err = tx.Exec("INSERT INTO Counter_RM (tahun, count) VALUES (?, 1)", tahun)
+        if err != nil {
+            tx.Rollback()
+            return 0, 0, 0, fmt.Errorf("failed to insert into Counter_RM: %v", err)
+        }
+        count = 1
+    } else if err != nil {
         tx.Rollback()
-        return 0, 0, 0, err
+        return 0, 0, 0, fmt.Errorf("failed to select from Counter_RM: %v", err)
+    } else {
+        // Jika ada record, tambah count
+        count++
+        _, err = tx.Exec("UPDATE Counter_RM SET count = ? WHERE tahun = ?", count, tahun)
+        if err != nil {
+            tx.Rollback()
+            return 0, 0, 0, fmt.Errorf("failed to update Counter_RM: %v", err)
+        }
     }
+    formattedCount := fmt.Sprintf("%05d", count) // Format ke 5 digit, misalnya "00001"
+    idRM := fmt.Sprintf("RM%d%s", tahun, formattedCount) // Misalnya, "RM202500001"
 
-    // 4. Ambil ID_RM (Rekam_Medis) untuk pasien tersebut
-    var idRM int64
-    err = tx.QueryRow("SELECT id_rm FROM Rekam_Medis WHERE id_pasien = ? ORDER BY created_at DESC LIMIT 1", patientID).Scan(&idRM)
+    // 4. Insert ke Rekam_Medis dengan id_rm yang sudah dibuat
+    queryRM := `INSERT INTO Rekam_Medis (id_rm, id_pasien) VALUES (?, ?)`
+    _, err = tx.Exec(queryRM, idRM, patientID)
     if err != nil {
         tx.Rollback()
-        return 0, 0, 0, fmt.Errorf("failed to get Rekam_Medis for pasien: %v", err)
+        return 0, 0, 0, fmt.Errorf("failed to insert into Rekam_Medis: %v", err)
     }
 
     // 5. Buat record baru di Riwayat_Kunjungan (sementara catatan kosong)
@@ -176,7 +195,6 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(p models.Pasien, idPoli
         return 0, 0, 0, err
     }
 
-    // Kembalikan id_pasien, id_antrian, dan nomor_antrian
     return patientID, idAntrian, nomorAntrian, nil
 }
 
@@ -238,7 +256,7 @@ func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(p models.Pasien, i
     }
 
     // 3. Ambil ID_RM (Rekam_Medis) untuk pasien tersebut
-    var idRM int64
+    var idRM string
     err = tx.QueryRow("SELECT id_rm FROM Rekam_Medis WHERE id_pasien = ? ORDER BY created_at DESC LIMIT 1", idPasien).Scan(&idRM)
     if err != nil {
         tx.Rollback()
@@ -342,7 +360,6 @@ func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(p models.Pasien, i
 
 
 
-
 func (s *PendaftaranService) GetAllPasienDataFiltered(namaFilter string, page, limit int) ([]map[string]interface{}, error) {
 	// Base query untuk mengambil data pasien
 	query := `
@@ -408,16 +425,43 @@ func (s *PendaftaranService) GetAllPasienDataFiltered(namaFilter string, page, l
 
 
 func (s *PendaftaranService) TundaPasien(idAntrian int) error {
-	// Dapatkan id_status untuk "Ditunda"
-	var idStatus int
-	err := s.DB.QueryRow("SELECT id_status FROM Status_Antrian WHERE status = 'Ditunda' LIMIT 1").Scan(&idStatus)
-	if err != nil {
-		return fmt.Errorf("failed to get id_status for 'Ditunda': %v", err)
-	}
+    // 1. Periksa apakah antrian ada
+    var exists bool
+    err := s.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM Antrian WHERE id_antrian = ?)", idAntrian).Scan(&exists)
+    if err != nil {
+        return fmt.Errorf("gagal memeriksa keberadaan antrian: %v", err)
+    }
+    if !exists {
+        return fmt.Errorf("antrian dengan id %d tidak ditemukan", idAntrian)
+    }
 
-	query := `UPDATE Antrian SET id_status = ? WHERE id_antrian = ?`
-	_, err = s.DB.Exec(query, idStatus, idAntrian)
-	return err
+    // 2. Dapatkan id_status untuk "Ditunda"
+    var idStatus int
+    err = s.DB.QueryRow("SELECT id_status FROM Status_Antrian WHERE status = 'Ditunda' LIMIT 1").Scan(&idStatus)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            return fmt.Errorf("status 'Ditunda' tidak ditemukan di tabel Status_Antrian")
+        }
+        return fmt.Errorf("gagal mendapatkan id_status untuk 'Ditunda': %v", err)
+    }
+
+    // 3. Update status antrian
+    query := `UPDATE Antrian SET id_status = ? WHERE id_antrian = ?`
+    result, err := s.DB.Exec(query, idStatus, idAntrian)
+    if err != nil {
+        return fmt.Errorf("gagal mengupdate status antrian: %v", err)
+    }
+
+    // 4. Periksa apakah ada baris yang terupdate
+    rowsAffected, err := result.RowsAffected()
+    if err != nil {
+        return fmt.Errorf("gagal memeriksa jumlah baris yang terupdate: %v", err)
+    }
+    if rowsAffected == 0 {
+        return fmt.Errorf("tidak ada baris yang terupdate, antrian dengan id %d mungkin tidak ada", idAntrian)
+    }
+
+    return nil
 }
 
 
@@ -429,73 +473,89 @@ func (s *PendaftaranService) TundaPasien(idAntrian int) error {
 // 3. Hitung newPriority = MIN_waiting + 2 jika count waiting >= 2, atau +1 jika count waiting kurang dari 2.
 // 4. Update record antrian tersebut dengan newPriority dan ubah id_status menjadi nilai untuk "Menunggu".
 func (s *PendaftaranService) RescheduleAntrianPriority(idAntrian int, idPoli int) (int64, error) {
-	// 1. Periksa apakah record id_antrian ada di id_poli dengan status Ditunda (id_status = 2)
-	var currentStatus int
-	err := s.DB.QueryRow("SELECT id_status FROM Antrian WHERE id_antrian = ? AND id_poli = ?", idAntrian, idPoli).Scan(&currentStatus)
-	if err != nil {
-		return 0, fmt.Errorf("failed to find antrian: %v", err)
-	}
-	if currentStatus != 2 {
-		return 0, fmt.Errorf("antrian is not in 'Ditunda' status")
-	}
+    // 1. Periksa apakah antrian ada dan dalam status "Ditunda" (misal id_status = 2)
+    var currentStatus int
+    err := s.DB.QueryRow("SELECT id_status FROM Antrian WHERE id_antrian = ? AND id_poli = ?", idAntrian, idPoli).Scan(&currentStatus)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            return 0, fmt.Errorf("antrian dengan id %d dan poli %d tidak ditemukan", idAntrian, idPoli)
+        }
+        return 0, fmt.Errorf("gagal menemukan antrian: %v", err)
+    }
+    if currentStatus != 2 { // Misalkan 2 adalah id_status untuk "Ditunda"
+        return 0, fmt.Errorf("antrian tidak dalam status 'Ditunda', status saat ini: %d", currentStatus)
+    }
 
-	// 2. Tentukan hari ini
-	today := time.Now().Format("2006-01-02")
+    // 2. Tentukan hari ini
+    today := time.Now().Format("2006-01-02")
 
-	// 3. Cari MIN(nomor_antrian) dari antrian dengan status "Menunggu" (id_status = 1)
-	var minWaiting sql.NullInt64
-	queryMin := `
-		SELECT MIN(nomor_antrian)
-		FROM Antrian
-		WHERE id_poli = ? AND DATE(created_at) = ? AND id_status = 1
-	`
-	err = s.DB.QueryRow(queryMin, idPoli, today).Scan(&minWaiting)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get minimum waiting nomor_antrian: %v", err)
-	}
+    // 3. Cari MIN(nomor_antrian) dari antrian dengan status "Menunggu" (id_status = 1)
+    var minWaiting sql.NullInt64
+    queryMin := `
+        SELECT MIN(nomor_antrian)
+        FROM Antrian
+        WHERE id_poli = ? AND DATE(created_at) = ? AND id_status = 1
+    `
+    err = s.DB.QueryRow(queryMin, idPoli, today).Scan(&minWaiting)
+    if err != nil {
+        return 0, fmt.Errorf("gagal mendapatkan nomor antrian minimum untuk 'Menunggu': %v", err)
+    }
 
-	// 4. Hitung jumlah antrian waiting (id_status = 1) untuk id_poli hari ini
-	var countWaiting int
-	queryCount := `
-		SELECT COUNT(*)
-		FROM Antrian
-		WHERE id_poli = ? AND DATE(created_at) = ? AND id_status = 1
-	`
-	err = s.DB.QueryRow(queryCount, idPoli, today).Scan(&countWaiting)
-	if err != nil {
-		return 0, fmt.Errorf("failed to count waiting antrian: %v", err)
-	}
+    // 4. Hitung jumlah antrian waiting (id_status = 1) untuk id_poli hari ini
+    var countWaiting int
+    queryCount := `
+        SELECT COUNT(*)
+        FROM Antrian
+        WHERE id_poli = ? AND DATE(created_at) = ? AND id_status = 1
+    `
+    err = s.DB.QueryRow(queryCount, idPoli, today).Scan(&countWaiting)
+    if err != nil {
+        return 0, fmt.Errorf("gagal menghitung jumlah antrian menunggu: %v", err)
+    }
 
-	// 5. Tentukan newPriority:
-	var newPriority int64
-	if minWaiting.Valid {
-		if countWaiting >= 2 {
-			newPriority = minWaiting.Int64 + 2
-		} else {
-			newPriority = minWaiting.Int64 + 1
-		}
-	} else {
-		newPriority = 1
-	}
+    // 5. Tentukan newPriority
+    var newPriority int64
+    if minWaiting.Valid {
+        if countWaiting >= 2 {
+            newPriority = minWaiting.Int64 + 2
+        } else {
+            newPriority = minWaiting.Int64 + 1
+        }
+    } else {
+        newPriority = 1 // Jika tidak ada antrian menunggu
+    }
 
-	// 6. Ambil id_status untuk "Menunggu" dari tabel Status_Antrian (harus menghasilkan 1)
-	var waitingStatus int
-	err = s.DB.QueryRow("SELECT id_status FROM Status_Antrian WHERE status = 'Menunggu' LIMIT 1").Scan(&waitingStatus)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get id_status for 'Menunggu': %v", err)
-	}
+    // 6. Ambil id_status untuk "Menunggu"
+    var waitingStatus int
+    err = s.DB.QueryRow("SELECT id_status FROM Status_Antrian WHERE status = 'Menunggu' LIMIT 1").Scan(&waitingStatus)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            return 0, fmt.Errorf("status 'Menunggu' tidak ditemukan di tabel Status_Antrian")
+        }
+        return 0, fmt.Errorf("gagal mendapatkan id_status untuk 'Menunggu': %v", err)
+    }
 
-	// 7. Update record antrian: ubah priority_order dan id_status menjadi waitingStatus (1)
-	updateQuery := `
-		UPDATE Antrian
-		SET priority_order = ?, id_status = ?
-		WHERE id_antrian = ?
-	`
-	_, err = s.DB.Exec(updateQuery, newPriority, waitingStatus, idAntrian)
-	if err != nil {
-		return 0, fmt.Errorf("failed to update antrian: %v", err)
-	}
-	return newPriority, nil
+    // 7. Update record antrian
+    updateQuery := `
+        UPDATE Antrian
+        SET priority_order = ?, id_status = ?
+        WHERE id_antrian = ?
+    `
+    result, err := s.DB.Exec(updateQuery, newPriority, waitingStatus, idAntrian)
+    if err != nil {
+        return 0, fmt.Errorf("gagal mengupdate antrian: %v", err)
+    }
+
+    // 8. Periksa apakah ada baris yang terupdate
+    rowsAffected, err := result.RowsAffected()
+    if err != nil {
+        return 0, fmt.Errorf("gagal memeriksa jumlah baris yang terupdate: %v", err)
+    }
+    if rowsAffected == 0 {
+        return 0, fmt.Errorf("tidak ada baris yang terupdate, antrian dengan id %d mungkin tidak ada", idAntrian)
+    }
+
+    return newPriority, nil
 }
 
 
@@ -541,7 +601,7 @@ func (s *PendaftaranService) GetAntrianToday(statusFilter string) ([]map[string]
 	for rows.Next() {
 		var idPasien int
 		var nama string
-		var idRM sql.NullInt64
+		var idRM sql.NullString
 		var idPoli int
 		var namaPoli sql.NullString
 		var nomorAntrian int
@@ -565,7 +625,7 @@ func (s *PendaftaranService) GetAntrianToday(statusFilter string) ([]map[string]
 			"priority_order": nil,
 		}
 		if idRM.Valid {
-			record["id_rm"] = idRM.Int64
+			record["id_rm"] = idRM.String
 		}
 		if namaPoli.Valid {
 			record["nama_poli"] = namaPoli.String
