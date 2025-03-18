@@ -134,7 +134,7 @@ func (s *DokterService) GetListAntrianByPoli(idPoli int) ([]map[string]interface
 	var result []map[string]interface{}
 	for rows.Next() {
 		var nama string
-		var idRM sql.NullInt64
+		var idRM sql.NullString
 		var namaPoli sql.NullString
 		var nomorAntrian sql.NullInt64
 		var status int
@@ -155,7 +155,7 @@ func (s *DokterService) GetListAntrianByPoli(idPoli int) ([]map[string]interface
 		}
 
 		if idRM.Valid {
-			record["id_rm"] = idRM.Int64
+			record["id_rm"] = idRM.String
 		}
 		if namaPoli.Valid {
 			record["nama_poli"] = namaPoli.String

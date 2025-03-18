@@ -63,7 +63,7 @@ func (s *AntrianService) MasukkanPasien(idPoli int) (map[string]interface{}, err
 	`
 	var idPasien int
 	var nama, jenisKelamin, tanggalLahirStr string
-	var idRM int
+	var idRM string
 	var nomorAntrian int
 
 	err = s.DB.QueryRow(queryDetails, idAntrian).Scan(&idPasien, &nama, &jenisKelamin, &idRM, &tanggalLahirStr, &nomorAntrian)
