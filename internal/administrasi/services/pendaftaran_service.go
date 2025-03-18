@@ -664,3 +664,33 @@ func (s *PendaftaranService) GetAllStatusAntrian() ([]map[string]interface{}, er
 	}
 	return list, nil
 }
+
+func (s *PendaftaranService) BatalkanAntrian(idAntrian int) error {
+    // 1. Periksa apakah antrian dengan id_antrian ada
+    var exists bool
+    err := s.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM Antrian WHERE id_antrian = ?)", idAntrian).Scan(&exists)
+    if err != nil {
+        return fmt.Errorf("gagal memeriksa keberadaan antrian: %v", err)
+    }
+    if !exists {
+        return fmt.Errorf("antrian dengan id %d tidak ditemukan", idAntrian)
+    }
+
+    // 2. Update id_status menjadi 6 (Dibatalkan)
+    query := `UPDATE Antrian SET id_status = 6, updated_at = CURRENT_TIMESTAMP WHERE id_antrian = ?`
+    result, err := s.DB.Exec(query, idAntrian)
+    if err != nil {
+        return fmt.Errorf("gagal mengupdate status antrian: %v", err)
+    }
+
+    // 3. Pastikan ada baris yang terupdate
+    rowsAffected, err := result.RowsAffected()
+    if err != nil {
+        return fmt.Errorf("gagal memeriksa jumlah baris yang terupdate: %v", err)
+    }
+    if rowsAffected == 0 {
+        return fmt.Errorf("tidak ada antrian yang diperbarui, id_antrian %d mungkin tidak valid", idAntrian)
+    }
+
+    return nil
+}

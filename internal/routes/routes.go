@@ -78,6 +78,8 @@ func Init(e *echo.Echo, db *sql.DB) {
 	administrasi.GET("/antrian/today", pasienController.GetAntrianTodayHandler, middlewares.JWTMiddleware())
 	administrasi.GET("/status_antrian", pasienController.GetAllStatusAntrianHandler, middlewares.JWTMiddleware())
 	administrasi.GET("/poliklinik", poliklinikController.GetPoliklinikList, middlewares.JWTMiddleware())
+	administrasi.PUT("/antrian/batalkan", pasienController.BatalkanAntrianHandler, middlewares.JWTMiddleware())
+
 
 
 	billing := administrasi.Group("/billing")
@@ -99,7 +101,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter.GET("/antrian/terlama", antrianController.GetAntrianTerlamaHandler, middlewares.JWTMiddleware())
 	dokter.POST("/input-screening", screeningController.InputScreening, middlewares.JWTMiddleware())
 	dokter.GET("/screening", screeningController.GetScreeningByPasienHandler, middlewares.JWTMiddleware())
-	dokter.POST("/masukkan", antrianController.MasukkanPasienHandler, middlewares.JWTMiddleware())
+	dokter.POST("/masukkan", antrianController.MasukkanPasienKeDokterHandler, middlewares.JWTMiddleware())
 
 
 	// Tambahkan endpoint dokter lain sesuai kebutuhan
@@ -143,5 +145,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.POST("/cms/create", cmsController.CreateCMSHandler, middlewares.JWTMiddleware())
 	management.PUT("/cms/update", cmsController.UpdateCMSHandler, middlewares.JWTMiddleware())
 	management.GET("/shift/karyawan", shiftController.GetKaryawanListHandler, middlewares.JWTMiddleware())
+	management.GET("/karyawan/tanpa-shift", shiftController.GetKaryawanTanpaShiftHandler, middlewares.JWTMiddleware())
+	management.POST("/shift/assign-new", shiftController.AssignShiftHandlerNew, middlewares.JWTMiddleware())
 
 }

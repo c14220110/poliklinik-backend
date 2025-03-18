@@ -102,3 +102,49 @@ func (ac *AntrianController) GetAntrianTerlamaHandler(c echo.Context) error {
         "data":    data,
     })
 }
+
+func (ac *AntrianController) MasukkanPasienKeDokterHandler(c echo.Context) error {
+	// Ambil parameter id_poli dari query string.
+	idPoliStr := c.QueryParam("id_poli")
+	if idPoliStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_poli parameter is required",
+			"data":    nil,
+		})
+	}
+	idPoli, err := strconv.Atoi(idPoliStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_poli must be a number",
+			"data":    nil,
+		})
+	}
+
+	// Panggil service yang sudah diperbarui untuk mengubah status antrian
+	// dan mengembalikan detail data pasien.
+	result, err := ac.AntrianService.MasukkanPasienKeDokter(idPoli)
+	if err != nil {
+		// Jika error mengindikasikan tidak ada data yang ditemukan, kembalikan 404.
+		if strings.Contains(err.Error(), "tidak ada pasien") {
+			return c.JSON(http.StatusNotFound, map[string]interface{}{
+				"status":  http.StatusNotFound,
+				"message": err.Error(),
+				"data":    nil,
+			})
+		}
+		// Untuk error lain, kembalikan status 500.
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to update antrian: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Pasien berhasil dimasukkan",
+		"data":    result,
+	})
+}

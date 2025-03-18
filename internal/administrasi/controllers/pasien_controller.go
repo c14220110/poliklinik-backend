@@ -338,3 +338,48 @@ func (pc *PasienController) GetAllStatusAntrianHandler(c echo.Context) error {
     })
 }
 
+func (pc *PasienController) BatalkanAntrianHandler(c echo.Context) error {
+    // 1. Ambil query parameter id_antrian
+    idAntrianStr := c.QueryParam("id_antrian")
+    if idAntrianStr == "" {
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{
+            "status":  http.StatusBadRequest,
+            "message": "parameter id_antrian wajib diisi",
+            "data":    nil,
+        })
+    }
+
+    // 2. Konversi ke integer
+    idAntrian, err := strconv.Atoi(idAntrianStr)
+    if err != nil {
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{
+            "status":  http.StatusBadRequest,
+            "message": "id_antrian harus berupa angka",
+            "data":    nil,
+        })
+    }
+
+    // 3. Panggil fungsi service untuk membatalkan antrian
+    err = pc.Service.BatalkanAntrian(idAntrian)
+    if err != nil {
+        if strings.Contains(err.Error(), "tidak ditemukan") {
+            return c.JSON(http.StatusNotFound, map[string]interface{}{
+                "status":  http.StatusNotFound,
+                "message": err.Error(),
+                "data":    nil,
+            })
+        }
+        return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+            "status":  http.StatusInternalServerError,
+            "message": "gagal membatalkan antrian: " + err.Error(),
+            "data":    nil,
+        })
+    }
+
+    // 4. Respons sukses
+    return c.JSON(http.StatusOK, map[string]interface{}{
+        "status":  http.StatusOK,
+        "message": "antrian berhasil dibatalkan",
+        "data":    nil,
+    })
+}
