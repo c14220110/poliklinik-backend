@@ -135,6 +135,8 @@ func (ps *PoliklinikService) SoftDeletePoliklinik(idPoli int, idManagement int) 
 
 // AddPoliklinikWithManagement menambahkan record Poliklinik dan mencatat siapa yang menambahkannya ke tabel Management_Poli.
 // Untuk Poliklinik baru, id_status diset 1 (aktif).
+// AddPoliklinikWithManagement menambahkan record Poliklinik dan mencatat siapa yang menambahkannya ke tabel Management_Poli.
+// Untuk Poliklinik baru, id_status diset 1 (aktif).
 func (ps *PoliklinikService) AddPoliklinikWithManagement(namaPoli, keterangan, logoPath string, idManagement int) (int, error) {
     tx, err := ps.DB.Begin()
     if err != nil {
@@ -154,22 +156,11 @@ func (ps *PoliklinikService) AddPoliklinikWithManagement(namaPoli, keterangan, l
         // Jika tidak ada input, set ke "uploads/default.png"
         logoPath = "uploads/default.png"
     } else {
-        // Tambahkan prefiks uploads/ jika belum ada
+        // Pastikan prefiks uploads/ ada
         if !strings.HasPrefix(logoPath, "uploads/") {
             logoPath = "uploads/" + logoPath
         }
-        // Ganti semua spasi dengan underscore
-        logoPath = strings.ReplaceAll(logoPath, " ", "_")
-        // Cek apakah sudah ada logo dengan nama yang sama
-        var count int
-        queryCheck := "SELECT COUNT(*) FROM Poliklinik WHERE logo_poli = ?"
-        err = tx.QueryRow(queryCheck, logoPath).Scan(&count)
-        if err != nil {
-            return 0, fmt.Errorf("failed to check logo uniqueness: %v", err)
-        }
-        if count > 0 {
-            return 0, fmt.Errorf("Mohon ubah nama file anda! Nama file tidak boleh kembar!")
-        }
+        // Tidak perlu cek nama kembar karena sudah unik dari controller
     }
 
     // Insert ke tabel Poliklinik dengan id_status = 1 (aktif)
