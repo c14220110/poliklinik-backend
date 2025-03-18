@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/models"
 )
@@ -50,4 +51,24 @@ func (ps *PrivilegeService) GetAllPrivileges() ([]models.Privilege, error) {
 	}
 
 	return privileges, nil
+}
+// CreatePrivilege menyimpan privilege baru ke tabel Privilege
+func (ps *PrivilegeService) CreatePrivilege(namaPrivilege, deskripsi string) error {
+	query := `
+		INSERT INTO Privilege (nama_privilege, deskripsi, created_at, updated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?)
+	`
+	now := time.Now()
+	stmt, err := ps.DB.Prepare(query)
+	if err != nil {
+		return fmt.Errorf("prepare error: %v", err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(namaPrivilege, deskripsi, now, now, nil)
+	if err != nil {
+		return fmt.Errorf("execute error: %v", err)
+	}
+
+	return nil
 }

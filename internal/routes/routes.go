@@ -132,8 +132,9 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.GET("/role/list", roleController.GetRoleListHandler, middlewares.JWTMiddleware())
 
 	// Manajemen Privilege
-	management.POST("/privilege/add", karyawanController.AddPrivilegeHandler, middlewares.JWTMiddleware())
+	management.POST("/privilege/assign", karyawanController.AddPrivilegeHandler, middlewares.JWTMiddleware())
 	management.GET("/privilege", privilegeController.GetAllPrivilegesHandler, middlewares.JWTMiddleware())
+	management.POST("/privilege", privilegeController.CreatePrivilegeHandler, middlewares.JWTMiddleware())
 
 	// Manajemen Shift & CMS
 	management.POST("/shift/assign", shiftController.AssignShiftHandler, middlewares.JWTMiddleware())
