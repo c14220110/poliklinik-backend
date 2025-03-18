@@ -130,9 +130,8 @@ func (pc *PoliklinikController) AddPoliklinikHandler(c echo.Context) error {
 		}
 		defer src.Close()
 
-		// Tentukan folder tujuan (misalnya "uploads/")
+		// Tentukan folder tujuan
 		uploadDir := "uploads"
-		// Pastikan folder ada
 		if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 				"status":  http.StatusInternalServerError,
@@ -141,12 +140,12 @@ func (pc *PoliklinikController) AddPoliklinikHandler(c echo.Context) error {
 			})
 		}
 
-		// Generate nama file unik dengan timestamp
+		// Generate nama file unik dengan format yang mudah dibaca
 		ext := filepath.Ext(file.Filename) // Ambil ekstensi file (misalnya .png)
-		timestamp := time.Now().Format("20060102150405") // Format timestamp YYYYMMDDHHMMSS
-		filename := strings.TrimSuffix(file.Filename, ext) // Hapus ekstensi dari nama file asli
+		timestamp := time.Now().Format("2006-01-02 at 15.04.05") // Format "YYYY-MM-DD at HH.MM.SS"
+		filename := strings.TrimSuffix(file.Filename, ext) // Hapus ekstensi dari nama asli
 		filename = strings.ReplaceAll(filename, " ", "_") // Ganti spasi dengan underscore
-		uniqueFilename := fmt.Sprintf("%s_%s%s", filename, timestamp, ext) // Gabungkan nama file, timestamp, dan ekstensi
+		uniqueFilename := fmt.Sprintf("%s_%s%s", filename, timestamp, ext) // Gabungkan semua
 
 		// Tentukan path tujuan
 		dstPath := filepath.Join(uploadDir, uniqueFilename)
@@ -169,11 +168,10 @@ func (pc *PoliklinikController) AddPoliklinikHandler(c echo.Context) error {
 			})
 		}
 
-		// Simpan path file sebagai logo_poli (path relatif)
+		// Simpan path relatif
 		logoPath = filepath.Join("uploads", uniqueFilename)
 	} else {
-		// Jika tidak ada file, set logoPath kosong
-		logoPath = ""
+		logoPath = "" // Jika tidak ada file
 	}
 
 	// Ambil id_management dari JWT (management yang melakukan penambahan)
