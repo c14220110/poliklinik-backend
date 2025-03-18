@@ -169,34 +169,36 @@ func (cs *CMSService) GetCMSByPoliklinikID(poliID int) ([]models.CMSResponse, er
 	return responses, nil
 }
 
-// GetAllCMS mengembalikan daftar CMS yang dikelompokkan berdasarkan poliklinik.
-func (cs *CMSService) GetAllCMS() ([]models.CMSGroup, error) {
-	// Query semua poliklinik
-	poliQuery := `
-		SELECT id_poli, nama_poli
-		FROM Poliklinik
-	`
-	rows, err := cs.DB.Query(poliQuery)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 
-	var groups []models.CMSGroup
-	for rows.Next() {
-		var group models.CMSGroup
-		if err := rows.Scan(&group.IDPoli, &group.NamaPoli); err != nil {
-			return nil, err
-		}
-		// Ambil CMS untuk tiap poliklinik
-		cmsList, err := cs.GetCMSByPoliklinikID(group.IDPoli)
-		if err != nil {
-			return nil, err
-		}
-		group.CMS = cmsList
-		groups = append(groups, group)
-	}
-	return groups, nil
+func (cs *CMSService) GetAllCMS() ([]models.CMSFlat, error) {
+    query := `
+        SELECT p.id_poli, p.nama_poli, c.id_cms
+        FROM Poliklinik p
+        LEFT JOIN CMS c ON p.id_poli = c.id_poli
+    `
+    rows, err := cs.DB.Query(query)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    var cmsFlatList []models.CMSFlat
+    for rows.Next() {
+        var cmsFlat models.CMSFlat
+        var idCms sql.NullInt64 // Menangani nilai NULL dari database
+        err := rows.Scan(&cmsFlat.IDPoli, &cmsFlat.NamaPoli, &idCms)
+        if err != nil {
+            return nil, err
+        }
+        if idCms.Valid {
+            id := int(idCms.Int64)
+            cmsFlat.IDCms = &id
+        } else {
+            cmsFlat.IDCms = nil
+        }
+        cmsFlatList = append(cmsFlatList, cmsFlat)
+    }
+    return cmsFlatList, nil
 }
 
 

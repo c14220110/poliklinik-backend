@@ -195,19 +195,26 @@ func (cc *CMSController) GetCMSByPoliklinikHandler(c echo.Context) error {
 }
 
 func (cc *CMSController) GetAllCMSHandler(c echo.Context) error {
-    groups, err := cc.Service.GetAllCMS()
+    // Ambil data CMS dari service
+    cmsFlatList, err := cc.Service.GetAllCMS()
     if err != nil {
+        // Jika ada error, kembalikan response dengan struktur yang sama
         return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-            "status":  http.StatusInternalServerError,
-            "message": "Failed to retrieve all CMS data: " + err.Error(),
             "data":    nil,
+            "message": "Gagal mengambil data CMS: " + err.Error(),
+            "status":  http.StatusInternalServerError,
         })
     }
+
+    // Jika sukses, kembalikan response dengan data
     response := map[string]interface{}{
-        "cms_by_poliklinik": groups,
+        "data":    cmsFlatList,
+        "message": "CMS retrieved successfully",
+        "status":  http.StatusOK,
     }
     return c.JSON(http.StatusOK, response)
 }
+
 func (cc *CMSController) UpdateCMSHandler(c echo.Context) error {
     idCMSStr := c.QueryParam("id_cms")
     if idCMSStr == "" {

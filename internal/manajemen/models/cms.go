@@ -65,3 +65,9 @@ type CMSGroup struct {
     NamaPoli string        `json:"nama_poli"`
     CMS      []CMSResponse `json:"cms"`
 }
+
+type CMSFlat struct {
+    IDPoli   int    `json:"id_poli"`
+    NamaPoli string `json:"nama_poli"`
+    IDCms    *int   `json:"id_cms"` // Pointer untuk mendukung nilai null
+}
