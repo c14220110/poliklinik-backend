@@ -136,63 +136,66 @@ func (ps *PoliklinikService) SoftDeletePoliklinik(idPoli int, idManagement int) 
 // AddPoliklinikWithManagement menambahkan record Poliklinik dan mencatat siapa yang menambahkannya ke tabel Management_Poli.
 // Untuk Poliklinik baru, id_status diset 1 (aktif).
 func (ps *PoliklinikService) AddPoliklinikWithManagement(namaPoli, keterangan, logoPath string, idManagement int) (int, error) {
-	tx, err := ps.DB.Begin()
-	if err != nil {
-		return 0, err
-	}
+    tx, err := ps.DB.Begin()
+    if err != nil {
+        return 0, err
+    }
 
-	// Pastikan rollback jika terjadi error
-	defer func() {
-		if err != nil {
-			tx.Rollback()
-		}
-	}()
+    // Pastikan rollback jika terjadi error
+    defer func() {
+        if err != nil {
+            tx.Rollback()
+        }
+    }()
 
-	// Proses logoPath:
-	logoPath = strings.TrimSpace(logoPath)
-	if logoPath == "" {
-		// Jika tidak ada input, set ke "default.png"
-		logoPath = "default.png"
-	} else {
-		// Ganti semua spasi dengan underscore
-		logoPath = strings.ReplaceAll(logoPath, " ", "_")
-		// Cek apakah sudah ada logo dengan nama yang sama
-		var count int
-		queryCheck := "SELECT COUNT(*) FROM Poliklinik WHERE logo_poli = ?"
-		err = tx.QueryRow(queryCheck, logoPath).Scan(&count)
-		if err != nil {
-			return 0, fmt.Errorf("failed to check logo uniqueness: %v", err)
-		}
-		if count > 0 {
-			return 0, fmt.Errorf("Mohon ubah nama file anda! Nama file tidak boleh kembar!")
-		}
-	}
+    // Proses logoPath:
+    logoPath = strings.TrimSpace(logoPath)
+    if logoPath == "" {
+        // Jika tidak ada input, set ke "uploads/default.png"
+        logoPath = "uploads/default.png"
+    } else {
+        // Tambahkan prefiks uploads/ jika belum ada
+        if !strings.HasPrefix(logoPath, "uploads/") {
+            logoPath = "uploads/" + logoPath
+        }
+        // Ganti semua spasi dengan underscore
+        logoPath = strings.ReplaceAll(logoPath, " ", "_")
+        // Cek apakah sudah ada logo dengan nama yang sama
+        var count int
+        queryCheck := "SELECT COUNT(*) FROM Poliklinik WHERE logo_poli = ?"
+        err = tx.QueryRow(queryCheck, logoPath).Scan(&count)
+        if err != nil {
+            return 0, fmt.Errorf("failed to check logo uniqueness: %v", err)
+        }
+        if count > 0 {
+            return 0, fmt.Errorf("Mohon ubah nama file anda! Nama file tidak boleh kembar!")
+        }
+    }
 
-	// Insert ke tabel Poliklinik dengan id_status = 1 (aktif)
-	queryPoli := `INSERT INTO Poliklinik (nama_poli, keterangan, logo_poli, id_status) VALUES (?, ?, ?, 1)`
-	res, err := tx.Exec(queryPoli, namaPoli, keterangan, logoPath)
-	if err != nil {
-		return 0, fmt.Errorf("failed to insert Poliklinik: %v", err)
-	}
-	lastID, err := res.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get inserted ID: %v", err)
-	}
-	poliID := int(lastID)
+    // Insert ke tabel Poliklinik dengan id_status = 1 (aktif)
+    queryPoli := `INSERT INTO Poliklinik (nama_poli, keterangan, logo_poli, id_status) VALUES (?, ?, ?, 1)`
+    res, err := tx.Exec(queryPoli, namaPoli, keterangan, logoPath)
+    if err != nil {
+        return 0, fmt.Errorf("failed to insert Poliklinik: %v", err)
+    }
+    lastID, err := res.LastInsertId()
+    if err != nil {
+        return 0, fmt.Errorf("failed to get inserted ID: %v", err)
+    }
+    poliID := int(lastID)
 
-	// Catat ke tabel Management_Poli
-	queryMgmt := `INSERT INTO Management_Poli (id_management, id_poli, created_by, updated_by, deleted_by) VALUES (?, ?, ?, ?, NULL)`
-	_, err = tx.Exec(queryMgmt, idManagement, poliID, idManagement, idManagement)
-	if err != nil {
-		return 0, fmt.Errorf("failed to record Management_Poli: %v", err)
-	}
+    // Catat ke tabel Management_Poli
+    queryMgmt := `INSERT INTO Management_Poli (id_management, id_poli, created_by, updated_by, deleted_by) VALUES (?, ?, ?, ?, NULL)`
+    _, err = tx.Exec(queryMgmt, idManagement, poliID, idManagement, idManagement)
+    if err != nil {
+        return 0, fmt.Errorf("failed to record Management_Poli: %v", err)
+    }
 
-	if err = tx.Commit(); err != nil {
-		return 0, err
-	}
-	return poliID, nil
+    if err = tx.Commit(); err != nil {
+        return 0, err
+    }
+    return poliID, nil
 }
-
 
 func (ps *PoliklinikService) UpdatePoliklinikWithOptionalLogo(idPoli int, namaPoli, keterangan, logoPoli string, idManagement int) error {
 	tx, err := ps.DB.Begin()
