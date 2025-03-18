@@ -18,18 +18,18 @@ func NewPoliklinikService(db *sql.DB) *PoliklinikService {
 func (ps *PoliklinikService) GetPoliklinikListFiltered(statusFilter string) ([]map[string]interface{}, error) {
     baseQuery := `
         SELECT 
-            id_poli, 
-            id_status, 
-            nama_poli, 
-            jumlah_tenkes, 
-            logo_poli, 
-            keterangan, 
-            created_at,
-            c.id_cms
-        FROM 
-            Poliklinik p
-        LEFT JOIN 
-            CMS c ON p.id_poli = c.id_poli
+    p.id_poli,        -- Mengambil id_poli dari tabel Poliklinik (p)
+    p.id_status, 
+    p.nama_poli, 
+    p.jumlah_tenkes, 
+    p.logo_poli, 
+    p.keterangan, 
+    p.created_at,
+    c.id_cms
+FROM 
+    Poliklinik p
+LEFT JOIN 
+    CMS c ON p.id_poli = c.id_poli
     `
     conditions := []string{}
     params := []interface{}{}
