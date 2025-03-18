@@ -1,11 +1,14 @@
 package controllers
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/common/middlewares"
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/services"
@@ -137,8 +140,18 @@ func (pc *PoliklinikController) AddPoliklinikHandler(c echo.Context) error {
 				"data":    nil,
 			})
 		}
-		// Buat nama file unik (misalnya dengan menggunakan filepath.Base dan timestamp)
-		dstPath := filepath.Join(uploadDir, file.Filename)
+
+		// Generate nama file unik dengan timestamp
+		ext := filepath.Ext(file.Filename) // Ambil ekstensi file (misalnya .png)
+		timestamp := time.Now().Format("20060102150405") // Format timestamp YYYYMMDDHHMMSS
+		filename := strings.TrimSuffix(file.Filename, ext) // Hapus ekstensi dari nama file asli
+		filename = strings.ReplaceAll(filename, " ", "_") // Ganti spasi dengan underscore
+		uniqueFilename := fmt.Sprintf("%s_%s%s", filename, timestamp, ext) // Gabungkan nama file, timestamp, dan ekstensi
+
+		// Tentukan path tujuan
+		dstPath := filepath.Join(uploadDir, uniqueFilename)
+
+		// Simpan file
 		dst, err := os.Create(dstPath)
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
@@ -155,8 +168,9 @@ func (pc *PoliklinikController) AddPoliklinikHandler(c echo.Context) error {
 				"data":    nil,
 			})
 		}
-		// Simpan path file sebagai logo_poli
-		logoPath = dstPath
+
+		// Simpan path file sebagai logo_poli (path relatif)
+		logoPath = filepath.Join("uploads", uniqueFilename)
 	} else {
 		// Jika tidak ada file, set logoPath kosong
 		logoPath = ""
