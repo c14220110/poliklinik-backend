@@ -563,7 +563,7 @@ func (s *PendaftaranService) GetAntrianToday(statusFilter string) ([]map[string]
             a.id_poli,
             pol.nama_poli,
             a.nomor_antrian,
-            a.id_antrian,  // Tambahkan id_antrian di sini
+            a.id_antrian,
             a.id_status,
             sa.status,
             a.priority_order
@@ -597,7 +597,7 @@ func (s *PendaftaranService) GetAntrianToday(statusFilter string) ([]map[string]
         var idPoli int
         var namaPoli sql.NullString
         var nomorAntrian int
-        var idAntrian int  // Variabel baru untuk id_antrian
+        var idAntrian int 
         var idStatus int
         var status sql.NullString
         var priorityOrder sql.NullInt64
@@ -614,7 +614,7 @@ func (s *PendaftaranService) GetAntrianToday(statusFilter string) ([]map[string]
             "id_poli":       idPoli,
             "nama_poli":     nil,
             "nomor_antrian": nomorAntrian,
-            "id_antrian":    idAntrian,  // Tambahkan id_antrian di bawah nomor_antrian
+            "id_antrian":    idAntrian,
             "id_status":     idStatus,
             "status":        nil,
             "priority_order": nil,
