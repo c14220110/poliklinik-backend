@@ -465,20 +465,14 @@ func (s *PendaftaranService) TundaPasien(idAntrian int) error {
 }
 
 
-// RescheduleAntrianPriority mengupdate baris antrian (yang statusnya Ditunda)
-// dengan mengubah priority_order dan id_status (ke "Menunggu") tanpa mengubah nomor_antrian.
-// Logika:
-// 1. Pastikan record id_antrian ada di id_poli dan statusnya adalah Ditunda (misal: 1).
-// 2. Cari MIN(nomor_antrian) di antara record waiting (id_status = 0) untuk id_poli hari ini.
-// 3. Hitung newPriority = MIN_waiting + 2 jika count waiting >= 2, atau +1 jika count waiting kurang dari 2.
-// 4. Update record antrian tersebut dengan newPriority dan ubah id_status menjadi nilai untuk "Menunggu".
-func (s *PendaftaranService) RescheduleAntrianPriority(idAntrian int, idPoli int) (int64, error) {
-    // 1. Periksa apakah antrian ada dan dalam status "Ditunda" (misal id_status = 2)
+func (s *PendaftaranService) RescheduleAntrianPriority(idAntrian int) (int64, error) {
+    // 1. Periksa apakah antrian ada dan dalam status "Ditunda", sekaligus ambil id_poli
     var currentStatus int
-    err := s.DB.QueryRow("SELECT id_status FROM Antrian WHERE id_antrian = ? AND id_poli = ?", idAntrian, idPoli).Scan(&currentStatus)
+    var idPoli int
+    err := s.DB.QueryRow("SELECT id_status, id_poli FROM Antrian WHERE id_antrian = ?", idAntrian).Scan(&currentStatus, &idPoli)
     if err != nil {
         if err == sql.ErrNoRows {
-            return 0, fmt.Errorf("antrian dengan id %d dan poli %d tidak ditemukan", idAntrian, idPoli)
+            return 0, fmt.Errorf("antrian dengan id %d tidak ditemukan", idAntrian)
         }
         return 0, fmt.Errorf("gagal menemukan antrian: %v", err)
     }
@@ -558,87 +552,88 @@ func (s *PendaftaranService) RescheduleAntrianPriority(idAntrian int, idPoli int
     return newPriority, nil
 }
 
-
 // GetAntrianToday mengambil data antrian hari ini dengan join ke Pasien, Rekam_Medis, Poliklinik, dan Status_Antrian.
 // Jika statusFilter tidak kosong, query akan memfilter berdasarkan status.
 func (s *PendaftaranService) GetAntrianToday(statusFilter string) ([]map[string]interface{}, error) {
-	query := `
-		SELECT 
-			p.id_pasien,
-			p.nama,
-			rm.id_rm,
-			a.id_poli,
-			pol.nama_poli,
-			a.nomor_antrian,
-			a.id_status,
-			sa.status,
-			a.priority_order
-		FROM Antrian a
-		JOIN Pasien p ON a.id_pasien = p.id_pasien
-		JOIN Rekam_Medis rm ON p.id_pasien = rm.id_pasien
-		JOIN Poliklinik pol ON a.id_poli = pol.id_poli
-		JOIN Status_Antrian sa ON a.id_status = sa.id_status
-		WHERE DATE(a.created_at) = CURDATE()
-	`
-	// Jika statusFilter disediakan, tambahkan filter.
-	params := []interface{}{}
-	if statusFilter != "" {
-		// Misalnya, statusFilter "aktif" berarti kita ingin nilai status "Menunggu" (atau sesuai nilai di tabel Status_Antrian)
-		// atau Anda bisa langsung memfilter berdasarkan nilai string yang ada di kolom sa.status.
-		query += " AND sa.status = ?"
-		params = append(params, statusFilter)
-	}
-	// Urutkan berdasarkan nomor antrian
-	query += " ORDER BY a.nomor_antrian"
+    query := `
+        SELECT 
+            p.id_pasien,
+            p.nama,
+            rm.id_rm,
+            a.id_poli,
+            pol.nama_poli,
+            a.nomor_antrian,
+            a.id_antrian,  // Tambahkan id_antrian di sini
+            a.id_status,
+            sa.status,
+            a.priority_order
+        FROM Antrian a
+        JOIN Pasien p ON a.id_pasien = p.id_pasien
+        JOIN Rekam_Medis rm ON p.id_pasien = rm.id_pasien
+        JOIN Poliklinik pol ON a.id_poli = pol.id_poli
+        JOIN Status_Antrian sa ON a.id_status = sa.id_status
+        WHERE DATE(a.created_at) = CURDATE()
+    `
+    // Jika statusFilter disediakan, tambahkan filter.
+    params := []interface{}{}
+    if statusFilter != "" {
+        query += " AND sa.status = ?"
+        params = append(params, statusFilter)
+    }
+    // Urutkan berdasarkan nomor antrian
+    query += " ORDER BY a.nomor_antrian"
 
-	rows, err := s.DB.Query(query, params...)
-	if err != nil {
-		return nil, fmt.Errorf("query error: %v", err)
-	}
-	defer rows.Close()
+    rows, err := s.DB.Query(query, params...)
+    if err != nil {
+        return nil, fmt.Errorf("query error: %v", err)
+    }
+    defer rows.Close()
 
-	var list []map[string]interface{}
-	for rows.Next() {
-		var idPasien int
-		var nama string
-		var idRM sql.NullString
-		var idPoli int
-		var namaPoli sql.NullString
-		var nomorAntrian int
-		var idStatus int
-		var status sql.NullString
-		var priorityOrder sql.NullInt64
+    var list []map[string]interface{}
+    for rows.Next() {
+        var idPasien int
+        var nama string
+        var idRM sql.NullString
+        var idPoli int
+        var namaPoli sql.NullString
+        var nomorAntrian int
+        var idAntrian int  // Variabel baru untuk id_antrian
+        var idStatus int
+        var status sql.NullString
+        var priorityOrder sql.NullInt64
 
-		if err := rows.Scan(&idPasien, &nama, &idRM, &idPoli, &namaPoli, &nomorAntrian, &idStatus, &status, &priorityOrder); err != nil {
-			return nil, fmt.Errorf("scan error: %v", err)
-		}
+        // Sesuaikan urutan scan dengan urutan kolom di SELECT
+        if err := rows.Scan(&idPasien, &nama, &idRM, &idPoli, &namaPoli, &nomorAntrian, &idAntrian, &idStatus, &status, &priorityOrder); err != nil {
+            return nil, fmt.Errorf("scan error: %v", err)
+        }
 
-		record := map[string]interface{}{
-			"id_pasien":     idPasien,
-			"nama":          nama,
-			"id_rm":         nil,
-			"id_poli":       idPoli,
-			"nama_poli":     nil,
-			"nomor_antrian": nomorAntrian,
-			"id_status":     idStatus,
-			"status":        nil,
-			"priority_order": nil,
-		}
-		if idRM.Valid {
-			record["id_rm"] = idRM.String
-		}
-		if namaPoli.Valid {
-			record["nama_poli"] = namaPoli.String
-		}
-		if status.Valid {
-			record["status"] = status.String
-		}
-		if priorityOrder.Valid {
-			record["priority_order"] = priorityOrder.Int64
-		}
-		list = append(list, record)
-	}
-	return list, nil
+        record := map[string]interface{}{
+            "id_pasien":     idPasien,
+            "nama":          nama,
+            "id_rm":         nil,
+            "id_poli":       idPoli,
+            "nama_poli":     nil,
+            "nomor_antrian": nomorAntrian,
+            "id_antrian":    idAntrian,  // Tambahkan id_antrian di bawah nomor_antrian
+            "id_status":     idStatus,
+            "status":        nil,
+            "priority_order": nil,
+        }
+        if idRM.Valid {
+            record["id_rm"] = idRM.String
+        }
+        if namaPoli.Valid {
+            record["nama_poli"] = namaPoli.String
+        }
+        if status.Valid {
+            record["status"] = status.String
+        }
+        if priorityOrder.Valid {
+            record["priority_order"] = priorityOrder.Int64
+        }
+        list = append(list, record)
+    }
+    return list, nil
 }
 
 func (s *PendaftaranService) GetAllStatusAntrian() ([]map[string]interface{}, error) {

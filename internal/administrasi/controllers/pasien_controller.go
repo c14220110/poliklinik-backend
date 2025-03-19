@@ -255,11 +255,10 @@ func (pc *PasienController) TundaPasienHandler(c echo.Context) error {
 
 func (pc *PasienController) RescheduleAntrianHandler(c echo.Context) error {
     idAntrianStr := c.QueryParam("id_antrian")
-    idPoliStr := c.QueryParam("id_poli")
-    if idAntrianStr == "" || idPoliStr == "" {
+    if idAntrianStr == "" {
         return c.JSON(http.StatusBadRequest, map[string]interface{}{
             "status":  http.StatusBadRequest,
-            "message": "parameter id_antrian dan id_poli wajib diisi",
+            "message": "parameter id_antrian wajib diisi",
             "data":    nil,
         })
     }
@@ -271,16 +270,8 @@ func (pc *PasienController) RescheduleAntrianHandler(c echo.Context) error {
             "data":    nil,
         })
     }
-    idPoli, err := strconv.Atoi(idPoliStr)
-    if err != nil {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "id_poli harus berupa angka",
-            "data":    nil,
-        })
-    }
 
-    newPriority, err := pc.Service.RescheduleAntrianPriority(idAntrian, idPoli)
+    newPriority, err := pc.Service.RescheduleAntrianPriority(idAntrian)
     if err != nil {
         if strings.Contains(err.Error(), "tidak ditemukan") || strings.Contains(err.Error(), "tidak dalam status 'Ditunda'") {
             return c.JSON(http.StatusBadRequest, map[string]interface{}{
