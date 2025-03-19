@@ -77,7 +77,7 @@ func (s *BillingService) GetBillingData(idPoliFilter, statusFilter string) ([]ma
 	for rows.Next() {
 		var idPasien int
 		var nama string
-		var idRM int
+		var idRM string
 		var namaPoli string
 		var statusStr string
 		var idKunjungan int
