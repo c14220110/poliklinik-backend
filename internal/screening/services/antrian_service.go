@@ -128,11 +128,11 @@ func (s *AntrianService) GetAntrianTerlama(idPoli int) (map[string]interface{}, 
 }
 
 func (s *AntrianService) MasukkanPasienKeDokter(idPoli int) (map[string]interface{}, error) {
-	// 1. Cari baris antrian teratas dengan id_status = 1 untuk id_poli yang diberikan dan untuk hari ini.
+	// 1. Cari baris antrian teratas dengan id_status = 4 untuk id_poli yang diberikan dan untuk hari ini.
 	query := `
 		SELECT id_antrian 
 		FROM Antrian 
-		WHERE id_poli = ? AND id_status = 1 AND DATE(created_at) = CURDATE()
+		WHERE id_poli = ? AND id_status = 4 AND DATE(created_at) = CURDATE()
 		ORDER BY nomor_antrian ASC 
 		LIMIT 1
 	`
@@ -140,15 +140,15 @@ func (s *AntrianService) MasukkanPasienKeDokter(idPoli int) (map[string]interfac
 	err := s.DB.QueryRow(query, idPoli).Scan(&idAntrian)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("tidak ada pasien dengan status 1 untuk poli dengan id %d pada hari ini", idPoli)
+			return nil, fmt.Errorf("tidak ada pasien dengan status pra-konsul untuk poli dengan id %d pada hari ini", idPoli)
 		}
 		return nil, err
 	}
 
-	// 2. Update baris yang ditemukan, ubah id_status menjadi 4.
+	// 2. Update baris yang ditemukan, ubah id_status menjadi 5.
 	updateQuery := `
 		UPDATE Antrian 
-		SET id_status = 4 
+		SET id_status = 5 
 		WHERE id_antrian = ?
 	`
 	res, err := s.DB.Exec(updateQuery, idAntrian)
@@ -207,4 +207,35 @@ func (s *AntrianService) MasukkanPasienKeDokter(idPoli int) (map[string]interfac
 	}
 
 	return result, nil
+}
+
+func (s *AntrianService) PulangkanPasien(idAntrian int) error {
+	// Periksa status saat ini
+	var currentStatus int
+	checkQuery := "SELECT id_status FROM Antrian WHERE id_antrian = ?"
+	err := s.DB.QueryRow(checkQuery, idAntrian).Scan(&currentStatus)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("antrian dengan id %d tidak ditemukan", idAntrian)
+		}
+		return fmt.Errorf("gagal memeriksa status antrian: %v", err)
+	}
+	if currentStatus != 5 {
+		return fmt.Errorf("status antrian saat ini bukan Konsultasi (5), melainkan %d", currentStatus)
+	}
+
+	// Update status ke 6 (Pulang)
+	updateQuery := "UPDATE Antrian SET id_status = ? WHERE id_antrian = ?"
+	result, err := s.DB.Exec(updateQuery, 6, idAntrian)
+	if err != nil {
+		return fmt.Errorf("gagal mengupdate antrian: %v", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("gagal memeriksa update antrian: %v", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("tidak ada baris yang terupdate, antrian dengan id %d mungkin tidak ada", idAntrian)
+	}
+	return nil
 }

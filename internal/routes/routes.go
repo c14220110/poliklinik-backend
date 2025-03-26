@@ -2,11 +2,13 @@ package routes
 
 import (
 	"database/sql"
+	"net/http"
 
 	"github.com/labstack/echo/v4"
 
 	adminControllers "github.com/c14220110/poliklinik-backend/internal/administrasi/controllers"
 	adminServices "github.com/c14220110/poliklinik-backend/internal/administrasi/services"
+	"github.com/c14220110/poliklinik-backend/ws"
 
 	manajemenControllers "github.com/c14220110/poliklinik-backend/internal/manajemen/controllers"
 	manajemenServices "github.com/c14220110/poliklinik-backend/internal/manajemen/services"
@@ -66,6 +68,17 @@ func Init(e *echo.Echo, db *sql.DB) {
 
 	// Grup API utama
 	api := e.Group("/api")
+	api.GET("/ws", ws.ServeWS(ws.HubInstance))
+	api.GET("/ws-test", func(c echo.Context) error {
+    ws.HubInstance.Broadcast <- []byte("Test broadcast message")
+    return c.JSON(http.StatusOK, map[string]interface{}{
+        "status":  http.StatusOK,
+        "message": "Broadcast message sent",
+    })
+})
+
+
+
 
 	// 1. Administrasi (Aplikasi Pendaftaran & Administrasi)
 	administrasi := api.Group("/administrasi")
@@ -102,6 +115,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter.POST("/input-screening", screeningController.InputScreening, middlewares.JWTMiddleware())
 	dokter.GET("/screening", screeningController.GetScreeningByPasienHandler, middlewares.JWTMiddleware())
 	dokter.POST("/masukkan", antrianController.MasukkanPasienKeDokterHandler, middlewares.JWTMiddleware())
+	dokter.PUT("/pulangkan-pasien", antrianController.PulangkanPasienHandler, middlewares.JWTMiddleware())
 
 
 	// Tambahkan endpoint dokter lain sesuai kebutuhan
