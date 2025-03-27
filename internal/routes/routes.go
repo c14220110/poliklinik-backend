@@ -104,7 +104,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	screening.POST("/input", screeningController.InputScreening, middlewares.JWTMiddleware())
 	screening.GET("", screeningController.GetScreeningByPasienHandler, middlewares.JWTMiddleware())
 	screening.GET("/antrian/terlama", antrianController.GetAntrianTerlamaHandler, middlewares.JWTMiddleware())
-	screening.POST("/masukkan", antrianController.MasukkanPasienHandler, middlewares.JWTMiddleware())
+	screening.PUT("/masukkan", antrianController.MasukkanPasienHandler, middlewares.JWTMiddleware())
 	screening.GET("/poliklinik", poliklinikController.GetActivePoliklinikList)
 
 	// 3. Dokter (Website untuk Dokter)
