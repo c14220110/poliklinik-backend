@@ -51,9 +51,15 @@ func (s *AntrianService) MasukkanPasien(idPoli int) (map[string]interface{}, err
 		return nil, fmt.Errorf("gagal mengupdate antrian, baris tidak ditemukan")
 	}
 
-	// 3. Ambil data tambahan: id_pasien, nama pasien, jenis_kelamin, id_rm, tanggal_lahir, dan nomor_antrian
+	// 3. Ambil data detail pasien dan antrian.
+	// Query ini menggabungkan data dari tabel Pasien, Rekam_Medis, dan Antrian.
+	// Data yang diambil: id_pasien, nama, jenis_kelamin, tempat_lahir, tanggal_lahir, nik, no_telp, alamat,
+	// kota_tinggal, kelurahan, kecamatan, id_rm, dan nomor_antrian.
 	queryDetails := `
-		SELECT p.id_pasien, p.nama, p.jenis_kelamin, rm.id_rm, p.tanggal_lahir, a.nomor_antrian
+		SELECT p.id_pasien, p.nama, p.jenis_kelamin, p.tempat_lahir, 
+		       DATE_FORMAT(p.tanggal_lahir, '%Y-%m-%d') AS tanggal_lahir, p.nik, p.no_telp, 
+		       p.alamat, p.kota_tinggal, p.kelurahan, p.kecamatan, 
+		       rm.id_rm, a.nomor_antrian
 		FROM Antrian a
 		JOIN Pasien p ON a.id_pasien = p.id_pasien
 		JOIN Rekam_Medis rm ON p.id_pasien = rm.id_pasien
@@ -62,17 +68,20 @@ func (s *AntrianService) MasukkanPasien(idPoli int) (map[string]interface{}, err
 		LIMIT 1
 	`
 	var idPasien int
-	var nama, jenisKelamin, tanggalLahirStr string
+	var nama, jenisKelamin, tempatLahir, tanggalLahirStr, nik, noTelp, alamat, kotaTinggal, kelurahan, kecamatan string
 	var idRM string
 	var nomorAntrian int
 
-	err = s.DB.QueryRow(queryDetails, idAntrian).Scan(&idPasien, &nama, &jenisKelamin, &idRM, &tanggalLahirStr, &nomorAntrian)
+	err = s.DB.QueryRow(queryDetails, idAntrian).Scan(
+		&idPasien, &nama, &jenisKelamin, &tempatLahir, &tanggalLahirStr, &nik, &noTelp,
+		&alamat, &kotaTinggal, &kelurahan, &kecamatan, &idRM, &nomorAntrian,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get detail data: %v", err)
 	}
 
-	// Parse tanggal_lahir; gunakan layout RFC3339 karena format di database misalnya "1995-08-15T00:00:00+07:00"
-	tanggalLahir, err := time.Parse(time.RFC3339, tanggalLahirStr)
+	// Parse tanggal_lahir dengan layout "2006-01-02"
+	tanggalLahir, err := time.Parse("2006-01-02", tanggalLahirStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse tanggal_lahir: %v", err)
 	}
@@ -85,17 +94,26 @@ func (s *AntrianService) MasukkanPasien(idPoli int) (map[string]interface{}, err
 	}
 
 	result := map[string]interface{}{
-		"id_antrian":     idAntrian,
-		"id_pasien":      idPasien,
-		"nama_pasien":    nama,
-		"jenis_kelamin":  jenisKelamin,
-		"id_rm":          idRM,
-		"nomor_antrian":  nomorAntrian,
-		"umur":           umur,
+		"id_antrian":    idAntrian,
+		"nomor_antrian": nomorAntrian,
+		"id_pasien":     idPasien,
+		"nama_pasien":   nama,
+		"id_rm":         idRM,
+		"jenis_kelamin": jenisKelamin,
+		"tempat_lahir":  tempatLahir,
+		"tanggal_lahir": tanggalLahirStr,
+		"nik":           nik,
+		"no_telp":       noTelp,
+		"alamat":        alamat,
+		"kota":          kotaTinggal, // Disesuaikan dengan kolom 'kota_tinggal'
+		"kelurahan":     kelurahan,
+		"kecamatan":     kecamatan,
+		"umur":          umur,
 	}
 
 	return result, nil
 }
+
 
 
 
