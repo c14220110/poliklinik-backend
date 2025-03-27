@@ -106,6 +106,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	screening.GET("/antrian/terlama", antrianController.GetAntrianTerlamaHandler, middlewares.JWTMiddleware())
 	screening.PUT("/masukkan", antrianController.MasukkanPasienHandler, middlewares.JWTMiddleware())
 	screening.GET("/poliklinik", poliklinikController.GetActivePoliklinikList)
+	screening.PUT("/alihkan-pasien", antrianController.AlihkanPasienHandler, middlewares.JWTMiddleware())
 
 	// 3. Dokter (Website untuk Dokter)
 	dokter := api.Group("/dokter")

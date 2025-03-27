@@ -257,3 +257,20 @@ func (s *AntrianService) PulangkanPasien(idAntrian int) error {
 	}
 	return nil
 }
+
+// AlihkanPasien mengubah status antrian menjadi 4 untuk id_antrian yang diberikan.
+func (s *AntrianService) AlihkanPasien(idAntrian int) error {
+	updateQuery := "UPDATE Antrian SET id_status = ? WHERE id_antrian = ?"
+	result, err := s.DB.Exec(updateQuery, 4, idAntrian)
+	if err != nil {
+		return fmt.Errorf("gagal mengupdate antrian: %v", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("gagal memeriksa update antrian: %v", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("tidak ada baris yang terupdate, antrian dengan id %d mungkin tidak ada", idAntrian)
+	}
+	return nil
+}

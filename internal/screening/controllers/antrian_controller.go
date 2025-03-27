@@ -248,3 +248,55 @@ func (ac *AntrianController) PulangkanPasienHandler(c echo.Context) error {
 		},
 	})
 }
+
+func (ac *AntrianController) AlihkanPasienHandler(c echo.Context) error {
+	// Ambil parameter id_antrian dari query string.
+	idAntrianStr := c.QueryParam("id_antrian")
+	if idAntrianStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "parameter id_antrian wajib diisi",
+			"data":    nil,
+		})
+	}
+	idAntrian, err := strconv.Atoi(idAntrianStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_antrian harus berupa angka",
+			"data":    nil,
+		})
+	}
+
+	// Panggil service untuk mengubah status antrian menjadi 4.
+	err = ac.AntrianService.AlihkanPasien(idAntrian)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Gagal mengalihkan pasien: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	// Broadcast ke WebSocket dengan format { id_antrian: <id_antrian>, status: "Pra-Konsultasi" }
+	broadcastData := map[string]interface{}{
+		"id_antrian": idAntrian,
+		"status":     "Pra-Konsultasi",
+	}
+	messageJSON, err := json.Marshal(broadcastData)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Gagal membuat pesan broadcast: " + err.Error(),
+			"data":    nil,
+		})
+	}
+	ws.HubInstance.Broadcast <- messageJSON
+
+	// Kembalikan response sukses
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Pasien berhasil dialihkan",
+		"data":    nil,
+	})
+}
