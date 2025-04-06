@@ -275,120 +275,126 @@ func (s *ShiftService) GetListKaryawanFiltered(idPoliFilter, idShiftFilter, idRo
 			return nil, fmt.Errorf("invalid id_role value: %v", err)
 		}
 		query := `
-			SELECT 
-				k.id_karyawan,
-				k.nama,
-				k.nik,
-				k.username,
-				k.no_telp,
-				k.alamat,
-				sk.custom_jam_mulai,
-				sk.custom_jam_selesai,
-				sk.id_shift_karyawan,
-				drk.id_role
-			FROM Karyawan k
-			JOIN Shift_Karyawan sk ON k.id_karyawan = sk.id_karyawan 
-				AND sk.id_poli = ? 
-				AND sk.id_shift = ? 
-				AND sk.tanggal = ?
-			JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan AND drk.id_role = ?
-			ORDER BY k.id_karyawan
-		`
-		args := []interface{}{idPoli, idShift, tanggal, idRole}
-		rows, err := s.DB.Query(query, args...)
-		if err != nil {
-			return nil, fmt.Errorf("query error: %v", err)
-		}
-		defer rows.Close()
+	SELECT 
+		k.id_karyawan,
+		k.nama,
+		k.nik,
+		k.username,
+		k.no_telp,
+		k.alamat,
+		k.jenis_kelamin,
+		sk.custom_jam_mulai,
+		sk.custom_jam_selesai,
+		sk.id_shift_karyawan,
+		drk.id_role
+	FROM Karyawan k
+	JOIN Shift_Karyawan sk ON k.id_karyawan = sk.id_karyawan 
+		AND sk.id_poli = ? 
+		AND sk.id_shift = ? 
+		AND sk.tanggal = ?
+	JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan AND drk.id_role = ?
+	ORDER BY k.id_karyawan
+`
+args := []interface{}{idPoli, idShift, tanggal, idRole}
+rows, err := s.DB.Query(query, args...)
+if err != nil {
+	return nil, fmt.Errorf("query error: %v", err)
+}
+defer rows.Close()
 
-		var results []map[string]interface{}
-		for rows.Next() {
-			var idKaryawan int
-			var nama, nik, username, noTelp, alamat string
-			var customJamMulai, customJamSelesai string
-			var idShiftKaryawan int
-			var role int
+var results []map[string]interface{}
+for rows.Next() {
+	var idKaryawan int
+	var nama, nik, username, noTelp, alamat, jenisKelamin string
+	var customJamMulai, customJamSelesai string
+	var idShiftKaryawan int
+	var role int
 
-			if err := rows.Scan(&idKaryawan, &nama, &nik, &username, &noTelp, &alamat, &customJamMulai, &customJamSelesai, &idShiftKaryawan, &role); err != nil {
-				return nil, fmt.Errorf("scan error: %v", err)
-			}
-			record := map[string]interface{}{
-				"id_karyawan":       idKaryawan,
-				"nama":              nama,
-				"NIK":               nik,
-				"username":          username,
-				"role":              role,
-				"no_telp":           noTelp,
-				"alamat":            alamat,
-				"custom_jam_mulai":  customJamMulai,
-				"custom_jam_selesai": customJamSelesai,
-				"id_shift_karyawan": idShiftKaryawan,
-			}
-			results = append(results, record)
-		}
-		return results, nil
+	if err := rows.Scan(&idKaryawan, &nama, &nik, &username, &noTelp, &alamat, &jenisKelamin, &customJamMulai, &customJamSelesai, &idShiftKaryawan, &role); err != nil {
+		return nil, fmt.Errorf("scan error: %v", err)
+	}
+	record := map[string]interface{}{
+		"id_karyawan":       idKaryawan,
+		"nama":              nama,
+		"NIK":               nik,
+		"username":          username,
+		"role":              role,
+		"no_telp":           noTelp,
+		"alamat":            alamat,
+		"jenis_kelamin":     jenisKelamin,
+		"custom_jam_mulai":  customJamMulai,
+		"custom_jam_selesai": customJamSelesai,
+		"id_shift_karyawan": idShiftKaryawan,
+	}
+	results = append(results, record)
+}
+return results, nil
+
 	} else {
 		// Jika tidak ada filter id_role, gunakan GROUP_CONCAT untuk mengagregasi role per karyawan.
 		query := `
-			SELECT 
-				k.id_karyawan,
-				k.nama,
-				k.nik,
-				k.username,
-				k.no_telp,
-				k.alamat,
-				sk.custom_jam_mulai,
-				sk.custom_jam_selesai,
-				sk.id_shift_karyawan,
-				GROUP_CONCAT(drk.id_role) AS roles
-			FROM Karyawan k
-			JOIN Shift_Karyawan sk ON k.id_karyawan = sk.id_karyawan 
-				AND sk.id_poli = ? 
-				AND sk.id_shift = ? 
-				AND sk.tanggal = ?
-			LEFT JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
-			GROUP BY k.id_karyawan, k.nama, k.nik, k.username, k.no_telp, k.alamat, sk.custom_jam_mulai, sk.custom_jam_selesai, sk.id_shift_karyawan
-			ORDER BY k.id_karyawan
-		`
-		args := []interface{}{idPoli, idShift, tanggal}
-		rows, err := s.DB.Query(query, args...)
-		if err != nil {
-			return nil, fmt.Errorf("query error: %v", err)
-		}
-		defer rows.Close()
+	SELECT 
+		k.id_karyawan,
+		k.nama,
+		k.nik,
+		k.username,
+		k.no_telp,
+		k.alamat,
+		k.jenis_kelamin,
+		sk.custom_jam_mulai,
+		sk.custom_jam_selesai,
+		sk.id_shift_karyawan,
+		GROUP_CONCAT(drk.id_role) AS roles
+	FROM Karyawan k
+	JOIN Shift_Karyawan sk ON k.id_karyawan = sk.id_karyawan 
+		AND sk.id_poli = ? 
+		AND sk.id_shift = ? 
+		AND sk.tanggal = ?
+	LEFT JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
+	GROUP BY k.id_karyawan, k.nama, k.nik, k.username, k.no_telp, k.alamat, k.jenis_kelamin, sk.custom_jam_mulai, sk.custom_jam_selesai, sk.id_shift_karyawan
+	ORDER BY k.id_karyawan
+`
+args := []interface{}{idPoli, idShift, tanggal}
+rows, err := s.DB.Query(query, args...)
+if err != nil {
+	return nil, fmt.Errorf("query error: %v", err)
+}
+defer rows.Close()
 
-		var results []map[string]interface{}
-		for rows.Next() {
-			var idKaryawan int
-			var nama, nik, username, noTelp, alamat string
-			var customJamMulai, customJamSelesai string
-			var idShiftKaryawan int
-			var rolesStr sql.NullString
+var results []map[string]interface{}
+for rows.Next() {
+	var idKaryawan int
+	var nama, nik, username, noTelp, alamat, jenisKelamin string
+	var customJamMulai, customJamSelesai string
+	var idShiftKaryawan int
+	var rolesStr sql.NullString
 
-			if err := rows.Scan(&idKaryawan, &nama, &nik, &username, &noTelp, &alamat, &customJamMulai, &customJamSelesai, &idShiftKaryawan, &rolesStr); err != nil {
-				return nil, fmt.Errorf("scan error: %v", err)
-			}
+	if err := rows.Scan(&idKaryawan, &nama, &nik, &username, &noTelp, &alamat, &jenisKelamin, &customJamMulai, &customJamSelesai, &idShiftKaryawan, &rolesStr); err != nil {
+		return nil, fmt.Errorf("scan error: %v", err)
+	}
 
-			roleOutput := ""
-			if rolesStr.Valid {
-				roleOutput = rolesStr.String
-			}
+	roleOutput := ""
+	if rolesStr.Valid {
+		roleOutput = rolesStr.String
+	}
 
-			record := map[string]interface{}{
-				"id_karyawan":       idKaryawan,
-				"nama":              nama,
-				"NIK":               nik,
-				"username":          username,
-				"role":              roleOutput,
-				"no_telp":           noTelp,
-				"alamat":            alamat,
-				"custom_jam_mulai":  customJamMulai,
-				"custom_jam_selesai": customJamSelesai,
-				"id_shift_karyawan": idShiftKaryawan,
-			}
-			results = append(results, record)
-		}
-		return results, nil
+	record := map[string]interface{}{
+		"id_karyawan":       idKaryawan,
+		"nama":              nama,
+		"NIK":               nik,
+		"username":          username,
+		"role":              roleOutput,
+		"no_telp":           noTelp,
+		"alamat":            alamat,
+		"jenis_kelamin":     jenisKelamin,
+		"custom_jam_mulai":  customJamMulai,
+		"custom_jam_selesai": customJamSelesai,
+		"id_shift_karyawan": idShiftKaryawan,
+	}
+	results = append(results, record)
+}
+return results, nil
+
 	}
 }
 
