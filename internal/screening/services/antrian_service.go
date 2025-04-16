@@ -274,7 +274,9 @@ func (s *AntrianService) AlihkanPasien(idAntrian int) error {
 	}
 	return nil
 }
-func (s *AntrianService) GetTodayScreeningAntrianByPoli(idPoli int) ([][]interface{}, error) {
+
+
+func (s *AntrianService) GetTodayScreeningAntrianByPoli(idPoli int) ([]map[string]interface{}, error) {
 	query := `
 		SELECT a.id_antrian, a.id_pasien, p.nama 
 		FROM Antrian a
@@ -290,16 +292,21 @@ func (s *AntrianService) GetTodayScreeningAntrianByPoli(idPoli int) ([][]interfa
 	}
 	defer rows.Close()
 
-	var results [][]interface{}
+	var results []map[string]interface{}
 	for rows.Next() {
 		var idAntrian, idPasien int
 		var nama string
 		if err := rows.Scan(&idAntrian, &idPasien, &nama); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
-		results = append(results, []interface{}{idAntrian, idPasien, nama})
+		record := map[string]interface{}{
+			"id_antrian":  idAntrian,
+			"id_pasien":   idPasien,
+			"nama_pasien": nama,
+		}
+		results = append(results, record)
 	}
-	if err := rows.Err(); err != nil {
+	if err = rows.Err(); err != nil {
 		return nil, err
 	}
 

@@ -300,7 +300,6 @@ func (ac *AntrianController) AlihkanPasienHandler(c echo.Context) error {
 		"data":    nil,
 	})
 }
-
 func (ac *AntrianController) GetTodayScreeningAntrianHandler(c echo.Context) error {
 	// Ambil query parameter id_poli dari query string.
 	idPoliStr := c.QueryParam("id_poli")
@@ -330,10 +329,7 @@ func (ac *AntrianController) GetTodayScreeningAntrianHandler(c echo.Context) err
 		})
 	}
 
-	// Contoh output (misalnya data hanya satu baris):
-	// [
-	//    [1, 1, "yesto"]
-	// ]
+	// Kembalikan response dengan data berupa array of object
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Screening antrian retrieved successfully",
