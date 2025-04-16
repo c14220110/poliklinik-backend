@@ -300,3 +300,21 @@ func (ac *AntrianController) AlihkanPasienHandler(c echo.Context) error {
 		"data":    nil,
 	})
 }
+
+func (ac *AntrianController) GetScreeningAntrianHandler(c echo.Context) error {
+    // Panggil service untuk mengambil screening antrian
+    result, err := ac.AntrianService.GetScreeningAntrian()
+    if err != nil {
+        return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+            "status":  http.StatusInternalServerError,
+            "message": "Failed to retrieve screening antrian: " + err.Error(),
+            "data":    nil,
+        })
+    }
+
+    return c.JSON(http.StatusOK, map[string]interface{}{
+        "status":  http.StatusOK,
+        "message": "Screening antrian retrieved successfully",
+        "data":    result,
+    })
+}

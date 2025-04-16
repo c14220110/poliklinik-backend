@@ -274,3 +274,33 @@ func (s *AntrianService) AlihkanPasien(idAntrian int) error {
 	}
 	return nil
 }
+
+
+func (s *AntrianService) GetScreeningAntrian() ([]interface{}, error) {
+    // Query untuk mengambil id_antrian, id_pasien, dan nama pasien dari antrian dengan id_status 3 (screening)
+    query := `
+        SELECT a.id_antrian, a.id_pasien, p.nama
+        FROM Antrian a
+        JOIN Pasien p ON a.id_pasien = p.id_pasien
+        WHERE a.id_status = 3
+        ORDER BY a.id_antrian
+    `
+    rows, err := s.DB.Query(query)
+    if err != nil {
+        return nil, fmt.Errorf("gagal query screening antrian: %v", err)
+    }
+    defer rows.Close()
+
+    var results []interface{}
+    for rows.Next() {
+        var idAntrian, idPasien int
+        var nama string
+        if err := rows.Scan(&idAntrian, &idPasien, &nama); err != nil {
+            return nil, fmt.Errorf("gagal scan row: %v", err)
+        }
+        // Bentuk array untuk setiap baris
+        row := []interface{}{idAntrian, idPasien, nama}
+        results = append(results, row)
+    }
+    return results, nil
+}
