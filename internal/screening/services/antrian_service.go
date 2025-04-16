@@ -274,13 +274,14 @@ func (s *AntrianService) AlihkanPasien(idAntrian int) error {
 	}
 	return nil
 }
-
-func (s *AntrianService) GetScreeningAntrianByPoli(idPoli int) ([][]interface{}, error) {
+func (s *AntrianService) GetTodayScreeningAntrianByPoli(idPoli int) ([][]interface{}, error) {
 	query := `
 		SELECT a.id_antrian, a.id_pasien, p.nama 
 		FROM Antrian a
 		JOIN Pasien p ON a.id_pasien = p.id_pasien
-		WHERE a.id_poli = ? AND a.id_status = 3
+		WHERE a.id_poli = ? 
+		  AND a.id_status = 3 
+		  AND DATE(a.created_at) = CURDATE()
 		ORDER BY a.id_antrian
 	`
 	rows, err := s.DB.Query(query, idPoli)
@@ -298,7 +299,7 @@ func (s *AntrianService) GetScreeningAntrianByPoli(idPoli int) ([][]interface{},
 		}
 		results = append(results, []interface{}{idAntrian, idPasien, nama})
 	}
-	if err = rows.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 

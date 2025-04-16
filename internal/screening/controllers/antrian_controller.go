@@ -300,8 +300,9 @@ func (ac *AntrianController) AlihkanPasienHandler(c echo.Context) error {
 		"data":    nil,
 	})
 }
-func (ac *AntrianController) GetScreeningAntrianHandler(c echo.Context) error {
-	// Ambil query parameter id_poli
+
+func (ac *AntrianController) GetTodayScreeningAntrianHandler(c echo.Context) error {
+	// Ambil query parameter id_poli dari query string.
 	idPoliStr := c.QueryParam("id_poli")
 	if idPoliStr == "" {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
@@ -319,8 +320,8 @@ func (ac *AntrianController) GetScreeningAntrianHandler(c echo.Context) error {
 		})
 	}
 
-	// Panggil service untuk mengambil antrian screening (id_status = 3)
-	results, err := ac.AntrianService.GetScreeningAntrianByPoli(idPoli)
+	// Panggil service untuk mengambil data screening antrian untuk tanggal sekarang.
+	results, err := ac.AntrianService.GetTodayScreeningAntrianByPoli(idPoli)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
@@ -329,7 +330,10 @@ func (ac *AntrianController) GetScreeningAntrianHandler(c echo.Context) error {
 		})
 	}
 
-	// Kembalikan response dengan output sesuai yang diinginkan
+	// Contoh output (misalnya data hanya satu baris):
+	// [
+	//    [1, 1, "yesto"]
+	// ]
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Screening antrian retrieved successfully",
