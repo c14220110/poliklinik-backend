@@ -300,21 +300,39 @@ func (ac *AntrianController) AlihkanPasienHandler(c echo.Context) error {
 		"data":    nil,
 	})
 }
-
 func (ac *AntrianController) GetScreeningAntrianHandler(c echo.Context) error {
-    // Panggil service untuk mengambil screening antrian
-    result, err := ac.AntrianService.GetScreeningAntrian()
-    if err != nil {
-        return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-            "status":  http.StatusInternalServerError,
-            "message": "Failed to retrieve screening antrian: " + err.Error(),
-            "data":    nil,
-        })
-    }
+	// Ambil query parameter id_poli
+	idPoliStr := c.QueryParam("id_poli")
+	if idPoliStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_poli query parameter is required",
+			"data":    nil,
+		})
+	}
+	idPoli, err := strconv.Atoi(idPoliStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_poli must be a number",
+			"data":    nil,
+		})
+	}
 
-    return c.JSON(http.StatusOK, map[string]interface{}{
-        "status":  http.StatusOK,
-        "message": "Screening antrian retrieved successfully",
-        "data":    result,
-    })
+	// Panggil service untuk mengambil antrian screening (id_status = 3)
+	results, err := ac.AntrianService.GetScreeningAntrianByPoli(idPoli)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve screening antrian: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	// Kembalikan response dengan output sesuai yang diinginkan
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Screening antrian retrieved successfully",
+		"data":    results,
+	})
 }
