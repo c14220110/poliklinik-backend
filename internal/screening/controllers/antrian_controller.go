@@ -336,3 +336,41 @@ func (ac *AntrianController) GetTodayScreeningAntrianHandler(c echo.Context) err
 		"data":    results,
 	})
 }
+
+
+func (ac *AntrianController) GetDetailAntrianHandler(c echo.Context) error {
+	// Ambil query parameter id_antrian
+	idAntrianStr := c.QueryParam("id_antrian")
+	if idAntrianStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "parameter id_antrian wajib diisi",
+			"data":    nil,
+		})
+	}
+
+	idAntrian, err := strconv.Atoi(idAntrianStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_antrian harus berupa angka",
+			"data":    nil,
+		})
+	}
+
+	// Panggil service untuk mendapatkan detail antrian berdasarkan id_antrian.
+	result, err := ac.AntrianService.GetDetailAntrianByID(idAntrian)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve detail antrian: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Detail antrian retrieved successfully",
+		"data":    result,
+	})
+}

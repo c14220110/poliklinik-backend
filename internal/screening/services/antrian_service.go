@@ -312,3 +312,69 @@ func (s *AntrianService) GetTodayScreeningAntrianByPoli(idPoli int) ([]map[strin
 
 	return results, nil
 }
+
+
+func (s *AntrianService) GetDetailAntrianByID(idAntrian int) (map[string]interface{}, error) {
+	// Query untuk mengambil data detail dari tabel Antrian, Pasien, dan Rekam_Medis,
+	// serta menambahkan kolom keluhan_utama dari tabel Antrian.
+	queryDetails := `
+		SELECT p.id_pasien, p.nama, p.jenis_kelamin, p.tempat_lahir, 
+		       DATE_FORMAT(p.tanggal_lahir, '%Y-%m-%d') AS tanggal_lahir, p.nik, p.no_telp, 
+		       p.alamat, p.kota_tinggal, p.kelurahan, p.kecamatan, 
+		       a.keluhan_utama,
+		       rm.id_rm, a.nomor_antrian
+		FROM Antrian a
+		JOIN Pasien p ON a.id_pasien = p.id_pasien
+		JOIN Rekam_Medis rm ON p.id_pasien = rm.id_pasien
+		WHERE a.id_antrian = ?
+		ORDER BY rm.created_at DESC
+		LIMIT 1
+	`
+	var idPasien, nomorAntrian int
+	var nama, jenisKelamin, tempatLahir, tanggalLahirStr, nik, noTelp, alamat, kotaTinggal, kelurahan, kecamatan string
+	var keluhanUtama string
+	var idRM string
+
+	err := s.DB.QueryRow(queryDetails, idAntrian).Scan(
+		&idPasien, &nama, &jenisKelamin, &tempatLahir, &tanggalLahirStr, &nik, &noTelp,
+		&alamat, &kotaTinggal, &kelurahan, &kecamatan, &keluhanUtama, &idRM, &nomorAntrian,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get detail data: %v", err)
+	}
+
+	// Parse tanggal_lahir dengan layout "2006-01-02"
+	tanggalLahir, err := time.Parse("2006-01-02", tanggalLahirStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse tanggal_lahir: %v", err)
+	}
+
+	// Hitung umur
+	now := time.Now()
+	umur := now.Year() - tanggalLahir.Year()
+	if now.YearDay() < tanggalLahir.YearDay() {
+		umur--
+	}
+
+	// Susun hasil dalam map dengan key sesuai permintaan.
+	result := map[string]interface{}{
+		"id_antrian":    idAntrian,
+		"nomor_antrian": nomorAntrian,
+		"id_pasien":     idPasien,
+		"nama_pasien":   nama,
+		"id_rm":         idRM,
+		"jenis_kelamin": jenisKelamin,
+		"tempat_lahir":  tempatLahir,
+		"tanggal_lahir": tanggalLahirStr,
+		"nik":           nik,
+		"no_telp":       noTelp,
+		"alamat":        alamat,
+		"kota":          kotaTinggal,
+		"kelurahan":     kelurahan,
+		"kecamatan":     kecamatan,
+		"umur":          umur,
+		"keluhan_utama": keluhanUtama,
+	}
+
+	return result, nil
+}
