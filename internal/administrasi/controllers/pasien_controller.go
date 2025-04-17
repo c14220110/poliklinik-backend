@@ -482,3 +482,37 @@ func (pc *PasienController) BatalkanAntrianHandler(c echo.Context) error {
         "data":    nil,
     })
 }
+
+func (pc *PasienController) GetDetailAntrianHandler(c echo.Context) error {
+    idAntrianStr := c.QueryParam("id_antrian")
+    if idAntrianStr == "" {
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{
+            "status":  http.StatusBadRequest,
+            "message": "parameter id_antrian wajib diisi",
+            "data":    nil,
+        })
+    }
+    idAntrian, err := strconv.Atoi(idAntrianStr)
+    if err != nil {
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{
+            "status":  http.StatusBadRequest,
+            "message": "id_antrian harus berupa angka",
+            "data":    nil,
+        })
+    }
+
+    detail, err := pc.Service.GetDetailAntrianByID(idAntrian)
+    if err != nil {
+        return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+            "status":  http.StatusInternalServerError,
+            "message": "Failed to retrieve detail antrian: " + err.Error(),
+            "data":    nil,
+        })
+    }
+
+    return c.JSON(http.StatusOK, map[string]interface{}{
+        "status":  http.StatusOK,
+        "message": "Detail antrian retrieved successfully",
+        "data":    detail,
+    })
+}
