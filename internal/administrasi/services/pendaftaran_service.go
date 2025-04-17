@@ -756,7 +756,7 @@ func (s *PendaftaranService) GetDetailAntrianByID(idAntrian int) (map[string]int
         umur--
     }
 
-    // 3. Cari assessment terbaru di riwayat_kunjungan
+   // 3. Cari assessment terbaru di riwayat_kunjungan
     var idAssessment int64
     err = s.DB.QueryRow(`
         SELECT id_assessment
@@ -766,12 +766,9 @@ func (s *PendaftaranService) GetDetailAntrianByID(idAntrian int) (map[string]int
         LIMIT 1
     `, idAntrian).Scan(&idAssessment)
 
-    var namaDokter string
-    if err == sql.ErrNoRows {
-        namaDokter = "pasien ini belum melakukan konsultasi dengan dokter"
-    } else if err != nil {
-        return nil, fmt.Errorf("failed to get assessment record: %v", err)
-    } else {
+    // namaDokter akan dit-set nil jika belum ada assessment
+    var namaDokter interface{} = nil
+    if err == nil {
         // 4. Ambil id_karyawan (dokter) dari Assessment
         var idKaryawanDokter int
         if err := s.DB.QueryRow(
@@ -781,12 +778,16 @@ func (s *PendaftaranService) GetDetailAntrianByID(idAntrian int) (map[string]int
             return nil, fmt.Errorf("failed to get doctor id: %v", err)
         }
         // 5. Ambil nama dokter dari Karyawan
+        var nd string
         if err := s.DB.QueryRow(
             "SELECT nama FROM Karyawan WHERE id_karyawan = ?",
             idKaryawanDokter,
-        ).Scan(&namaDokter); err != nil {
+        ).Scan(&nd); err != nil {
             return nil, fmt.Errorf("failed to get doctor name: %v", err)
         }
+        namaDokter = nd
+    } else if err != sql.ErrNoRows {
+        return nil, fmt.Errorf("failed to get assessment record: %v", err)
     }
 
     // 6. Susun hasil akhir
@@ -807,7 +808,7 @@ func (s *PendaftaranService) GetDetailAntrianByID(idAntrian int) (map[string]int
         "kecamatan":     kec,
         "umur":          umur,
         "keluhan_utama": keluhanUtama,
-        "nama_dokter":   namaDokter,
+        "nama_dokter":   namaDokter,  // akan menjadi null jika tidak ada konsultasi
     }
     return result, nil
 }
