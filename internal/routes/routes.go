@@ -131,7 +131,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.POST("/login", managementController.Login) // Tidak pakai JWT
 
 	// Manajemen Karyawan
-	management.POST("/karyawan", karyawanController.AddKaryawan, middlewares.JWTMiddleware())
+	management.POST("/karyawan", karyawanController.AddKaryawan, middlewares.JWTMiddleware()) 
 	management.GET("/karyawan", karyawanController.GetKaryawanListHandler, middlewares.JWTMiddleware())
 	management.PUT("/karyawan/update", karyawanController.UpdateKaryawanHandler, middlewares.JWTMiddleware())
 	management.PUT("/karyawan/delete", karyawanController.SoftDeleteKaryawanHandler, middlewares.JWTMiddleware())
@@ -161,10 +161,10 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.PUT("/shift/updateCustom", shiftController.UpdateCustomShiftHandler, middlewares.JWTMiddleware())
 	management.PUT("/shift/soft-delete", shiftController.SoftDeleteShiftHandler, middlewares.JWTMiddleware())
 	management.GET("/shift", shiftController.GetShiftPoliList, middlewares.JWTMiddleware())
-	management.GET("/cms", cmsController.GetCMSByPoliklinikHandler, middlewares.JWTMiddleware())
-	management.GET("/cms/all", cmsController.GetAllCMSHandler, middlewares.JWTMiddleware())
-	management.POST("/cms/create", cmsController.CreateCMSHandler, middlewares.JWTMiddleware())
-	management.PUT("/cms/update", cmsController.UpdateCMSHandler, middlewares.JWTMiddleware())
+	management.GET("/cms", cmsController.GetCMSByPoliklinikHandler, middlewares.JWTMiddleware()) 
+	management.GET("/cms/all", cmsController.GetAllCMSHandler, middlewares.JWTMiddleware()) 
+	management.POST("/cms/create", cmsController.CreateCMSHandler, middlewares.JWTMiddleware()) 
+	management.PUT("/cms/update", cmsController.UpdateCMSHandler, middlewares.JWTMiddleware()) 
 	management.GET("/shift/karyawan", shiftController.GetKaryawanListHandler, middlewares.JWTMiddleware())
 	management.GET("/karyawan/tanpa-shift", shiftController.GetKaryawanTanpaShiftHandler, middlewares.JWTMiddleware())
 	management.POST("/shift/assign-new", shiftController.AssignShiftHandlerNew, middlewares.JWTMiddleware())

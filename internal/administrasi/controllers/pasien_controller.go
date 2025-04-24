@@ -9,23 +9,26 @@ import (
 
 	"github.com/c14220110/poliklinik-backend/internal/administrasi/models"
 	"github.com/c14220110/poliklinik-backend/internal/administrasi/services"
+	common "github.com/c14220110/poliklinik-backend/internal/common/middlewares"
+	jwtUtils "github.com/c14220110/poliklinik-backend/pkg/utils"
 	"github.com/c14220110/poliklinik-backend/ws"
 	"github.com/labstack/echo/v4"
 )
 
+// ExtendedPasienRequest defines payload untuk pendaftaran pasien
 type ExtendedPasienRequest struct {
-	Nama              string `json:"nama"`
-	JenisKelamin      string `json:"jenis_kelamin"`
-	TempatLahir       string `json:"tempat_lahir"`
-	TanggalLahir      string `json:"tanggal_lahir"`
-	Nik               string `json:"nik"`
-	NoTelp            string `json:"no_telp"`
-	Alamat            string `json:"alamat"`
-	Kelurahan         string `json:"kelurahan"`
-	Kecamatan         string `json:"kecamatan"`
-	KotaTempatTinggal string `json:"kota_tempat_tinggal"`
-	IDPoli            int    `json:"id_poli"`
-	KeluhanUtama      string `json:"keluhan_utama"`
+	Nama               string `json:"nama"`
+	TanggalLahir       string `json:"tanggal_lahir"`
+	JenisKelamin       string `json:"jenis_kelamin"`
+	TempatLahir        string `json:"tempat_lahir"`
+	Nik                string `json:"nik"`
+	Kelurahan          string `json:"kelurahan"`
+	Kecamatan          string `json:"kecamatan"`
+	KotaTempatTinggal  string `json:"kota_tinggal"`
+	Alamat             string `json:"alamat"`
+	NoTelp             string `json:"no_telp"`
+	IDPoli             int    `json:"id_poli"`
+	KeluhanUtama       string `json:"keluhan_utama"`
 }
 
 type PasienController struct {
@@ -37,105 +40,118 @@ func NewPasienController(service *services.PendaftaranService) *PasienController
 }
 
 
+// RegisterPasien mendaftarkan pasien baru + kunjungan + broadcast WS
 func (pc *PasienController) RegisterPasien(c echo.Context) error {
-    var req ExtendedPasienRequest
-    if err := c.Bind(&req); err != nil {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "Invalid request payload: " + err.Error(),
-            "data":    nil,
-        })
-    }
+	var req ExtendedPasienRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Invalid request payload: " + err.Error(),
+			"data":    nil,
+		})
+	}
 
-    // Validasi field wajib
-    if req.Nama == "" || req.TanggalLahir == "" || req.Nik == "" || req.IDPoli == 0 {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "Nama, tanggal_lahir, nik, dan id_poli harus diisi",
-            "data":    nil,
-        })
-    }
+	// Validasi field wajib
+	if req.Nama == "" || req.TanggalLahir == "" || req.Nik == "" || req.IDPoli == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Nama, tanggal_lahir, nik, dan id_poli harus diisi",
+			"data":    nil,
+		})
+	}
 
-    // Parse tanggal lahir
-    parsedDate, err := time.Parse("2006-01-02", req.TanggalLahir)
-    if err != nil {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "Format tanggal_lahir tidak valid. Gunakan format YYYY-MM-DD",
-            "data":    nil,
-        })
-    }
+	// Parse tanggal lahir
+	parsedDate, err := time.Parse("2006-01-02", req.TanggalLahir)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Format tanggal_lahir tidak valid. Gunakan format YYYY-MM-DD",
+			"data":    nil,
+		})
+	}
 
-    // Buat objek Pasien
-    p := models.Pasien{
-        Nama:         req.Nama,
-        TanggalLahir: parsedDate,
-        JenisKelamin: req.JenisKelamin,
-        TempatLahir:  req.TempatLahir,
-        NIK:          req.Nik,
-        Kelurahan:    req.Kelurahan,
-        Kecamatan:    req.Kecamatan,
-        Alamat:       req.Alamat,
-        NoTelp:       req.NoTelp,
-        KotaTinggal:  req.KotaTempatTinggal,
-    }
+	// Ambil operatorID dari JWT
+	claims := c.Get(string(common.ContextKeyClaims)).(*jwtUtils.Claims)
+	operatorID, err := strconv.Atoi(claims.IDKaryawan)
+	if err != nil {
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "Invalid operator ID in token",
+			"data":    nil,
+		})
+	}
 
-    // Operator yang menginput (dummy ID 1, idealnya dari JWT)
-    operatorID := 1
+	// Buat objek Pasien untuk dikirim ke service
+	p := models.Pasien{
+		Nama:          req.Nama,
+		TanggalLahir:  parsedDate,
+		JenisKelamin:  req.JenisKelamin,
+		TempatLahir:   req.TempatLahir,
+		NIK:           req.Nik,
+		Kelurahan:     req.Kelurahan,
+		Kecamatan:     req.Kecamatan,
+		KotaTinggal:   req.KotaTempatTinggal,
+		Alamat:        req.Alamat,
+		NoTelp:        req.NoTelp,
+	}
 
-   patientID, idAntrian, nomorAntrian, idRM, idStatus, namaPoli, err := pc.Service.RegisterPasienWithKunjungan(p, req.IDPoli, operatorID, req.KeluhanUtama)
-if err != nil {
-    if err.Error() == "NIK sudah terdaftar" {
-        return c.JSON(http.StatusConflict, map[string]interface{}{
-            "status":  http.StatusConflict,
-            "message": "NIK sudah terdaftar",
-            "data":    nil,
-        })
-    }
-    return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-        "status":  http.StatusInternalServerError,
-        "message": "Gagal mendaftarkan pasien: " + err.Error(),
-        "data":    nil,
-    })
-}
+	// Panggil service untuk register pasien + kunjungan
+	patientID, idAntrian, nomorAntrian, idRM, idStatus, namaPoli, err :=
+		pc.Service.RegisterPasienWithKunjungan(p, req.IDPoli, operatorID, req.KeluhanUtama)
+	if err != nil {
+		if err.Error() == "NIK sudah terdaftar" {
+			return c.JSON(http.StatusConflict, map[string]interface{}{
+				"status":  http.StatusConflict,
+				"message": "NIK sudah terdaftar",
+				"data":    nil,
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Gagal mendaftarkan pasien: " + err.Error(),
+			"data":    nil,
+		})
+	}
 
-// Siapkan data broadcast dengan format yang diinginkan
-broadcastData := map[string]interface{}{
-    "id_antrian":    idAntrian,
-    "id_pasien":     patientID,
-    "id_poli":       req.IDPoli,
-    "id_rm":         idRM,
-    "id_status":     idStatus,
-    "nama":          req.Nama,
-    "nama_poli":     namaPoli,
-    "nomor_antrian": nomorAntrian,
-    "priority_order": nomorAntrian, // misal sama dengan nomor_antrian
-    "status":        "Menunggu",      // sesuai contoh format broadcast
-}
+	// Siapkan payload broadcast WS
+	inner := map[string]interface{}{
+		"id_antrian":     idAntrian,
+		"id_pasien":      patientID,
+		"id_poli":        req.IDPoli,
+		"id_rm":          idRM,
+		"id_status":      idStatus,
+		"nama":           req.Nama,
+		"nama_poli":      namaPoli,
+		"nomor_antrian":  nomorAntrian,
+		"priority_order": nomorAntrian,
+		"status":         "Menunggu",
+	}
+	wrapper := map[string]interface{}{
+		"type": "antrian_update",
+		"data": inner,
+	}
+	msg, err := json.Marshal(wrapper)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Gagal membuat pesan broadcast: " + err.Error(),
+			"data":    nil,
+		})
+	}
 
-messageJSON, err := json.Marshal(broadcastData)
-if err != nil {
-    return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-        "status":  http.StatusInternalServerError,
-        "message": "Gagal membuat pesan broadcast: " + err.Error(),
-        "data":    nil,
-    })
-}
+	// Broadcast via WebSocket
+	ws.HubInstance.Broadcast <- msg
 
-// Kirim pesan ke WebSocket
-ws.HubInstance.Broadcast <- messageJSON
-
-// Kembalikan response API ke client
-return c.JSON(http.StatusOK, map[string]interface{}{
-    "status":  http.StatusOK,
-    "message": "Pasien berhasil didaftarkan",
-    "data": map[string]interface{}{
-        "id_pasien":     patientID,
-        "id_antrian":    idAntrian,
-        "nomor_antrian": nomorAntrian,
-    },
-})
-
+	// Kembalikan response API
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Pasien berhasil didaftarkan",
+		"data": map[string]interface{}{
+			"id_pasien":     patientID,
+			"id_antrian":    idAntrian,
+			"nomor_antrian": nomorAntrian,
+		},
+	})
 }
 
 func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
