@@ -291,60 +291,65 @@ func (pc *PasienController) GetAllPasienData(c echo.Context) error {
 
 
 func (pc *PasienController) TundaPasienHandler(c echo.Context) error {
-	idAntrianStr := c.QueryParam("id_antrian")
-	if idAntrianStr == "" {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"status":  http.StatusBadRequest,
-			"message": "parameter id_antrian wajib diisi",
-			"data":    nil,
-		})
-	}
-	idAntrian, err := strconv.Atoi(idAntrianStr)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"status":  http.StatusBadRequest,
-			"message": "id_antrian harus berupa angka",
-			"data":    nil,
-		})
-	}
-
-	err = pc.Service.TundaPasien(idAntrian)
-	if err != nil {
-		if strings.Contains(err.Error(), "tidak ditemukan") {
-			return c.JSON(http.StatusNotFound, map[string]interface{}{
-				"status":  http.StatusNotFound,
-				"message": err.Error(),
-				"data":    nil,
-			})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-			"status":  http.StatusInternalServerError,
-			"message": "Gagal menunda pasien: " + err.Error(),
-			"data":    nil,
-		})
-	}
-
-	// Setelah update berhasil, trigger event broadcast ke WebSocket.
-    data := map[string]interface{}{
-	"id_antrian": idAntrian,
-	"status":     "Ditunda",
+    idAntrianStr := c.QueryParam("id_antrian")
+    if idAntrianStr == "" {
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{
+            "status":  http.StatusBadRequest,
+            "message": "parameter id_antrian wajib diisi",
+            "data":    nil,
+        })
     }
-    messageJSON, err := json.Marshal(data)
+    idAntrian, err := strconv.Atoi(idAntrianStr)
     if err != nil {
-	    return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-		"status":  http.StatusInternalServerError,
-		"message": "Gagal membuat pesan JSON: " + err.Error(),
-		"data":    nil,
-	})
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{
+            "status":  http.StatusBadRequest,
+            "message": "id_antrian harus berupa angka",
+            "data":    nil,
+        })
+    }
+
+    if err := pc.Service.TundaPasien(idAntrian); err != nil {
+        if strings.Contains(err.Error(), "tidak ditemukan") {
+            return c.JSON(http.StatusNotFound, map[string]interface{}{
+                "status":  http.StatusNotFound,
+                "message": err.Error(),
+                "data":    nil,
+            })
+        }
+        return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+            "status":  http.StatusInternalServerError,
+            "message": "Gagal menunda pasien: " + err.Error(),
+            "data":    nil,
+        })
+    }
+
+    // Siapkan payload broadcast dengan wrapper "type" & "data"
+    inner := map[string]interface{}{
+        "id_antrian": idAntrian,
+        "status":     "Ditunda",
+    }
+    wrapper := map[string]interface{}{
+        "type": "antrian_update",
+        "data": inner,
+    }
+
+    messageJSON, err := json.Marshal(wrapper)
+    if err != nil {
+        return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+            "status":  http.StatusInternalServerError,
+            "message": "Gagal membuat pesan JSON: " + err.Error(),
+            "data":    nil,
+        })
     }
     ws.HubInstance.Broadcast <- messageJSON
-    
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"status":  http.StatusOK,
-		"message": "Pasien berhasil ditunda",
-		"data":    nil,
-	})
+
+    return c.JSON(http.StatusOK, map[string]interface{}{
+        "status":  http.StatusOK,
+        "message": "Pasien berhasil ditunda",
+        "data":    nil,
+    })
 }
+
 
 
 func (pc *PasienController) RescheduleAntrianHandler(c echo.Context) error {
@@ -381,14 +386,18 @@ func (pc *PasienController) RescheduleAntrianHandler(c echo.Context) error {
         })
     }
 
-    // Siapkan data broadcast untuk WebSocket
-    broadcastData := map[string]interface{}{
+    // Siapkan payload broadcast dengan wrapper "type" & "data"
+    inner := map[string]interface{}{
         "id_antrian":         idAntrian,
         "new_priority_order": newPriority,
         "status":             "Menunggu",
     }
+    wrapper := map[string]interface{}{
+        "type": "antrian_update",
+        "data": inner,
+    }
 
-    messageJSON, err := json.Marshal(broadcastData)
+    messageJSON, err := json.Marshal(wrapper)
     if err != nil {
         return c.JSON(http.StatusInternalServerError, map[string]interface{}{
             "status":  http.StatusInternalServerError,
@@ -408,6 +417,7 @@ func (pc *PasienController) RescheduleAntrianHandler(c echo.Context) error {
         },
     })
 }
+
 
 
 func (pc *PasienController) GetAntrianTodayHandler(c echo.Context) error {
@@ -465,8 +475,7 @@ func (pc *PasienController) BatalkanAntrianHandler(c echo.Context) error {
     }
 
     // 3. Panggil fungsi service untuk membatalkan antrian
-    err = pc.Service.BatalkanAntrian(idAntrian)
-    if err != nil {
+    if err := pc.Service.BatalkanAntrian(idAntrian); err != nil {
         if strings.Contains(err.Error(), "tidak ditemukan") {
             return c.JSON(http.StatusNotFound, map[string]interface{}{
                 "status":  http.StatusNotFound,
@@ -476,17 +485,22 @@ func (pc *PasienController) BatalkanAntrianHandler(c echo.Context) error {
         }
         return c.JSON(http.StatusInternalServerError, map[string]interface{}{
             "status":  http.StatusInternalServerError,
-            "message": "gagal membatalkan antrian: " + err.Error(),
+            "message": "Gagal membatalkan antrian: " + err.Error(),
             "data":    nil,
         })
     }
 
-    // 4. Kirim broadcast ke WebSocket
-    broadcastData := map[string]interface{}{
+    // 4. Siapkan payload broadcast dengan wrapper "type" & "data"
+    inner := map[string]interface{}{
         "id_antrian": idAntrian,
         "status":     "Dibatalkan",
     }
-    messageJSON, err := json.Marshal(broadcastData)
+    wrapper := map[string]interface{}{
+        "type": "antrian_update",
+        "data": inner,
+    }
+
+    msg, err := json.Marshal(wrapper)
     if err != nil {
         return c.JSON(http.StatusInternalServerError, map[string]interface{}{
             "status":  http.StatusInternalServerError,
@@ -494,15 +508,16 @@ func (pc *PasienController) BatalkanAntrianHandler(c echo.Context) error {
             "data":    nil,
         })
     }
-    ws.HubInstance.Broadcast <- messageJSON
+    ws.HubInstance.Broadcast <- msg
 
     // 5. Respons sukses
     return c.JSON(http.StatusOK, map[string]interface{}{
         "status":  http.StatusOK,
-        "message": "antrian berhasil dibatalkan",
+        "message": "Antrian berhasil dibatalkan",
         "data":    nil,
     })
 }
+
 
 func (pc *PasienController) GetDetailAntrianHandler(c echo.Context) error {
     idAntrianStr := c.QueryParam("id_antrian")
