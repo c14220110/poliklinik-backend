@@ -173,6 +173,7 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 		})
 	}
 
+	// Parse tanggal lahir (jika disertakan)
 	parsedDate, err := time.Parse("2006-01-02", req.TanggalLahir)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
@@ -182,22 +183,23 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 		})
 	}
 
-	// Buat objek Pasien untuk update (tidak mengubah NIK)
+	// Siapkan model Pasien (NIK tidak diubah)
 	p := models.Pasien{
-		Nama:         req.Nama,
-		TanggalLahir: parsedDate,
-		JenisKelamin: req.JenisKelamin,
-		TempatLahir:  req.TempatLahir,
-		NIK:          req.Nik,
-		Kelurahan:    req.Kelurahan,
-		Kecamatan:    req.Kecamatan,
-		Alamat:       req.Alamat,
-		NoTelp:       req.NoTelp,
-		KotaTinggal:  req.KotaTempatTinggal,
+		Nama:          req.Nama,
+		TanggalLahir:  parsedDate,
+		JenisKelamin:  req.JenisKelamin,
+		TempatLahir:   req.TempatLahir,
+		NIK:           req.Nik,
+		Kelurahan:     req.Kelurahan,
+		Kecamatan:     req.Kecamatan,
+		KotaTinggal:   req.KotaTempatTinggal,
+		Alamat:        req.Alamat,
+		NoTelp:        req.NoTelp,
 	}
 
-	// Panggil service update yang sudah dimodifikasi agar mengembalikan data tambahan
-	idPasien, idAntrian, nomorAntrian, idRM, idStatus, namaPoli, err := pc.Service.UpdatePasienAndRegisterKunjungan(p, req.IDPoli, req.KeluhanUtama)
+	// Panggil service untuk update pasien + kunjungan
+	idPasien, idAntrian, nomorAntrian, idRM, idStatus, namaPoli, err :=
+		pc.Service.UpdatePasienAndRegisterKunjungan(p, req.IDPoli, req.KeluhanUtama)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
@@ -206,21 +208,25 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 		})
 	}
 
-	// Siapkan data broadcast dengan format JSON
-	broadcastData := map[string]interface{}{
-		"id_antrian":    idAntrian,
-		"id_pasien":     idPasien,
-		"id_poli":       req.IDPoli,
-		"id_rm":         idRM,
-		"id_status":     idStatus,
-		"nama":          req.Nama,
-		"nama_poli":     namaPoli,
-		"nomor_antrian": nomorAntrian,
-		"priority_order": nomorAntrian, // misalnya sama dengan nomor_antrian
-		"status":        "Menunggu",     // sesuai dengan data di database
+	// Siapkan payload broadcast
+	inner := map[string]interface{}{
+		"id_antrian":     idAntrian,
+		"id_pasien":      idPasien,
+		"id_poli":        req.IDPoli,
+		"id_rm":          idRM,
+		"id_status":      idStatus,
+		"nama":           req.Nama,
+		"nama_poli":      namaPoli,
+		"nomor_antrian":  nomorAntrian,
+		"priority_order": nomorAntrian,
+		"status":         "Menunggu",
+	}
+	wrapper := map[string]interface{}{
+		"type": "antrian_update",
+		"data": inner,
 	}
 
-	messageJSON, err := json.Marshal(broadcastData)
+	msg, err := json.Marshal(wrapper)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
@@ -229,8 +235,8 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 		})
 	}
 
-	// Kirim pesan ke WebSocket
-	ws.HubInstance.Broadcast <- messageJSON
+	// Broadcast via WebSocket
+	ws.HubInstance.Broadcast <- msg
 
 	// Kembalikan response API ke client
 	return c.JSON(http.StatusOK, map[string]interface{}{
@@ -243,7 +249,6 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 		},
 	})
 }
-
 
 func (pc *PasienController) GetAllPasienData(c echo.Context) error {
 	// Ambil query parameter "nama", "page", dan "limit"
