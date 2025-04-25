@@ -24,7 +24,7 @@ type ExtendedPasienRequest struct {
 	Nik                string `json:"nik"`
 	Kelurahan          string `json:"kelurahan"`
 	Kecamatan          string `json:"kecamatan"`
-	KotaTempatTinggal  string `json:"kota_tinggal"`
+	KotaTempatTinggal  string `json:"kota_tempat_tinggal"`
 	Alamat             string `json:"alamat"`
 	NoTelp             string `json:"no_telp"`
 	IDPoli             int    `json:"id_poli"`

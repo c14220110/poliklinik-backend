@@ -268,6 +268,7 @@ func (ac *AntrianController) AlihkanPasienHandler(c echo.Context) error {
 			"data":    nil,
 		})
 	}
+	
 	idAntrian, err := strconv.Atoi(idAntrianStr)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
