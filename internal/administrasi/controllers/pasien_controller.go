@@ -144,6 +144,7 @@ func (pc *PasienController) RegisterPasien(c echo.Context) error {
 		},
 	})
 }
+
 func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 	var req ExtendedPasienRequest
 	if err := c.Bind(&req); err != nil {
@@ -153,8 +154,7 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-
-	// Validasi minimal
+	// validasi minimal
 	if req.Nik == "" || req.IDPoli == 0 {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
@@ -162,8 +162,7 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-
-	// Parse tanggal lahir (jika disertakan)
+	// parse tanggal lahir (jika disertakan)
 	parsedDate, err := time.Parse("2006-01-02", req.TanggalLahir)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
@@ -187,7 +186,7 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 		NoTelp:        req.NoTelp,
 	}
 
-	// Panggil service untuk update pasien + kunjungan
+	// Panggil service
 	idPasien, idAntrian, nomorAntrian, idRM, idStatus, namaPoli, err :=
 		pc.Service.UpdatePasienAndRegisterKunjungan(p, req.IDPoli, req.KeluhanUtama)
 	if err != nil {
@@ -198,7 +197,7 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 		})
 	}
 
-	// Siapkan payload broadcast
+	// Broadcast WebSocket
 	inner := map[string]interface{}{
 		"id_antrian":     idAntrian,
 		"id_pasien":      idPasien,
@@ -215,26 +214,16 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 		"type": "antrian_update",
 		"data": inner,
 	}
-
-	msg, err := json.Marshal(wrapper)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-			"status":  http.StatusInternalServerError,
-			"message": "Failed to marshal broadcast message: " + err.Error(),
-			"data":    nil,
-		})
-	}
-
-	// Broadcast via WebSocket
+	msg, _ := json.Marshal(wrapper)
 	ws.HubInstance.Broadcast <- msg
 
-	// Kembalikan response API ke client
+	// Response
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Kunjungan registered successfully",
 		"data": map[string]interface{}{
-			"id_pasien":     idPasien,
-			"id_antrian":    idAntrian,
+			"id_pasien":    idPasien,
+			"id_antrian":   idAntrian,
 			"nomor_antrian": nomorAntrian,
 		},
 	})
