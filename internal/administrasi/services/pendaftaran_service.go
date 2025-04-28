@@ -676,7 +676,7 @@ func (s *PendaftaranService) GetAllStatusAntrian() ([]map[string]interface{}, er
 func (s *PendaftaranService) BatalkanAntrian(idAntrian int) error {
     // 1. Update status antrian (contoh: update ke status batal, misalnya 3)
     updateAntrianQuery := "UPDATE Antrian SET id_status = ? WHERE id_antrian = ?"
-    result, err := s.DB.Exec(updateAntrianQuery, 3, idAntrian)
+    result, err := s.DB.Exec(updateAntrianQuery, 7, idAntrian)
     if err != nil {
         return fmt.Errorf("gagal membatalkan antrian: %v", err)
     }

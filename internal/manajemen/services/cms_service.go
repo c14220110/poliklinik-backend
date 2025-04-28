@@ -2,7 +2,10 @@ package services
 
 import (
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/models"
@@ -16,84 +19,195 @@ func NewCMSService(db *sql.DB) *CMSService {
 	return &CMSService{DB: db}
 }
 
-// CreateCMSWithElements memasukkan data ke tabel CMS, CMS_Elements, dan Management_CMS.
-// Jika sudah ada CMS untuk id_poli tersebut (dan deleted_at IS NULL), fungsi mengembalikan error.
-func (cs *CMSService) CreateCMSWithElements(cms models.CMS, elements []models.CMSElement, managementInfo models.ManagementCMS) (int64, error) {
-	// Cek apakah sudah ada CMS untuk id_poli tersebut
-	var existingID int
-	err := cs.DB.QueryRow("SELECT id_cms FROM CMS WHERE id_poli = ? AND deleted_at IS NULL LIMIT 1", cms.IDPoli).Scan(&existingID)
+var (
+	// ErrCMSAlreadyExists returned when a CMS for the given poliklinik already exists
+	ErrCMSAlreadyExists = errors.New("cms already exists for this poliklinik")
+	// ErrInvalidElementID returned when request contains an element ID not in master Elements table
+	ErrInvalidElementID = errors.New("invalid element ID in request")
+)
+
+// CreateCMSWithSections membuat CMS beserta section, subsection, elements, detail_element, dan management
+func (svc *CMSService) CreateCMSWithSections(
+	req models.CreateCMSRequest,
+	mgmt models.ManagementCMS,
+) (int64, error) {
+	// 1. cek duplikat CMS untuk id_poli
+	var exists int
+	err := svc.DB.QueryRow(
+		"SELECT id_cms FROM CMS WHERE id_poli = ? AND deleted_at IS NULL",
+		req.IDPoli,
+	).Scan(&exists)
 	if err == nil {
-		// Jika tidak terjadi error, artinya ada record yang ditemukan.
-		return 0, fmt.Errorf("CMS already exists for poliklinik with id_poli %d", cms.IDPoli)
+		return 0, ErrCMSAlreadyExists
 	}
 	if err != sql.ErrNoRows {
-		// Jika error lain, kembalikan error
-		return 0, fmt.Errorf("failed to check existing CMS: %v", err)
+		return 0, err
 	}
 
-	tx, err := cs.DB.Begin()
+	// 2. kumpulkan semua id_element dari request
+	elementIDs := map[int]struct{}{}
+	for _, sec := range req.Sections {
+		for _, el := range sec.Elements {
+			elementIDs[el.IDElement] = struct{}{}
+		}
+		for _, sub := range sec.Subsections {
+			for _, el := range sub.Elements {
+				elementIDs[el.IDElement] = struct{}{}
+			}
+		}
+	}
+	// jika ada id_element, verifikasi keberadaannya
+	if len(elementIDs) > 0 {
+		placeholders := make([]string, 0, len(elementIDs))
+		args := make([]interface{}, 0, len(elementIDs))
+		for id := range elementIDs {
+			placeholders = append(placeholders, "?")
+			args = append(args, id)
+		}
+		// bangun IN clause
+		inClause := strings.Join(placeholders, ",")
+		query := fmt.Sprintf("SELECT id_element FROM Elements WHERE id_element IN (%s)", inClause)
+		rows, err := svc.DB.Query(query, args...)
+		if err != nil {
+			return 0, err
+		}
+		defer rows.Close()
+
+		existing := map[int]struct{}{}
+		for rows.Next() {
+			var id int
+			if err := rows.Scan(&id); err != nil {
+				return 0, err
+			}
+			existing[id] = struct{}{}
+		}
+		// cek ada yang invalid
+		for id := range elementIDs {
+			if _, ok := existing[id]; !ok {
+				return 0, fmt.Errorf("%w: %d", ErrInvalidElementID, id)
+			}
+		}
+	}
+
+	// 3. mulai transaksi
+	tx, err := svc.DB.Begin()
 	if err != nil {
 		return 0, err
 	}
 
-	// 1. Insert ke tabel CMS
-	cmsInsert := `
-        INSERT INTO CMS (id_poli, title, created_at, updated_at)
-        VALUES (?, ?, ?, ?)
-    `
+	// insert CMS
 	now := time.Now()
-	res, err := tx.Exec(cmsInsert, cms.IDPoli, cms.Title, now, now)
+	res, err := tx.Exec(
+		`INSERT INTO CMS (id_poli, title, created_at, updated_at)
+		 VALUES (?, ?, ?, ?)`,
+		req.IDPoli, req.Title, now, now,
+	)
 	if err != nil {
 		tx.Rollback()
-		return 0, fmt.Errorf("failed to insert CMS: %v", err)
+		return 0, err
 	}
 	idCMS, err := res.LastInsertId()
 	if err != nil {
 		tx.Rollback()
-		return 0, fmt.Errorf("failed to get last insert id for CMS: %v", err)
+		return 0, err
 	}
 
-	// 2. Insert setiap elemen ke tabel CMS_Elements
-	elemInsert := `
-        INSERT INTO CMS_Elements (id_cms, section_name, sub_section_name, element_type, element_label, element_name, element_options, element_size, element_hint, is_required)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-	for _, e := range elements {
-		var elementOptions interface{}
-		if e.ElementOptions == "" {
-			elementOptions = nil // Set NULL jika kosong
-		} else {
-			elementOptions = e.ElementOptions
-		}
-
-		var elementSize interface{}
-		if e.ElementSize == "" {
-			elementSize = nil // Set NULL jika kosong
-		} else {
-			elementSize = e.ElementSize
-		}
-
-		_, err := tx.Exec(elemInsert, idCMS, e.SectionName, e.SubSectionName, e.ElementType, e.ElementLabel, e.ElementName, elementOptions, elementSize, e.ElementHint, e.IsRequired)
+	// insert sections, subsections, elements, detail_element
+	for _, sec := range req.Sections {
+		// insert section
+		rSec, err := tx.Exec(
+			`INSERT INTO CMS_Section (id_cms, title) VALUES (?, ?)`,
+			idCMS, sec.Title,
+		)
 		if err != nil {
 			tx.Rollback()
-			return 0, fmt.Errorf("failed to insert CMS element: %v", err)
+			return 0, err
+		}
+		idSection, err := rSec.LastInsertId()
+		if err != nil {
+			tx.Rollback()
+			return 0, err
+		}
+
+		// siapkan subsections (jika none, treat elements at section level)
+		subsecs := sec.Subsections
+		if len(subsecs) == 0 && len(sec.Elements) > 0 {
+			subsecs = []models.SubsectionRequest{{Title: "", Elements: sec.Elements}}
+		}
+
+		for _, sub := range subsecs {
+			// insert subsection
+			rSub, err := tx.Exec(
+				`INSERT INTO CMS_Subsection (id_section, title) VALUES (?, ?)`,
+				idSection, sub.Title,
+			)
+			if err != nil {
+				tx.Rollback()
+				return 0, err
+			}
+			idSub, err := rSub.LastInsertId()
+			if err != nil {
+				tx.Rollback()
+				return 0, err
+			}
+
+			// insert elements
+			for _, el := range sub.Elements {
+				// element_options JSON raw (string atau null)
+				var opts interface{}
+				if string(el.ElementOptions) == "null" || len(el.ElementOptions) == 0 {
+					opts = nil
+				} else {
+					opts = json.RawMessage(el.ElementOptions)
+				}
+
+				// insert into CMS_Elements
+				rEl, err := tx.Exec(
+					`INSERT INTO CMS_Elements
+					 (id_section, id_subsection, element_label, element_name, element_options, element_hint, is_required)
+					 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+					idSection, idSub,
+					el.ElementLabel, el.ElementName,
+					opts, el.ElementHint, el.IsRequired,
+				)
+				if err != nil {
+					tx.Rollback()
+					return 0, err
+				}
+				idCMSEl, err := rEl.LastInsertId()
+				if err != nil {
+					tx.Rollback()
+					return 0, err
+				}
+
+				// insert detail_element
+				_, err = tx.Exec(
+					`INSERT INTO Detail_Element (id_element, id_cms_elements) VALUES (?, ?)`,
+					el.IDElement, idCMSEl,
+				)
+				if err != nil {
+					tx.Rollback()
+					return 0, err
+				}
+			}
 		}
 	}
 
-	// 3. Insert ke tabel Management_CMS
-	managementInsert := `
-        INSERT INTO Management_CMS (id_management, id_cms, created_by, updated_by)
-        VALUES (?, ?, ?, ?)
-    `
-	_, err = tx.Exec(managementInsert, managementInfo.IDManagement, idCMS, managementInfo.IDManagement, managementInfo.IDManagement)
+	// insert management
+	_, err = tx.Exec(
+		`INSERT INTO Management_CMS (id_management, id_cms, created_by, updated_by)
+		 VALUES (?, ?, ?, ?)`,
+		mgmt.IDManagement, idCMS, mgmt.CreatedBy, mgmt.UpdatedBy,
+	)
 	if err != nil {
 		tx.Rollback()
-		return 0, fmt.Errorf("failed to insert into Management_CMS: %v", err)
+		return 0, err
 	}
 
 	if err = tx.Commit(); err != nil {
 		return 0, err
 	}
+
 	return idCMS, nil
 }
 
