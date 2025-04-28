@@ -24,185 +24,185 @@ func NewPendaftaranService(db *sql.DB) *PendaftaranService {
 // - Hubungan Kunjungan dengan Poli (di tabel Kunjungan_Poli)
 // - Pembuatan nomor antrian di tabel Antrian (nomor antrian unik per poli per hari)
 // Catatan: Kolom Status di tabel Antrian telah diganti menjadi id_status yang mengacu ke tabel Status_Antrian.
-func (s *PendaftaranService) RegisterPasienWithKunjungan(p models.Pasien, idPoli int, operatorID int, keluhanUtama string) (int64, int64, int64, string, int, string, error) {
-    tx, err := s.DB.Begin()
-    if err != nil {
-        return 0, 0, 0, "", 0, "", err
-    }
+// RegisterPasienWithKunjungan melakukan registrasi pasien, rekam medis,
+// riwayat kunjungan, kunjungan_poli, antrian, dan billing.
+func (s *PendaftaranService) RegisterPasienWithKunjungan(
+	p models.Pasien,
+	idPoli, operatorID int,
+	keluhanUtama string,
+) (patientID int64, idAntrian int64, nomorAntrian int64, idRM string, idStatus int, namaPoli string, err error) {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
 
-    // 1. Cek apakah NIK sudah ada di tabel Pasien
-    var existingID int
-    err = tx.QueryRow("SELECT id_pasien FROM Pasien WHERE NIK = ?", p.NIK).Scan(&existingID)
-    if err == nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", fmt.Errorf("NIK sudah terdaftar")
-    } else if err != sql.ErrNoRows {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", err
-    }
+	// 1. Cek NIK
+	var existingID int
+	err = tx.QueryRow("SELECT id_pasien FROM Pasien WHERE NIK = ?", p.NIK).Scan(&existingID)
+	if err == nil {
+		err = fmt.Errorf("NIK sudah terdaftar")
+		return
+	} else if err != sql.ErrNoRows {
+		return
+	}
 
-    // 2. Insert data pasien ke tabel Pasien
-    queryPasien := `
-        INSERT INTO Pasien 
-            (Nama, Tanggal_Lahir, Jenis_Kelamin, Tempat_Lahir, NIK, Kelurahan, Kecamatan, Alamat, No_Telp, kota_tinggal)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-    res, err := tx.Exec(queryPasien,
-        p.Nama,
-        p.TanggalLahir,
-        p.JenisKelamin,
-        p.TempatLahir,
-        p.NIK,
-        p.Kelurahan,
-        p.Kecamatan,
-        p.Alamat,
-        p.NoTelp,
-        p.KotaTinggal,
-    )
-    if err != nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", err
-    }
-    patientID, err := res.LastInsertId()
-    if err != nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", err
-    }
+	// 2. Insert Pasien
+	res, err := tx.Exec(`
+		INSERT INTO Pasien
+		  (Nama, Tanggal_Lahir, Jenis_Kelamin, Tempat_Lahir,
+		   NIK, Kelurahan, Kecamatan, Alamat, No_Telp, kota_tinggal)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.Nama, p.TanggalLahir, p.JenisKelamin, p.TempatLahir,
+		p.NIK, p.Kelurahan, p.Kecamatan, p.Alamat, p.NoTelp, p.KotaTinggal,
+	)
+	if err != nil {
+		return
+	}
+	patientID, err = res.LastInsertId()
+	if err != nil {
+		return
+	}
 
-    // 3. Generate id_rm dengan format "RM(Tahun)(5 digit)"
-    tahun := time.Now().Year()
-    var count int
-    err = tx.QueryRow("SELECT count FROM Counter_RM WHERE tahun = ? FOR UPDATE", tahun).Scan(&count)
-    if err == sql.ErrNoRows {
-        _, err = tx.Exec("INSERT INTO Counter_RM (tahun, count) VALUES (?, 1)", tahun)
-        if err != nil {
-            tx.Rollback()
-            return 0, 0, 0, "", 0, "", fmt.Errorf("failed to insert into Counter_RM: %v", err)
-        }
-        count = 1
-    } else if err != nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", fmt.Errorf("failed to select from Counter_RM: %v", err)
-    } else {
-        count++
-        _, err = tx.Exec("UPDATE Counter_RM SET count = ? WHERE tahun = ?", count, tahun)
-        if err != nil {
-            tx.Rollback()
-            return 0, 0, 0, "", 0, "", fmt.Errorf("failed to update Counter_RM: %v", err)
-        }
-    }
-    formattedCount := fmt.Sprintf("%05d", count)
-    idRM := fmt.Sprintf("RM%d%s", tahun, formattedCount)
+	// 3. Generate id_rm via Counter_RM
+	tahun := time.Now().Year()
+	var count int
+	err = tx.QueryRow("SELECT count FROM Counter_RM WHERE tahun = ? FOR UPDATE", tahun).Scan(&count)
+	if err == sql.ErrNoRows {
+		_, err = tx.Exec("INSERT INTO Counter_RM (tahun, count) VALUES (?, 1)", tahun)
+		if err != nil {
+			err = fmt.Errorf("failed to insert into Counter_RM: %v", err)
+			return
+		}
+		count = 1
+	} else if err != nil {
+		err = fmt.Errorf("failed to select from Counter_RM: %v", err)
+		return
+	} else {
+		count++
+		_, err = tx.Exec("UPDATE Counter_RM SET count = ? WHERE tahun = ?", count, tahun)
+		if err != nil {
+			err = fmt.Errorf("failed to update Counter_RM: %v", err)
+			return
+		}
+	}
+	idRM = fmt.Sprintf("RM%d%05d", tahun, count)
 
-    // 4. Insert ke Rekam_Medis dengan id_rm yang sudah dibuat
-    queryRM := `INSERT INTO Rekam_Medis (id_rm, id_pasien) VALUES (?, ?)`
-    _, err = tx.Exec(queryRM, idRM, patientID)
-    if err != nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", fmt.Errorf("failed to insert into Rekam_Medis: %v", err)
-    }
+	// 4. Insert Rekam_Medis
+	_, err = tx.Exec(
+		"INSERT INTO Rekam_Medis (id_rm, id_pasien) VALUES (?, ?)",
+		idRM, patientID,
+	)
+	if err != nil {
+		err = fmt.Errorf("failed to insert into Rekam_Medis: %v", err)
+		return
+	}
 
-    // 5. Buat record baru di Riwayat_Kunjungan (sementara catatan kosong)
-    insertRK := `INSERT INTO Riwayat_Kunjungan (id_rm, Catatan) VALUES (?, ?)`
-    res, err = tx.Exec(insertRK, idRM, "")
-    if err != nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", fmt.Errorf("failed to insert Riwayat_Kunjungan: %v", err)
-    }
-    idKunjungan, err := res.LastInsertId()
-    if err != nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", fmt.Errorf("failed to get last insert id for Riwayat_Kunjungan: %v", err)
-    }
+	// 5. Insert Riwayat_Kunjungan
+	res, err = tx.Exec(
+		"INSERT INTO Riwayat_Kunjungan (id_rm, catatan) VALUES (?, ?)",
+		idRM, "",
+	)
+	if err != nil {
+		err = fmt.Errorf("failed to insert Riwayat_Kunjungan: %v", err)
+		return
+	}
+	idKunjungan, err := res.LastInsertId()
+	if err != nil {
+		err = fmt.Errorf("failed to get last insert id for Riwayat_Kunjungan: %v", err)
+		return
+	}
 
-    // 6. Hubungkan Riwayat_Kunjungan dengan Poliklinik melalui tabel Kunjungan_Poli
-    insertKP := `INSERT INTO Kunjungan_Poli (id_poli, id_kunjungan) VALUES (?, ?)`
-    _, err = tx.Exec(insertKP, idPoli, idKunjungan)
-    if err != nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", fmt.Errorf("failed to insert into Kunjungan_Poli: %v", err)
-    }
+	// 6. Insert Kunjungan_Poli
+	_, err = tx.Exec(
+		"INSERT INTO Kunjungan_Poli (id_poli, id_kunjungan) VALUES (?, ?)",
+		idPoli, idKunjungan,
+	)
+	if err != nil {
+		err = fmt.Errorf("failed to insert into Kunjungan_Poli: %v", err)
+		return
+	}
 
-    // 7. Hitung nomor antrian untuk poli yang dipilih pada hari ini (reset setiap hari)
-    today := time.Now().Format("2006-01-02")
-    var maxNomor sql.NullInt64
-    err = tx.QueryRow("SELECT COALESCE(MAX(nomor_antrian), 0) FROM Antrian WHERE id_poli = ? AND DATE(created_at) = ?", idPoli, today).Scan(&maxNomor)
-    if err != nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", fmt.Errorf("failed to get max nomor antrian: %v", err)
-    }
-    nomorAntrian := int64(1)
-    if maxNomor.Valid && maxNomor.Int64 > 0 {
-        nomorAntrian = maxNomor.Int64 + 1
-    }
+	// 7. Hitung nomor antrian hari ini
+	today := time.Now().Format("2006-01-02")
+	var maxNomor sql.NullInt64
+	err = tx.QueryRow(
+		"SELECT COALESCE(MAX(nomor_antrian),0) FROM Antrian WHERE id_poli=? AND DATE(created_at)=?",
+		idPoli, today,
+	).Scan(&maxNomor)
+	if err != nil {
+		err = fmt.Errorf("failed to get max nomor antrian: %v", err)
+		return
+	}
+	nomorAntrian = 1
+	if maxNomor.Valid && maxNomor.Int64 > 0 {
+		nomorAntrian = maxNomor.Int64 + 1
+	}
 
-    // 8. Dapatkan id_status untuk "Menunggu" dari tabel Status_Antrian
-    var idStatus int
-    err = tx.QueryRow("SELECT id_status FROM Status_Antrian WHERE status = 'Menunggu' LIMIT 1").Scan(&idStatus)
-    if err != nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", fmt.Errorf("failed to get id_status for 'Menunggu': %v", err)
-    }
+	// 8. Ambil id_status "Menunggu"
+	err = tx.QueryRow(
+		"SELECT id_status FROM Status_Antrian WHERE status='Menunggu' LIMIT 1",
+	).Scan(&idStatus)
+	if err != nil {
+		err = fmt.Errorf("failed to get id_status for 'Menunggu': %v", err)
+		return
+	}
 
-    // 9. Insert data antrian ke tabel Antrian, termasuk keluhan_utama
-    insertAntrian := `
-        INSERT INTO Antrian (id_pasien, id_poli, keluhan_utama, nomor_antrian, id_status, priority_order, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, NOW())
-    `
-    res, err = tx.Exec(insertAntrian, patientID, idPoli, keluhanUtama, nomorAntrian, idStatus, nomorAntrian)
-    if err != nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", fmt.Errorf("failed to insert into Antrian: %v", err)
-    }
-    idAntrian, err := res.LastInsertId()
-    if err != nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", fmt.Errorf("failed to get id_antrian: %v", err)
-    }
+	// 9. Insert Antrian
+	res, err = tx.Exec(`
+		INSERT INTO Antrian
+		  (id_pasien, id_poli, keluhan_utama, nomor_antrian, id_status, priority_order, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+		patientID, idPoli, keluhanUtama, nomorAntrian, idStatus, nomorAntrian,
+	)
+	if err != nil {
+		err = fmt.Errorf("failed to insert into Antrian: %v", err)
+		return
+	}
+	idAntrian, err = res.LastInsertId()
+	if err != nil {
+		err = fmt.Errorf("failed to get id_antrian: %v", err)
+		return
+	}
 
-    // 10. Insert data billing ke tabel Billing
-insertBilling := `
-    INSERT INTO Billing (id_kunjungan, id_antrian, id_karyawan, id_billing_assessment, tipe_pembayaran, total, id_status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
-`
-res, err = tx.Exec(insertBilling, idKunjungan, idAntrian, nil, nil, nil, nil)
-if err != nil {
-    tx.Rollback()
-    return 0, 0, 0, "", 0, "", fmt.Errorf("failed to insert into Billing: %v", err)
-}
-idBilling, err := res.LastInsertId()  // Simpan id billing yang baru dibuat
-if err != nil {
-    tx.Rollback()
-    return 0, 0, 0, "", 0, "", fmt.Errorf("failed to get id_billing: %v", err)
-}
+	// 10. Insert Billing (tetap dilakukan)
+	_, err = tx.Exec(`
+		INSERT INTO Billing
+		  (id_kunjungan, id_antrian, id_karyawan, id_billing_assessment,
+		   tipe_pembayaran, total, id_status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
+		idKunjungan, idAntrian, operatorID, nil, nil, nil,
+	)
+	if err != nil {
+		err = fmt.Errorf("failed to insert into Billing: %v", err)
+		return
+	}
 
-// 11. Update Riwayat_Kunjungan dengan id_antrian dan id_billing
-updateRK := `
-    UPDATE Riwayat_Kunjungan
-    SET id_antrian = ?, id_billing = ?
-    WHERE id_kunjungan = ?
-`
-_, err = tx.Exec(updateRK, idAntrian, idBilling, idKunjungan)
-if err != nil {
-    tx.Rollback()
-    return 0, 0, 0, "", 0, "", fmt.Errorf("failed to update Riwayat_Kunjungan with id_antrian and id_billing: %v", err)
-}
+	// 11. Update Riwayat_Kunjungan hanya dengan id_antrian
+	_, err = tx.Exec(`
+		UPDATE Riwayat_Kunjungan
+		SET id_antrian = ?
+		WHERE id_kunjungan = ?`,
+		idAntrian, idKunjungan,
+	)
+	if err != nil {
+		err = fmt.Errorf("failed to update Riwayat_Kunjungan: %v", err)
+		return
+	}
 
+	// 12. Ambil nama_poli
+	err = tx.QueryRow(
+		"SELECT nama_poli FROM Poliklinik WHERE id_poli = ?",
+		idPoli,
+	).Scan(&namaPoli)
+	if err != nil {
+		err = fmt.Errorf("failed to get nama_poli: %v", err)
+		return
+	}
 
-    // 12. Ambil nama_poli dari tabel Poliklinik
-    var namaPoli string
-    err = tx.QueryRow("SELECT nama_poli FROM Poliklinik WHERE id_poli = ?", idPoli).Scan(&namaPoli)
-    if err != nil {
-        tx.Rollback()
-        return 0, 0, 0, "", 0, "", fmt.Errorf("failed to get nama_poli: %v", err)
-    }
-
-    // Commit transaksi
-    if err = tx.Commit(); err != nil {
-        return 0, 0, 0, "", 0, "", err
-    }
-
-    return patientID, idAntrian, nomorAntrian, idRM, idStatus, namaPoli, nil
+	// Commit transaksi
+	err = tx.Commit()
+	return
 }
 
 
