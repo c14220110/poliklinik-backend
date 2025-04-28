@@ -37,6 +37,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	shiftService := manajemenServices.NewShiftService(db)
 	cmsService := manajemenServices.NewCMSService(db)
 	privilegeService := manajemenServices.NewPrivilegeService(db)
+	dashboardService := manajemenServices.NewDashboardService(db)
 
 	// Screening / Suster
 	screeningService := screeningServices.NewScreeningService(db)
@@ -59,6 +60,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	cmsController := manajemenControllers.NewCMSController(cmsService)
 	poliklinikController := manajemenControllers.NewPoliklinikController(poliklinikService)
 	privilegeController := manajemenControllers.NewPrivilegeController(privilegeService)
+	dashboardController := manajemenControllers.NewDashboardController(dashboardService)
 	// Screening / Suster
 	susterController := screeningControllers.NewSusterController(susterService)
 	screeningController := screeningControllers.NewScreeningController(screeningService)
@@ -129,6 +131,8 @@ func Init(e *echo.Echo, db *sql.DB) {
 	// 4. Management (Website untuk Manajemen)
 	management := api.Group("/management")
 	management.POST("/login", managementController.Login) // Tidak pakai JWT
+
+	management.GET("/dashboard", dashboardController.GetDashboard, middlewares.JWTMiddleware())
 
 	// Manajemen Karyawan
 	management.POST("/karyawan", karyawanController.AddKaryawan, middlewares.JWTMiddleware()) 
