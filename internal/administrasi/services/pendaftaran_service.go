@@ -770,13 +770,14 @@ func (s *PendaftaranService) GetDetailAntrianByID(idAntrian int) (map[string]int
         return nil, fmt.Errorf("failed to get detail data: %v", err)
     }
 
-    // 2. Hitung umur
-    tglLahir, _ := time.Parse("2006-01-02", tglLhrStr)
-    now := time.Now()
-    umur := now.Year() - tglLahir.Year()
-    if now.YearDay() < tglLahir.YearDay() {
-        umur--
+    // 2. Hitung umur dalam hari
+    tglLahir, err := time.Parse("2006-01-02", tglLhrStr)
+    if err != nil {
+        return nil, fmt.Errorf("invalid tanggal lahir format: %v", err)
     }
+    now := time.Now()
+    days := int(now.Sub(tglLahir).Hours() / 24)  // selisih dalam jam dibagi 24 → hari
+
 
    // 3. Cari assessment terbaru di riwayat_kunjungan
     var idAssessment int64
@@ -812,7 +813,7 @@ func (s *PendaftaranService) GetDetailAntrianByID(idAntrian int) (map[string]int
         return nil, fmt.Errorf("failed to get assessment record: %v", err)
     }
 
-    // 6. Susun hasil akhir
+       // 6. Susun hasil akhir, ganti "umur" menjadi hari
     result := map[string]interface{}{
         "id_antrian":    idAntrian,
         "nomor_antrian": nomorAntrian,
@@ -828,9 +829,9 @@ func (s *PendaftaranService) GetDetailAntrianByID(idAntrian int) (map[string]int
         "kota":          kota,
         "kelurahan":     kelur,
         "kecamatan":     kec,
-        "umur":          umur,
+        "umur":          days,        // sekarang dalam hari
         "keluhan_utama": keluhanUtama,
-        "nama_dokter":   namaDokter,  // akan menjadi null jika tidak ada konsultasi
+        "nama_dokter":   namaDokter,
     }
     return result, nil
 }
