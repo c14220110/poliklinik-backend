@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,87 +20,35 @@ func NewCMSService(db *sql.DB) *CMSService {
 	return &CMSService{DB: db}
 }
 
-var (
-	// ErrCMSAlreadyExists returned when a CMS for the given poliklinik already exists
-	ErrCMSAlreadyExists = errors.New("cms already exists for this poliklinik")
-	// ErrInvalidElementID returned when request contains an element ID not in master Elements table
-	ErrInvalidElementID = errors.New("invalid element ID in request")
-)
+// ErrInvalidElementID returned when request contains an element ID not in master Elements
+type errInvalidElementID struct{ ID int }
+func (e errInvalidElementID) Error() string { return fmt.Sprintf("invalid element ID: %d", e.ID) }
 
-// CreateCMSWithSections membuat CMS beserta section, subsection, elements, detail_element, dan management
+// CreateCMSWithSections inserts a new CMS, soft-deletes any active CMS for the same poli,
+// and populates sections, subsections, elements, Detail_Element, and Management_CMS.
 func (svc *CMSService) CreateCMSWithSections(
 	req models.CreateCMSRequest,
 	mgmt models.ManagementCMS,
 ) (int64, error) {
-	// 1. cek duplikat CMS untuk id_poli
-	var exists int
-	err := svc.DB.QueryRow(
-		"SELECT id_cms FROM CMS WHERE id_poli = ? AND deleted_at IS NULL",
-		req.IDPoli,
-	).Scan(&exists)
-	if err == nil {
-		return 0, ErrCMSAlreadyExists
-	}
-	if err != sql.ErrNoRows {
-		return 0, err
-	}
-
-	// 2. kumpulkan semua id_element dari request
-	elementIDs := map[int]struct{}{}
-	for _, sec := range req.Sections {
-		for _, el := range sec.Elements {
-			elementIDs[el.IDElement] = struct{}{}
-		}
-		for _, sub := range sec.Subsections {
-			for _, el := range sub.Elements {
-				elementIDs[el.IDElement] = struct{}{}
-			}
-		}
-	}
-	// jika ada id_element, verifikasi keberadaannya
-	if len(elementIDs) > 0 {
-		placeholders := make([]string, 0, len(elementIDs))
-		args := make([]interface{}, 0, len(elementIDs))
-		for id := range elementIDs {
-			placeholders = append(placeholders, "?")
-			args = append(args, id)
-		}
-		// bangun IN clause
-		inClause := strings.Join(placeholders, ",")
-		query := fmt.Sprintf("SELECT id_element FROM Elements WHERE id_element IN (%s)", inClause)
-		rows, err := svc.DB.Query(query, args...)
-		if err != nil {
-			return 0, err
-		}
-		defer rows.Close()
-
-		existing := map[int]struct{}{}
-		for rows.Next() {
-			var id int
-			if err := rows.Scan(&id); err != nil {
-				return 0, err
-			}
-			existing[id] = struct{}{}
-		}
-		// cek ada yang invalid
-		for id := range elementIDs {
-			if _, ok := existing[id]; !ok {
-				return 0, fmt.Errorf("%w: %d", ErrInvalidElementID, id)
-			}
-		}
-	}
-
-	// 3. mulai transaksi
+	// begin transaction
 	tx, err := svc.DB.Begin()
 	if err != nil {
 		return 0, err
 	}
-
-	// insert CMS
 	now := time.Now()
+
+	// 1) Soft-delete existing CMS for this poli
+	if _, err := tx.Exec(
+		`UPDATE CMS SET deleted_at = ? WHERE id_poli = ? AND deleted_at IS NULL`,
+		now, req.IDPoli,
+	); err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+
+	// 2) Insert new CMS record
 	res, err := tx.Exec(
-		`INSERT INTO CMS (id_poli, title, created_at, updated_at)
-		 VALUES (?, ?, ?, ?)`,
+		`INSERT INTO CMS (id_poli, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
 		req.IDPoli, req.Title, now, now,
 	)
 	if err != nil {
@@ -112,57 +61,74 @@ func (svc *CMSService) CreateCMSWithSections(
 		return 0, err
 	}
 
-	// insert sections, subsections, elements, detail_element
+	// 3) Validate element IDs against master Elements table
+	elementIDs := make(map[int]struct{})
 	for _, sec := range req.Sections {
-		// insert section
-		rSec, err := tx.Exec(
-			`INSERT INTO CMS_Section (id_cms, title) VALUES (?, ?)`,
-			idCMS, sec.Title,
-		)
-		if err != nil {
-			tx.Rollback()
-			return 0, err
+		for _, el := range sec.Elements {
+			elementIDs[el.IDElement] = struct{}{}
 		}
-		idSection, err := rSec.LastInsertId()
-		if err != nil {
-			tx.Rollback()
-			return 0, err
-		}
-
-		// siapkan subsections (jika none, treat elements at section level)
-		subsecs := sec.Subsections
-		if len(subsecs) == 0 && len(sec.Elements) > 0 {
-			subsecs = []models.SubsectionRequest{{Title: "", Elements: sec.Elements}}
-		}
-
-		for _, sub := range subsecs {
-			// insert subsection
-			rSub, err := tx.Exec(
-				`INSERT INTO CMS_Subsection (id_section, title) VALUES (?, ?)`,
-				idSection, sub.Title,
-			)
-			if err != nil {
-				tx.Rollback()
-				return 0, err
-			}
-			idSub, err := rSub.LastInsertId()
-			if err != nil {
-				tx.Rollback()
-				return 0, err
-			}
-
-			// insert elements
+		for _, sub := range sec.Subsections {
 			for _, el := range sub.Elements {
-				// element_options JSON raw (string atau null)
+				elementIDs[el.IDElement] = struct{}{}
+			}
+		}
+	}
+	if len(elementIDs) > 0 {
+		placeholders := make([]string, 0, len(elementIDs))
+		args := make([]interface{}, 0, len(elementIDs))
+		for id := range elementIDs {
+			placeholders = append(placeholders, "?")
+			args = append(args, id)
+		}
+		query := fmt.Sprintf("SELECT id_element FROM Elements WHERE id_element IN (%s)", strings.Join(placeholders, ","))
+		exRows, err := svc.DB.Query(query, args...)
+		if err != nil {
+			tx.Rollback()
+			return 0, err
+		}
+		defer exRows.Close()
+
+		existing := make(map[int]struct{})
+		for exRows.Next() {
+			var id int
+			exRows.Scan(&id)
+			existing[id] = struct{}{}
+		}
+		for id := range elementIDs {
+			if _, ok := existing[id]; !ok {
+				tx.Rollback()
+				return 0, errInvalidElementID{ID: id}
+			}
+		}
+	}
+
+	// 4) Insert sections, subsections, elements, and Detail_Element
+	for _, sec := range req.Sections {
+		// section
+		rS, err := tx.Exec(`INSERT INTO CMS_Section (id_cms, title) VALUES (?, ?)`, idCMS, sec.Title)
+		if err != nil { tx.Rollback(); return 0, err }
+		idSection, _ := rS.LastInsertId()
+
+		subs := sec.Subsections
+		if len(subs) == 0 && len(sec.Elements) > 0 {
+			subs = []models.SubsectionRequest{{Title: "", Elements: sec.Elements}}
+		}
+		for _, sub := range subs {
+			rSub, err := tx.Exec(`INSERT INTO CMS_Subsection (id_section, title) VALUES (?, ?)`, idSection, sub.Title)
+			if err != nil { tx.Rollback(); return 0, err }
+			idSub, _ := rSub.LastInsertId()
+
+			for _, el := range sub.Elements {
+				// prepare element_options
 				var opts interface{}
-				if string(el.ElementOptions) == "null" || len(el.ElementOptions) == 0 {
+				if len(el.ElementOptions) == 0 || string(el.ElementOptions) == "null" {
 					opts = nil
 				} else {
 					opts = json.RawMessage(el.ElementOptions)
 				}
 
-				// insert into CMS_Elements
-				rEl, err := tx.Exec(
+				// insert CMS_Elements
+				rE, err := tx.Exec(
 					`INSERT INTO CMS_Elements
 					 (id_section, id_subsection, element_label, element_name, element_options, element_hint, is_required)
 					 VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -170,203 +136,359 @@ func (svc *CMSService) CreateCMSWithSections(
 					el.ElementLabel, el.ElementName,
 					opts, el.ElementHint, el.IsRequired,
 				)
-				if err != nil {
-					tx.Rollback()
-					return 0, err
-				}
-				idCMSEl, err := rEl.LastInsertId()
-				if err != nil {
-					tx.Rollback()
-					return 0, err
-				}
+				if err != nil { tx.Rollback(); return 0, err }
+				idCE, _ := rE.LastInsertId()
 
-				// insert detail_element
-				_, err = tx.Exec(
-					`INSERT INTO Detail_Element (id_element, id_cms_elements) VALUES (?, ?)`,
-					el.IDElement, idCMSEl,
-				)
-				if err != nil {
-					tx.Rollback()
-					return 0, err
+				// link to master element
+				if _, err := tx.Exec(`INSERT INTO Detail_Element (id_element, id_cms_elements) VALUES (?, ?)`, el.IDElement, idCE); err != nil {
+					tx.Rollback(); return 0, err
 				}
 			}
 		}
 	}
 
-	// insert management
-	_, err = tx.Exec(
-		`INSERT INTO Management_CMS (id_management, id_cms, created_by, updated_by)
-		 VALUES (?, ?, ?, ?)`,
+	// 5) Insert Management_CMS
+	if _, err := tx.Exec(
+		`INSERT INTO Management_CMS (id_management, id_cms, created_by, updated_by) VALUES (?, ?, ?, ?)`,
 		mgmt.IDManagement, idCMS, mgmt.CreatedBy, mgmt.UpdatedBy,
-	)
-	if err != nil {
+	); err != nil {
 		tx.Rollback()
 		return 0, err
 	}
 
-	if err = tx.Commit(); err != nil {
+	// commit
+	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
-
 	return idCMS, nil
 }
 
 
-// GetCMSByPoliklinikID mengembalikan daftar CMS untuk suatu poliklinik.
-func (cs *CMSService) GetCMSByPoliklinikID(poliID int) ([]models.CMSResponse, error) {
+// ErrCMSNotFound indicates no CMS record exists for given ID
+var ErrCMSNotFound = fmt.Errorf("cms not found")
+
+
+
+// GetCMSDetailByID returns a detailed CMS including all elements for given cmsID
+func (svc *CMSService) GetCMSDetailByID(cmsID int) (models.CMSDetailResponse, error) {
+	var resp models.CMSDetailResponse
+	// 1) Fetch CMS header
+	headerQ := `SELECT id_cms, title FROM CMS WHERE id_cms = ?`
+	if err := svc.DB.QueryRow(headerQ, cmsID).Scan(&resp.IDCMS, &resp.Title); err != nil {
+		if err == sql.ErrNoRows {
+			return resp, ErrCMSNotFound
+		}
+		return resp, err
+	}
+
+	// 2) Fetch all elements via join through CMS_Section
+	eleQ := `
+		SELECT
+		e.id_cms_elements,
+		e.id_section,
+		e.id_subsection,
+		e.element_label,
+		e.element_name,
+		e.element_options,
+		e.element_hint,
+		e.is_required
+		FROM CMS_Elements e
+		JOIN CMS_Section s ON e.id_section = s.id_section
+		WHERE s.id_cms = ?
+		ORDER BY e.id_cms_elements
+	`
+	rows, err := svc.DB.Query(eleQ, cmsID)
+	if err != nil {
+		return resp, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var e models.CMSElementDetail
+		var reqInt int
+		var optNull sql.NullString
+		var hintNull sql.NullString
+		if err := rows.Scan(
+			&e.IDCMSElement,
+			&e.IDSection,
+			&e.IDSubsection,
+			&e.Label,
+			&e.Name,
+			&optNull,
+			&hintNull,
+			&reqInt,
+		); err != nil {
+			return resp, err
+		}
+		e.Required = reqInt != 0
+		if optNull.Valid {
+			e.Options = optNull.String
+		}
+		if hintNull.Valid {
+			e.Hint = hintNull.String
+		}
+		resp.Elements = append(resp.Elements, e)
+	}
+	return resp, nil
+}
+
+// ErrNoCMSForPoli is returned when no CMS records exist under the given poliklinik ID
+var ErrNoCMSForPoli = fmt.Errorf("no CMS entries found for this poliklinik")
+// GetCMSListByPoli returns a list of CMS entries with status (active/non-active) for a given poliklinik
+func (svc *CMSService) GetCMSListByPoli(poliID int) ([]models.CMSListItem, error) {
 	query := `
-		SELECT id_cms, id_poli, title, created_at
+		SELECT id_cms, title, deleted_at
 		FROM CMS
 		WHERE id_poli = ?
 		ORDER BY created_at DESC
 	`
-	rows, err := cs.DB.Query(query, poliID)
+	rows, err := svc.DB.Query(query, poliID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var responses []models.CMSResponse
+	var list []models.CMSListItem
 	for rows.Next() {
-		var idCMS, idPoli int
-		var title string
-		var createdAt time.Time
-		if err := rows.Scan(&idCMS, &idPoli, &title, &createdAt); err != nil {
+		var (
+			idCMS     int
+			title     string
+			deletedAt sql.NullTime
+		)
+		if err := rows.Scan(&idCMS, &title, &deletedAt); err != nil {
 			return nil, err
 		}
-
-		// Query elemen CMS untuk id_cms ini
-		elemQuery := `
-			SELECT id_elements, element_type, element_label, element_name, element_options, is_required
-			FROM CMS_Elements
-			WHERE id_cms = ?
-		`
-		elemRows, err := cs.DB.Query(elemQuery, idCMS)
-		if err != nil {
-			return nil, err
+		status := "aktif"
+		if deletedAt.Valid {
+			status = "nonaktif"
 		}
-		var elements []models.ElementInfo
-		for elemRows.Next() {
-			var e models.ElementInfo
-			var isReq int
-			if err := elemRows.Scan(&e.IDEelements, &e.ElementType, &e.ElementLabel, &e.ElementName, &e.ElementOptions, &isReq); err != nil {
-				elemRows.Close()
-				return nil, err
-			}
-			e.IsRequired = isReq != 0
-			elements = append(elements, e)
-		}
-		elemRows.Close()
-
-		// Query informasi management untuk CMS
-		managementQuery := `
-			SELECT id_management, created_by, updated_by
-			FROM Management_CMS
-			WHERE id_cms = ?
-			LIMIT 1
-		`
-		var mInfo models.ManagementInfo
-		err = cs.DB.QueryRow(managementQuery, idCMS).Scan(&mInfo.IDManagement, &mInfo.CreatedBy, &mInfo.UpdatedBy)
-		if err != nil && err != sql.ErrNoRows {
-			return nil, fmt.Errorf("failed to query Management_CMS: %v", err)
-		}
-
-		response := models.CMSResponse{
-			IDCMS:      idCMS,
-			Title:      title,
-			CreatedAt:  createdAt.Format(time.RFC3339),
-			Management: mInfo,
-			Elements:   elements,
-		}
-		responses = append(responses, response)
+		list = append(list, models.CMSListItem{
+			IDCMS:  idCMS,
+			Title:  title,
+			Status: status,
+		})
 	}
-	return responses, nil
+	if len(list) == 0 {
+		return nil, ErrNoCMSForPoli
+	}
+	return list, nil
 }
 
 
-func (cs *CMSService) GetAllCMS() ([]models.CMSFlat, error) {
-    query := `
-        SELECT p.id_poli, p.nama_poli, c.id_cms
-        FROM Poliklinik p
-        LEFT JOIN CMS c ON p.id_poli = c.id_poli
-    `
-    rows, err := cs.DB.Query(query)
-    if err != nil {
-        return nil, err
-    }
-    defer rows.Close()
+// services/cms_service.go
+// UpdateCMSWithSections memperbarui CMS beserta seluruh hirarki­nya.
+func (svc *CMSService) UpdateCMSWithSections(
+	req models.UpdateCMSRequest,
+	mgmt models.ManagementCMS,
+) error {
 
-    var cmsFlatList []models.CMSFlat
-    for rows.Next() {
-        var cmsFlat models.CMSFlat
-        var idCms sql.NullInt64 // Menangani nilai NULL dari database
-        err := rows.Scan(&cmsFlat.IDPoli, &cmsFlat.NamaPoli, &idCms)
-        if err != nil {
-            return nil, err
-        }
-        if idCms.Valid {
-            id := int(idCms.Int64)
-            cmsFlat.IDCms = &id
-        } else {
-            cmsFlat.IDCms = nil
-        }
-        cmsFlatList = append(cmsFlatList, cmsFlat)
-    }
-    return cmsFlatList, nil
+	tx, err := svc.DB.Begin()
+	if err != nil { return err }
+	now := time.Now()
+
+	// 0) Pastikan CMS ada         ⬅️  HAPUS filter deleted_at
+var dummy int
+if err := tx.QueryRow(`SELECT id_cms FROM CMS WHERE id_cms = ?`,   // ← cukup ini
+	req.IDCMS).Scan(&dummy); err != nil {
+	tx.Rollback()
+	return fmt.Errorf("CMS tidak ditemukan") // masih valid utk id yg memang tidak ada
 }
 
 
-func (cs *CMSService) UpdateCMSWithElements(idCMS int, newTitle string, elements []models.CMSElement, managementInfo models.ManagementCMS) error {
-    tx, err := cs.DB.Begin()
+	// 1) Update header CMS
+	if _, err := tx.Exec(`
+		UPDATE CMS SET id_poli = ?, title = ?, updated_at = ?
+		WHERE id_cms = ?`,
+		req.IDPoli, req.Title, now, req.IDCMS); err != nil {
+		tx.Rollback(); return err
+	}
+
+	// 2) Bangun set ID yg datang dari frontend ─ dipakai utk deteksi delete implisit
+	payloadSecIDs   := map[int]struct{}{}
+	payloadSubIDs   := map[int]struct{}{}
+	payloadElemIDs  := map[int]struct{}{}
+
+	// 3) Validasi ID master Elements sekaligus upsert hirarki
+	reName := regexp.MustCompile(`[^a-zA-Z0-9\s]`) // utk generate name
+
+	for _, sec := range req.Sections {
+		if sec.Deleted {
+			// soft-delete section → cascade ke children via FK ON DELETE CASCADE
+			if _, err := tx.Exec(`UPDATE CMS_Section SET deleted_at=? WHERE id_section=?`,
+				now, sec.IDSection); err != nil { tx.Rollback(); return err }
+			continue
+		}
+		var idSection int64
+		if sec.IDSection == 0 {
+			res, err := tx.Exec(`INSERT INTO CMS_Section (id_cms, title) VALUES (?,?)`,
+				req.IDCMS, sec.Title)
+			if err != nil { tx.Rollback(); return err }
+			idSection, _ = res.LastInsertId()
+		} else {
+			payloadSecIDs[sec.IDSection] = struct{}{}
+			idSection = int64(sec.IDSection)
+			if _, err := tx.Exec(`UPDATE CMS_Section SET title=? WHERE id_section=?`,
+				sec.Title, idSection); err != nil { tx.Rollback(); return err }
+		}
+
+		// -------- Subsection loop --------
+		subs := sec.Subsections
+		if len(subs) == 0 && len(sec.Elements) > 0 {
+			subs = []models.SubsectionUpdate{{ /*dummy*/ Elements: sec.Elements }}
+		}
+		for _, sub := range subs {
+			if sub.Deleted && sub.IDSubsection != 0 {
+				if _, err := tx.Exec(`UPDATE CMS_Subsection SET deleted_at=? WHERE id_subsection=?`,
+					now, sub.IDSubsection); err != nil { tx.Rollback(); return err }
+				continue
+			}
+
+			var idSub int64
+			if sub.IDSubsection == 0 {
+				res, err := tx.Exec(`INSERT INTO CMS_Subsection (id_section, title) VALUES (?,?)`,
+					idSection, sub.Title)
+				if err != nil { tx.Rollback(); return err }
+				idSub, _ = res.LastInsertId()
+			} else {
+				payloadSubIDs[sub.IDSubsection] = struct{}{}
+				idSub = int64(sub.IDSubsection)
+				if _, err := tx.Exec(`UPDATE CMS_Subsection SET title=? WHERE id_subsection=?`,
+					sub.Title, idSub); err != nil { tx.Rollback(); return err }
+			}
+
+			// -------- Element loop --------
+			for _, el := range sub.Elements {
+				if el.Deleted && el.IDCMSElements != 0 {
+					if _, err := tx.Exec(`DELETE FROM CMS_Elements WHERE id_cms_elements=?`,
+						el.IDCMSElements); err != nil { tx.Rollback(); return err }
+					continue
+				}
+				// --- validasi id_element ada di master Elements
+				var tmp int
+				if err := tx.QueryRow(`SELECT id_element FROM Elements WHERE id_element=?`,
+					el.IDElement).Scan(&tmp); err != nil {
+					tx.Rollback(); return fmt.Errorf("invalid element ID: %d", el.IDElement)
+				}
+
+				// --- siapkan element_name
+				clean := strings.TrimSpace(reName.ReplaceAllString(el.ElementLabel, ""))
+				elemName := strings.ToLower(strings.ReplaceAll(clean, " ", "_"))
+
+				opts := interface{}(nil)
+				if len(el.ElementOptions) != 0 && string(el.ElementOptions) != "null" {
+					opts = el.ElementOptions
+				}
+
+				if el.IDCMSElements == 0 { // -------- CREATE
+					res, err := tx.Exec(`
+						INSERT INTO CMS_Elements
+						  (id_section,id_subsection,element_label,element_name,
+						   element_options,element_hint,is_required)
+						VALUES (?,?,?,?,?,?,?)`,
+						idSection, idSub, clean, elemName, opts, el.ElementHint, el.IsRequired)
+					if err != nil { tx.Rollback(); return err }
+					newIDElem, _ := res.LastInsertId()
+					if _, err := tx.Exec(
+						`INSERT INTO Detail_Element (id_element,id_cms_elements) VALUES (?,?)`,
+						el.IDElement, newIDElem); err != nil { tx.Rollback(); return err }
+				} else { // ---------------------- UPDATE
+					payloadElemIDs[el.IDCMSElements] = struct{}{}
+					if _, err := tx.Exec(`
+						UPDATE CMS_Elements
+						   SET element_label=?, element_name=?, element_options=?,
+						       element_hint=?, is_required=?
+						 WHERE id_cms_elements=?`,
+						clean, elemName, opts, el.ElementHint, el.IsRequired,
+						el.IDCMSElements); err != nil { tx.Rollback(); return err }
+
+					// perbarui Detail_Element jika id_element berubah
+					if _, err := tx.Exec(`
+						UPDATE Detail_Element SET id_element=? WHERE id_cms_elements=?`,
+						el.IDElement, el.IDCMSElements); err != nil { tx.Rollback(); return err }
+				}
+			}
+		}
+	}
+
+	// 4) Update Management_CMS (audit trail)
+	if _, err := tx.Exec(`
+		INSERT INTO Management_CMS (id_management,id_cms,created_by,updated_by)
+		VALUES (?,?,?,?)
+		ON DUPLICATE KEY UPDATE updated_by=?`,
+		mgmt.IDManagement, req.IDCMS, mgmt.CreatedBy, mgmt.UpdatedBy,
+		mgmt.UpdatedBy); err != nil { tx.Rollback(); return err }
+
+	return tx.Commit()
+}
+
+
+// Custom errors
+var (
+    ErrCMSAlreadyActive   = errors.New("cms already active")
+    ErrOtherCMSActive     = errors.New("another cms is already active for this poliklinik")
+    ErrCMSAlreadyInactive = errors.New("cms already inactive")
+		ErrCMSNotActive     = errors.New("cms already non-active")
+)
+
+// ActivateCMS sets deleted_at=NULL for given cmsID if no other active CMS exists in the same poli
+func (svc *CMSService) ActivateCMS(cmsID int) error {
+    tx, err := svc.DB.Begin()
     if err != nil {
         return err
     }
 
-    // 1. Update record CMS (title dan updated_at)
-    updateCMSQuery := `
-        UPDATE CMS
-        SET title = ?, updated_at = ?
-        WHERE id_cms = ?
-    `
-    now := time.Now()
-    _, err = tx.Exec(updateCMSQuery, newTitle, now, idCMS)
-    if err != nil {
+    var idPoli sql.NullInt64
+    var deletedAt sql.NullTime
+    // fetch cms and state
+    row := tx.QueryRow("SELECT id_poli, deleted_at FROM CMS WHERE id_cms = ?", cmsID)
+    if err = row.Scan(&idPoli, &deletedAt); err != nil {
         tx.Rollback()
-        return fmt.Errorf("failed to update CMS: %v", err)
+        if err == sql.ErrNoRows {
+            return ErrCMSNotFound
+        }
+        return err
     }
 
-    // 2. Hapus elemen lama di CMS_Elements
-    deleteElementsQuery := `DELETE FROM CMS_Elements WHERE id_cms = ?`
-    _, err = tx.Exec(deleteElementsQuery, idCMS)
-    if err != nil {
+    // already active?
+    if !deletedAt.Valid {
         tx.Rollback()
-        return fmt.Errorf("failed to delete old CMS elements: %v", err)
+        return ErrCMSAlreadyActive
     }
 
-    // 3. Insert elemen baru ke CMS_Elements
-    elemInsert := `
-        INSERT INTO CMS_Elements (id_cms, section_name, element_type, element_label, element_name, element_options, is_required)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    `
-    for _, e := range elements {
-        _, err := tx.Exec(elemInsert, idCMS, e.SectionName, e.ElementType, e.ElementLabel, e.ElementName, e.ElementOptions, e.IsRequired)
-        if err != nil {
+    // ensure no other active CMS in same poli
+    if idPoli.Valid {
+        var other int
+        err = tx.QueryRow("SELECT id_cms FROM CMS WHERE id_poli = ? AND deleted_at IS NULL LIMIT 1", idPoli.Int64).Scan(&other)
+        if err == nil {
             tx.Rollback()
-            return fmt.Errorf("failed to insert CMS element: %v", err)
+            return ErrOtherCMSActive
+        } else if err != sql.ErrNoRows {
+            tx.Rollback()
+            return err
         }
     }
 
-    // 4. Update Management_CMS: set updated_by dengan id_management (integer) dari managementInfo
-    updateManagementQuery := `
-        UPDATE Management_CMS
-        SET updated_by = ?
-        WHERE id_cms = ?
-    `
-    _, err = tx.Exec(updateManagementQuery, managementInfo.IDManagement, idCMS)
+    // activate this cms
+    _, err = tx.Exec("UPDATE CMS SET deleted_at = NULL, updated_at=? WHERE id_cms = ?", time.Now(), cmsID)
     if err != nil {
         tx.Rollback()
-        return fmt.Errorf("failed to update Management_CMS: %v", err)
+        return err
     }
 
     return tx.Commit()
+}
+
+// DeactivateCMS sets deleted_at=NOW() for given cmsID
+func (svc *CMSService) DeactivateCMS(cmsID int) error {
+    res, err := svc.DB.Exec("UPDATE CMS SET deleted_at = ? , updated_at = ? WHERE id_cms = ? AND deleted_at IS NULL", time.Now(), time.Now(), cmsID)
+    if err!=nil { return err }
+    rows, _ := res.RowsAffected()
+    if rows==0 { // already non active or not found
+        var exists int
+        if err := svc.DB.QueryRow("SELECT 1 FROM CMS WHERE id_cms = ?", cmsID).Scan(&exists); err==sql.ErrNoRows {
+            return ErrCMSNotFound
+        }
+        return ErrCMSNotActive
+    }
+    return nil
 }

@@ -100,3 +100,61 @@ type CMSFlat struct {
     NamaPoli string `json:"nama_poli"`
     IDCms    *int   `json:"id_cms"` // Pointer untuk mendukung nilai null
 }
+
+type CMSElementDetail struct {
+	IDCMSElement int    `json:"id_cms_elements"`
+	IDSection    int    `json:"id_section"`
+	IDSubsection int    `json:"id_subsection"`
+	Label        string `json:"element_label"`
+	Name         string `json:"element_name"`
+	Options      string `json:"element_options"`
+	Hint         string `json:"element_hint"`
+	Required     bool   `json:"is_required"`
+}
+
+// CMSDetailResponse is the response payload for a single CMS
+type CMSDetailResponse struct {
+	IDCMS    int                  `json:"id_cms"`
+	Title    string               `json:"title"`
+	Elements []CMSElementDetail  `json:"elements"`
+}
+
+type CMSListItem struct {
+	IDCMS  int    `json:"id_cms"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+////apdet
+type UpdateCMSRequest struct {
+	IDCMS   int               `json:"id_cms"`                 // wajib
+	IDPoli  int               `json:"id_poli"`                // boleh di-update
+	Title   string            `json:"title"`                  // boleh di-update
+	Sections []SectionUpdate  `json:"sections"`               // state lengkap
+}
+
+// ---------- helper struct ----------
+type SectionUpdate struct {
+	IDSection   int                `json:"id_section,omitempty"`   // 0 = section baru
+	Title       string             `json:"title"`
+	Deleted     bool               `json:"deleted,omitempty"`      // true = hapus section
+	Subsections []SubsectionUpdate `json:"subsections,omitempty"`  // opsional
+	Elements    []ElementUpdate    `json:"elements,omitempty"`     // section tanpa subsection
+}
+
+type SubsectionUpdate struct {
+	IDSubsection int             `json:"id_subsection,omitempty"` // 0 = baru
+	Title        string          `json:"title"`
+	Deleted      bool            `json:"deleted,omitempty"`
+	Elements     []ElementUpdate `json:"elements,omitempty"`
+}
+
+type ElementUpdate struct {
+	IDCMSElements int             `json:"id_cms_elements,omitempty"` // 0 = baru
+	Deleted       bool            `json:"deleted,omitempty"`
+	IDElement     int             `json:"id_element"`                // foreign-key master Elements
+	ElementLabel  string          `json:"element_label"`
+	ElementOptions json.RawMessage `json:"element_options"`
+	ElementHint   string          `json:"element_hint"`
+	IsRequired    bool            `json:"is_required"`
+}

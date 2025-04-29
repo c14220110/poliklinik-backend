@@ -165,10 +165,17 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.PUT("/shift/updateCustom", shiftController.UpdateCustomShiftHandler, middlewares.JWTMiddleware())
 	management.PUT("/shift/soft-delete", shiftController.SoftDeleteShiftHandler, middlewares.JWTMiddleware())
 	management.GET("/shift", shiftController.GetShiftPoliList, middlewares.JWTMiddleware())
-	management.GET("/cms", cmsController.GetCMSByPoliklinikHandler, middlewares.JWTMiddleware()) 
-	management.GET("/cms/all", cmsController.GetAllCMSHandler, middlewares.JWTMiddleware()) 
+	management.GET("/cms/detail", cmsController.GetCMSDetailHandler, middlewares.JWTMiddleware()) 
+	management.GET("/cms", cmsController.GetCMSListByPoliHandler, middlewares.JWTMiddleware()) 
+	management.PUT("/cms/update", cmsController.UpdateCMSHandler, middlewares.JWTMiddleware()) 
+	management.PUT("/cms/activate", cmsController.ActivateCMSHandler, middlewares.JWTMiddleware()) 
+	management.PUT("/cms/deactivate", cmsController.DeactivateCMSHandler, middlewares.JWTMiddleware()) 
+
+
+
+
 	management.POST("/cms/create", cmsController.CreateCMSHandler, middlewares.JWTMiddleware()) 
-	//management.PUT("/cms/update", cmsController.UpdateCMSHandler, middlewares.JWTMiddleware()) 
+
 	management.GET("/shift/karyawan", shiftController.GetKaryawanListHandler, middlewares.JWTMiddleware())
 	management.GET("/karyawan/tanpa-shift", shiftController.GetKaryawanTanpaShiftHandler, middlewares.JWTMiddleware())
 	management.POST("/shift/assign-new", shiftController.AssignShiftHandlerNew, middlewares.JWTMiddleware())
