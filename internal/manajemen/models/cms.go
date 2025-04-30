@@ -176,3 +176,11 @@ type CMSAnswer struct {
 type AssessmentInput struct {
     Answers []CMSAnswer `json:"answers"`
 }
+
+type RincianAsesmen struct {
+    KeluhanUtama      string `json:"keluhan_utama"`
+    RiwayatPenyakit   string `json:"riwayat_penyakit"`
+    Alergi            string `json:"alergi"`
+    JenisReaksi       string `json:"jenis_reaksi"`
+    KeadaanUmumPasien string `json:"keadaan_umum_pasien"`
+}

@@ -565,3 +565,73 @@ case "diagnosis_awal_medis":
 
     return res.LastInsertId()
 }
+
+
+var ErrAssessmentAbsent  = errors.New("no assessment yet")
+
+
+// GetRincianByAntrian mengambil keluhan_utama + mapping jawaban tertentu
+func (svc *CMSService) GetRincianByAntrian(idAntrian int) (models.RincianAsesmen, error) {
+    var r models.RincianAsesmen
+    var idPasien int
+
+    // 1. Ambil keluhan utama & id_pasien
+    err := svc.DB.QueryRow(
+        "SELECT keluhan_utama, id_pasien FROM Antrian WHERE id_antrian = ?", idAntrian,
+    ).Scan(&r.KeluhanUtama, &idPasien)
+    if err != nil {
+        if err == sql.ErrNoRows { return r, ErrAntrianNotFound }
+        return r, err
+    }
+
+    // 2. Ambil assessment terbaru pasien tsb
+    var rawJSON []byte
+    err = svc.DB.QueryRow(`
+        SELECT hasil_assessment
+        FROM Assessment
+        WHERE id_pasien = ?
+        ORDER BY created_at DESC
+        LIMIT 1`, idPasien).Scan(&rawJSON)
+    if err != nil {
+        if err == sql.ErrNoRows { return r, ErrAssessmentAbsent }
+        return r, err
+    }
+
+    // 3. Parse JSON array
+    var answers []struct {
+        Name  string      `json:"name"`
+        Value interface{} `json:"value"`
+    }
+    if err := json.Unmarshal(rawJSON, &answers); err != nil {
+        return r, err
+    }
+
+    // 4. Mapping field yang diminta
+    for _, a := range answers {
+        switch a.Name {
+        case "riwayat_penyakit":
+            r.RiwayatPenyakit = toString(a.Value)
+        case "alergi":
+            r.Alergi = toString(a.Value)
+        case "jenis_reaksi":
+            r.JenisReaksi = toString(a.Value)
+        case "keadaan_umum_pasien":
+            r.KeadaanUmumPasien = toString(a.Value)
+        }
+    }
+
+    return r, nil
+}
+
+// helper convert interface{} -> string
+func toString(v interface{}) string {
+    switch t := v.(type) {
+    case string:
+        return t
+    case float64:
+        return fmt.Sprintf("%v", t)
+    default:
+        raw, _ := json.Marshal(t) // untuk array, dsb.
+        return string(raw)
+    }
+}

@@ -337,3 +337,52 @@ func (cc *CMSController) SaveAssessmentHandler(c echo.Context) error {
         "data":    echo.Map{"id_assessment": idAss},
     })
 }
+
+func (cc *CMSController) GetRincianHandler(c echo.Context) error {
+    idStr := c.QueryParam("id_antrian")
+    if idStr == "" {
+        return c.JSON(http.StatusBadRequest, echo.Map{
+            "status":  http.StatusBadRequest,
+            "message": "id_antrian parameter is required",
+            "data":    nil,
+        })
+    }
+    idAntrian, err := strconv.Atoi(idStr)
+    if err != nil {
+        return c.JSON(http.StatusBadRequest, echo.Map{
+            "status":  http.StatusBadRequest,
+            "message": "id_antrian must be a number",
+            "data":    nil,
+        })
+    }
+
+    rincian, err := cc.Service.GetRincianByAntrian(idAntrian)
+    if err != nil {
+        switch err {
+        case services.ErrAntrianNotFound:
+            return c.JSON(http.StatusNotFound, echo.Map{
+                "status":  http.StatusNotFound,
+                "message": "Antrian not found",
+                "data":    nil,
+            })
+        case services.ErrAssessmentAbsent:
+            return c.JSON(http.StatusNotFound, echo.Map{
+                "status":  http.StatusNotFound,
+                "message": "No assessment yet for this antrian",
+                "data":    nil,
+            })
+        default:
+            return c.JSON(http.StatusInternalServerError, echo.Map{
+                "status":  http.StatusInternalServerError,
+                "message": "Failed to retrieve detail: " + err.Error(),
+                "data":    nil,
+            })
+        }
+    }
+
+    return c.JSON(http.StatusOK, echo.Map{
+        "status":  http.StatusOK,
+        "message": "Detail antrian retrieved successfully",
+        "data":    rincian,
+    })
+}
