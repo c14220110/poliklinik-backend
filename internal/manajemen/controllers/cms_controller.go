@@ -338,7 +338,7 @@ func (cc *CMSController) SaveAssessmentHandler(c echo.Context) error {
     })
 }
 
-func (cc *CMSController) GetRincianHandler(c echo.Context) error {
+func (cc *CMSController) GetRincianAsesmenHandler(c echo.Context) error {
     idStr := c.QueryParam("id_antrian")
     if idStr == "" {
         return c.JSON(http.StatusBadRequest, echo.Map{
