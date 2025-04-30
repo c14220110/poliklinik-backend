@@ -169,68 +169,68 @@ var ErrCMSNotFound = fmt.Errorf("cms not found")
 
 
 
-// GetCMSDetailByID returns a detailed CMS including all elements for given cmsID
-func (svc *CMSService) GetCMSDetailByID(cmsID int) (models.CMSDetailResponse, error) {
-	var resp models.CMSDetailResponse
-	// 1) Fetch CMS header
-	headerQ := `SELECT id_cms, title FROM CMS WHERE id_cms = ?`
-	if err := svc.DB.QueryRow(headerQ, cmsID).Scan(&resp.IDCMS, &resp.Title); err != nil {
-		if err == sql.ErrNoRows {
-			return resp, ErrCMSNotFound
-		}
-		return resp, err
-	}
+// GetCMSDetailFull mengembalikan detail CMS beserta elemen lengkap
+func (svc *CMSService) GetCMSDetailFull(cmsID int) (models.CMSDetailResponse, error) {
+    var resp models.CMSDetailResponse
 
-	// 2) Fetch all elements via join through CMS_Section
-	eleQ := `
-		SELECT
-		e.id_cms_elements,
-		e.id_section,
-		e.id_subsection,
-		e.element_label,
-		e.element_name,
-		e.element_options,
-		e.element_hint,
-		e.is_required
-		FROM CMS_Elements e
-		JOIN CMS_Section s ON e.id_section = s.id_section
-		WHERE s.id_cms = ?
-		ORDER BY e.id_cms_elements
-	`
-	rows, err := svc.DB.Query(eleQ, cmsID)
-	if err != nil {
-		return resp, err
-	}
-	defer rows.Close()
+    // Ambil header CMS (boleh aktif / non-aktif)
+    err := svc.DB.QueryRow(`SELECT id_cms, title FROM CMS WHERE id_cms = ?`, cmsID).
+        Scan(&resp.IDCMS, &resp.Title)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            return resp, ErrCMSNotFound
+        }
+        return resp, err
+    }
 
-	for rows.Next() {
-		var e models.CMSElementDetail
-		var reqInt int
-		var optNull sql.NullString
-		var hintNull sql.NullString
-		if err := rows.Scan(
-			&e.IDCMSElement,
-			&e.IDSection,
-			&e.IDSubsection,
-			&e.Label,
-			&e.Name,
-			&optNull,
-			&hintNull,
-			&reqInt,
-		); err != nil {
-			return resp, err
-		}
-		e.Required = reqInt != 0
-		if optNull.Valid {
-			e.Options = optNull.String
-		}
-		if hintNull.Valid {
-			e.Hint = hintNull.String
-		}
-		resp.Elements = append(resp.Elements, e)
-	}
-	return resp, nil
+    // Join ke semua tabel pendukung
+    query := `
+      SELECT
+        e.id_cms_elements,
+        s.id_section,       s.title              AS section_title,
+        ss.id_subsection,   ss.title             AS subsection_title,
+        d.id_element,       el.type              AS element_type,
+        e.element_label,    e.element_name,
+        COALESCE(e.element_options,'') AS options,
+        COALESCE(e.element_hint,'')    AS hint,
+        e.is_required
+      FROM CMS_Section s
+      JOIN CMS_Subsection ss ON ss.id_section = s.id_section
+      JOIN CMS_Elements   e  ON e.id_section  = s.id_section
+                             AND e.id_subsection = ss.id_subsection
+      JOIN Detail_Element d  ON d.id_cms_elements = e.id_cms_elements
+      JOIN Elements       el ON el.id_element = d.id_element
+      WHERE s.id_cms = ?
+      ORDER BY s.id_section, ss.id_subsection, e.id_cms_elements
+    `
+    rows, err := svc.DB.Query(query, cmsID)
+    if err != nil {
+        return resp, err
+    }
+    defer rows.Close()
+
+    for rows.Next() {
+        var (
+            det   models.CMSElementDetail
+            req   int
+        )
+        if err := rows.Scan(
+            &det.IDCMSElement,
+            &det.IDSection, &det.SectionTitle,
+            &det.IDSubsection, &det.SubTitle,
+            &det.IDElement, &det.ElementType,
+            &det.Label, &det.Name,
+            &det.Options, &det.Hint,
+            &req,
+        ); err != nil {
+            return resp, err
+        }
+        det.Required = req != 0
+        resp.Elements = append(resp.Elements, det)
+    }
+    return resp, nil
 }
+
 
 // ErrNoCMSForPoli is returned when no CMS records exist under the given poliklinik ID
 var ErrNoCMSForPoli = fmt.Errorf("no CMS entries found for this poliklinik")
@@ -491,4 +491,77 @@ func (svc *CMSService) DeactivateCMS(cmsID int) error {
         return ErrCMSNotActive
     }
     return nil
+}
+
+var ErrAntrianNotFound = errors.New("antrian not found")
+
+// SaveAssessment menyimpan jawaban CMS untuk satu antrian.
+func (svc *CMSService) SaveAssessment(
+    idAntrian, idCMS, idKaryawan int,
+    input models.AssessmentInput,
+) (int64, error) {
+
+    // 1. Ambil id_pasien & id_poli dari Antrian + validasi
+    var idPasien, idPoli int
+    err := svc.DB.QueryRow(
+        "SELECT id_pasien, id_poli FROM Antrian WHERE id_antrian = ?", idAntrian,
+    ).Scan(&idPasien, &idPoli)
+    if err != nil {
+        if err == sql.ErrNoRows { return 0, ErrAntrianNotFound }
+        return 0, err
+    }
+
+    // 2. Pastikan id_cms belong to that poli
+    var cmsPoli int
+    if err := svc.DB.QueryRow(
+        "SELECT id_poli FROM CMS WHERE id_cms = ?", idCMS,
+    ).Scan(&cmsPoli); err != nil {
+        if err == sql.ErrNoRows { return 0, ErrCMSNotFound }
+        return 0, err
+    }
+
+    // (opsional) boleh lintaskan poli berbeda, tapi ikuti permintaan:
+    idPoli = cmsPoli
+
+    // 3. Tarik id_ruang & id_icd10 dari answers
+    var (
+        idRuang  sql.NullInt64
+        idICD10  sql.NullString
+    )
+    for _, a := range input.Answers {
+        switch a.Name {          // GAJADI switch a.Label
+case "ruang_poli":
+    if v, ok := a.Value.(float64); ok {
+        idRuang = sql.NullInt64{Int64: int64(v), Valid: true}
+    }
+case "diagnosis_awal_medis":
+    if v, ok := a.Value.(string); ok && v != "" {
+        idICD10 = sql.NullString{String: v, Valid: true}
+    }
+}
+
+    }
+
+    // 4. Marshal answers menjadi JSON
+    raw, err := json.Marshal(input.Answers)
+    if err != nil { return 0, err }
+
+    // 5. Insert ke Assessment
+    res, err := svc.DB.Exec(`
+        INSERT INTO Assessment
+          (id_pasien, id_karyawan, id_poli, id_ruang, id_cms, id_icd10, hasil_assessment, created_at)
+        VALUES (?,?,?,?,?,?,?,?)
+    `,
+        idPasien,
+        idKaryawan,
+        idPoli,
+        idRuang,
+        idCMS,
+        idICD10,
+        raw,
+        time.Now(),
+    )
+    if err != nil { return 0, err }
+
+    return res.LastInsertId()
 }

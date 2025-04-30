@@ -101,22 +101,26 @@ type CMSFlat struct {
     IDCms    *int   `json:"id_cms"` // Pointer untuk mendukung nilai null
 }
 
+// Elemen dalam satu CMS (lengkap dgn section/subsection & type)
 type CMSElementDetail struct {
-	IDCMSElement int    `json:"id_cms_elements"`
-	IDSection    int    `json:"id_section"`
-	IDSubsection int    `json:"id_subsection"`
-	Label        string `json:"element_label"`
-	Name         string `json:"element_name"`
-	Options      string `json:"element_options"`
-	Hint         string `json:"element_hint"`
-	Required     bool   `json:"is_required"`
+    IDCMSElement int    `json:"id_cms_elements"`
+    IDSection    int    `json:"id_section"`
+    SectionTitle string `json:"section_title"`
+    IDSubsection int    `json:"id_subsection"`
+    SubTitle     string `json:"subsection_title"`
+    IDElement    int    `json:"id_element"`   // master Elements
+    ElementType  string `json:"element_type"` // dari tabel Elements.type
+    Label        string `json:"label"`
+    Name         string `json:"name"`
+    Options      string `json:"options"` // raw JSON/text
+    Hint         string `json:"hint"`
+    Required     bool   `json:"required"`
 }
 
-// CMSDetailResponse is the response payload for a single CMS
 type CMSDetailResponse struct {
-	IDCMS    int                  `json:"id_cms"`
-	Title    string               `json:"title"`
-	Elements []CMSElementDetail  `json:"elements"`
+    IDCMS    int                `json:"id_cms"`
+    Title    string             `json:"title"`
+    Elements []CMSElementDetail `json:"elements"`
 }
 
 type CMSListItem struct {
@@ -157,4 +161,18 @@ type ElementUpdate struct {
 	ElementOptions json.RawMessage `json:"element_options"`
 	ElementHint   string          `json:"element_hint"`
 	IsRequired    bool            `json:"is_required"`
+}
+
+// satu jawaban elemen
+type CMSAnswer struct {
+    IDCmsElement int    `json:"id_cms_elements"`
+    Label        string `json:"label"`
+    Name         string `json:"name"`   // <-- tambahkan
+    Value        any    `json:"value"`
+}
+
+
+// payload dari frontend
+type AssessmentInput struct {
+    Answers []CMSAnswer `json:"answers"`
 }

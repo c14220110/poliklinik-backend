@@ -124,6 +124,8 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter.GET("/screening", screeningController.GetScreeningByPasienHandler, middlewares.JWTMiddleware())
 	dokter.PUT("/masukkan", antrianController.MasukkanPasienKeDokterHandler, middlewares.JWTMiddleware())
 	dokter.PUT("/pulangkan-pasien", antrianController.PulangkanPasienHandler, middlewares.JWTMiddleware())
+	dokter.POST("/assessment", cmsController.SaveAssessmentHandler, middlewares.JWTMiddleware())
+
 
 
 	// Tambahkan endpoint dokter lain sesuai kebutuhan
@@ -170,6 +172,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.PUT("/cms/update", cmsController.UpdateCMSHandler, middlewares.JWTMiddleware()) 
 	management.PUT("/cms/activate", cmsController.ActivateCMSHandler, middlewares.JWTMiddleware()) 
 	management.PUT("/cms/deactivate", cmsController.DeactivateCMSHandler, middlewares.JWTMiddleware()) 
+
 
 
 

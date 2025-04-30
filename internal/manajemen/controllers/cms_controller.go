@@ -72,50 +72,48 @@ func (cc *CMSController) CreateCMSHandler(c echo.Context) error {
 }
 
 
-// GetCMSDetailHandler handles GET /api/management/cms?id_cms={id}
+// GET /api/management/cms/detail?id_cms=#
 func (cc *CMSController) GetCMSDetailHandler(c echo.Context) error {
-	// parse id_cms
-	idStr := c.QueryParam("id_cms")
-	if idStr == "" {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"status":  http.StatusBadRequest,
-			"message": "id_cms parameter is required",
-			"data":    nil,
-		})
-	}
-	cmsID, err := strconv.Atoi(idStr)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"status":  http.StatusBadRequest,
-			"message": "id_cms must be a number",
-			"data":    nil,
-		})
-	}
+    idStr := c.QueryParam("id_cms")
+    if idStr == "" {
+        return c.JSON(http.StatusBadRequest, echo.Map{
+            "status":  http.StatusBadRequest,
+            "message": "id_cms parameter is required",
+            "data":    nil,
+        })
+    }
+    id, err := strconv.Atoi(idStr)
+    if err != nil {
+        return c.JSON(http.StatusBadRequest, echo.Map{
+            "status":  http.StatusBadRequest,
+            "message": "id_cms must be a number",
+            "data":    nil,
+        })
+    }
 
-	// call service
-	resp, err := cc.Service.GetCMSDetailByID(cmsID)
-	if err != nil {
-		if err == services.ErrCMSNotFound {
-			return c.JSON(http.StatusNotFound, map[string]interface{}{
-				"status":  http.StatusNotFound,
-				"message": "CMS not found",
-				"data":    nil,
-			})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-			"status":  http.StatusInternalServerError,
-			"message": "Failed to retrieve CMS detail: " + err.Error(),
-			"data":    nil,
-		})
-	}
+    detail, err := cc.Service.GetCMSDetailFull(id)
+    if err != nil {
+        if err == services.ErrCMSNotFound {
+            return c.JSON(http.StatusNotFound, echo.Map{
+                "status":  http.StatusNotFound,
+                "message": "CMS not found",
+                "data":    nil,
+            })
+        }
+        return c.JSON(http.StatusInternalServerError, echo.Map{
+            "status":  http.StatusInternalServerError,
+            "message": "Failed to retrieve CMS detail: " + err.Error(),
+            "data":    nil,
+        })
+    }
 
-	// success response
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"status":  http.StatusOK,
-		"message": "CMS detail retrieved successfully",
-		"data":    resp,
-	})
+    return c.JSON(http.StatusOK, echo.Map{
+        "status":  http.StatusOK,
+        "message": "CMS detail retrieved successfully",
+        "data":    detail,
+    })
 }
+
 
 
 
@@ -271,4 +269,71 @@ func (cc *CMSController) DeactivateCMSHandler(c echo.Context) error {
         }
     }
     return c.JSON(http.StatusOK,map[string]interface{}{ "status":http.StatusOK,"message":"CMS deactivated successfully","data":map[string]interface{}{"id_cms":id}})
+}
+
+
+// POST /api/dokter/asesmen?id_antrian=..&id_cms=..
+func (cc *CMSController) SaveAssessmentHandler(c echo.Context) error {
+    // --- query params ---
+    idAntrianStr := c.QueryParam("id_antrian")
+    idCMSStr     := c.QueryParam("id_cms")
+    if idAntrianStr=="" || idCMSStr=="" {
+        return c.JSON(http.StatusBadRequest, echo.Map{
+            "status":  http.StatusBadRequest,
+            "message": "id_antrian & id_cms are required",
+            "data":    nil,
+        })
+    }
+    idAntrian, err1 := strconv.Atoi(idAntrianStr)
+    idCMS,     err2 := strconv.Atoi(idCMSStr)
+    if err1!=nil || err2!=nil {
+        return c.JSON(http.StatusBadRequest, echo.Map{
+            "status":  http.StatusBadRequest,
+            "message": "id_antrian & id_cms must be numbers",
+            "data":    nil,
+        })
+    }
+
+    // --- JWT user (dokter) ---
+    claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
+    if !ok || claims == nil {
+        return c.JSON(http.StatusUnauthorized, echo.Map{
+            "status":  http.StatusUnauthorized,
+            "message": "Invalid token claims",
+            "data":    nil,
+        })
+    }
+    idKaryawan, _ := strconv.Atoi(claims.IDKaryawan)
+
+    // --- body ---
+    var input models.AssessmentInput
+    if err := c.Bind(&input); err != nil {
+        return c.JSON(http.StatusBadRequest, echo.Map{
+            "status":  http.StatusBadRequest,
+            "message": "Invalid JSON payload: " + err.Error(),
+            "data":    nil,
+        })
+    }
+
+    // --- save ---
+    idAss, err := cc.Service.SaveAssessment(idAntrian, idCMS, idKaryawan, input)
+    if err != nil {
+        status := http.StatusInternalServerError
+        msg    := "Failed to save assessment: " + err.Error()
+        switch err {
+        case services.ErrAntrianNotFound:
+            status = http.StatusNotFound
+            msg    = "Antrian not found"
+        case services.ErrCMSNotFound:
+            status = http.StatusNotFound
+            msg    = "CMS not found"
+        }
+        return c.JSON(status, echo.Map{"status": status, "message": msg, "data": nil})
+    }
+
+    return c.JSON(http.StatusOK, echo.Map{
+        "status":  http.StatusOK,
+        "message": "Assessment saved successfully",
+        "data":    echo.Map{"id_assessment": idAss},
+    })
 }
