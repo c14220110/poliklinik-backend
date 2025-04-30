@@ -15,83 +15,76 @@ func NewPoliklinikService(db *sql.DB) *PoliklinikService {
 	return &PoliklinikService{DB: db}
 }
 
+// GetPoliklinikListFiltered mengambil daftar poliklinik dengan filter status (aktif / nonaktif / semua).
 func (ps *PoliklinikService) GetPoliklinikListFiltered(statusFilter string) ([]map[string]interface{}, error) {
-    baseQuery := `
-        SELECT 
-    p.id_poli,        -- Mengambil id_poli dari tabel Poliklinik (p)
-    p.id_status, 
-    p.nama_poli, 
-    p.jumlah_tenkes, 
-    p.logo_poli, 
-    p.keterangan, 
-    p.created_at,
-    c.id_cms
-FROM 
-    Poliklinik p
-LEFT JOIN 
-    CMS c ON p.id_poli = c.id_poli
-    `
-    conditions := []string{}
-    params := []interface{}{}
+	baseQuery := `
+		SELECT
+			p.id_poli,
+			p.id_status,
+			p.nama_poli,
+			p.jumlah_tenkes,
+			p.logo_poli,
+			p.keterangan,
+			p.created_at
+		FROM Poliklinik p
+	`
+	conditions := []string{}
+	params := []interface{}{}
 
-    if statusFilter != "" {
-        s := strings.ToLower(statusFilter)
-        if s == "aktif" {
-            conditions = append(conditions, "id_status = ?")
-            params = append(params, 1)
-        } else if s == "nonaktif" {
-            conditions = append(conditions, "id_status = ?")
-            params = append(params, 0)
-        }
-    }
+	if statusFilter != "" {
+		switch strings.ToLower(statusFilter) {
+		case "aktif":
+			conditions = append(conditions, "p.id_status = ?")
+			params = append(params, 1)
+		case "nonaktif":
+			conditions = append(conditions, "p.id_status = ?")
+			params = append(params, 0)
+		}
+	}
 
-    query := baseQuery
-    if len(conditions) > 0 {
-        query += " WHERE " + strings.Join(conditions, " AND ")
-    }
-    query += " ORDER BY id_poli"
+	query := baseQuery
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY p.id_poli"
 
-    rows, err := ps.DB.Query(query, params...)
-    if err != nil {
-        return nil, fmt.Errorf("query error: %v", err)
-    }
-    defer rows.Close()
+	rows, err := ps.DB.Query(query, params...)
+	if err != nil {
+		return nil, fmt.Errorf("query error: %v", err)
+	}
+	defer rows.Close()
 
-    var list []map[string]interface{}
-    for rows.Next() {
-        var idPoli, idStatus, jumlahTenkes int
-        var namaPoli, keterangan string
-        var logoPoli sql.NullString
-        var createdAt time.Time
-        var idCms sql.NullInt64 // Variabel untuk menampung id_cms yang bisa NULL
+	var list []map[string]interface{}
+	for rows.Next() {
+		var (
+			idPoli, idStatus, jumlahTenkes int
+			namaPoli, keterangan           string
+			logoPoli                       sql.NullString
+			createdAt                      time.Time
+		)
 
-        if err := rows.Scan(&idPoli, &idStatus, &namaPoli, &jumlahTenkes, &logoPoli, &keterangan, &createdAt, &idCms); err != nil {
-            return nil, fmt.Errorf("scan error: %v", err)
-        }
+		if err := rows.Scan(&idPoli, &idStatus, &namaPoli, &jumlahTenkes,
+			&logoPoli, &keterangan, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan error: %v", err)
+		}
 
-        // Format tanggal dibuat ke "DD/MM/YYYY"
-        formattedDate := createdAt.Format("02/01/2006")
+		record := map[string]interface{}{
+			"id_poli":       idPoli,
+			"id_status":     idStatus,
+			"nama_poli":     namaPoli,
+			"jumlah_tenkes": jumlahTenkes,
+			"logo_poli":     nil,
+			"keterangan":    keterangan,
+			"created_at":    createdAt.Format("02/01/2006"),
+		}
+		if logoPoli.Valid {
+			record["logo_poli"] = logoPoli.String
+		}
 
-        record := map[string]interface{}{
-            "id_poli":       idPoli,
-            "id_status":     idStatus,
-            "nama_poli":     namaPoli,
-            "jumlah_tenkes": jumlahTenkes,
-            "logo_poli":     nil,
-            "keterangan":    keterangan,
-            "created_at":    formattedDate,
-            "id_cms":        nil, // Default ke nil (akan menjadi null di JSON)
-        }
-        if logoPoli.Valid {
-            record["logo_poli"] = logoPoli.String
-        }
-        if idCms.Valid {
-            record["id_cms"] = idCms.Int64 // Jika ada id_cms, masukkan nilainya
-        }
-        list = append(list, record)
-    }
+		list = append(list, record)
+	}
 
-    return list, nil
+	return list, nil
 }
 
 // SoftDeletePoliklinik melakukan soft delete dengan mengupdate kolom deleted_at,
