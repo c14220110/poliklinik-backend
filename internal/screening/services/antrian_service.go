@@ -277,15 +277,21 @@ func (s *AntrianService) AlihkanPasien(idAntrian int) error {
 
 
 func (s *AntrianService) GetTodayScreeningAntrianByPoli(idPoli int) ([]map[string]interface{}, error) {
+
 	query := `
-		SELECT a.id_antrian, a.id_pasien, p.nama 
+		SELECT
+			a.id_antrian,
+			a.id_pasien,
+			p.nama,
+			a.priority_order
 		FROM Antrian a
 		JOIN Pasien p ON a.id_pasien = p.id_pasien
-		WHERE a.id_poli = ? 
-		  AND a.id_status = 3 
+		WHERE a.id_poli   = ?
+		  AND a.id_status = 3
 		  AND DATE(a.created_at) = CURDATE()
 		ORDER BY a.id_antrian
 	`
+
 	rows, err := s.DB.Query(query, idPoli)
 	if err != nil {
 		return nil, fmt.Errorf("query error: %v", err)
@@ -293,19 +299,32 @@ func (s *AntrianService) GetTodayScreeningAntrianByPoli(idPoli int) ([]map[strin
 	defer rows.Close()
 
 	var results []map[string]interface{}
+
 	for rows.Next() {
-		var idAntrian, idPasien int
-		var nama string
-		if err := rows.Scan(&idAntrian, &idPasien, &nama); err != nil {
+		var (
+			idAntrian, idPasien int
+			nama                string
+			priority            sql.NullInt64
+		)
+
+		if err := rows.Scan(&idAntrian, &idPasien, &nama, &priority); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
+
 		record := map[string]interface{}{
 			"id_antrian":  idAntrian,
 			"id_pasien":   idPasien,
 			"nama_pasien": nama,
+			// tampilkan null bila priority_order NULL di DB
+			"priority_order": nil,
 		}
+		if priority.Valid {
+			record["priority_order"] = priority.Int64
+		}
+
 		results = append(results, record)
 	}
+
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
