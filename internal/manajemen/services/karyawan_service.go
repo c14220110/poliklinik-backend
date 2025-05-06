@@ -39,6 +39,15 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 		return 0, fmt.Errorf("username %s sudah terdaftar", karyawan.Username)
 	}
 
+	// 1c. Cek apakah SIP sudah terdaftar (jika disediakan)
+	if karyawan.Sip != "" {
+		var existingSipID int64
+		err = tx.QueryRow("SELECT id_karyawan FROM Karyawan WHERE sip = ?", karyawan.Sip).Scan(&existingSipID)
+		if err != sql.ErrNoRows {
+			return 0, fmt.Errorf("SIP %s sudah terdaftar", karyawan.Sip)
+		}
+	}
+
 	// 2. Cek apakah Role sudah ada
 	var idRole int64
 	err = tx.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", role).Scan(&idRole)
@@ -57,9 +66,6 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 		return 0, fmt.Errorf("gagal memeriksa role: %v", err)
 	}
 
-	// 3. Set id_role pada objek karyawan (tidak disimpan di tabel Karyawan)
-	//karyawan.IDRole = idRole
-
 	// 4. Hash password sebelum disimpan
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(karyawan.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -67,11 +73,17 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 	}
 	karyawan.Password = string(hashedPassword)
 
-	// 5. Insert data karyawan ke tabel Karyawan (tanpa id_role)
+	// 5. Insert data karyawan ke tabel Karyawan
 	insertKaryawan := `
-		INSERT INTO Karyawan (nama, username, password, nik, tanggal_lahir, alamat, no_telp, jenis_kelamin)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO Karyawan (nama, username, password, nik, tanggal_lahir, alamat, no_telp, jenis_kelamin, sip)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
+	var sipValue interface{}
+	if karyawan.Sip != "" {
+		sipValue = karyawan.Sip
+	} else {
+		sipValue = nil
+	}
 	res, err := tx.Exec(insertKaryawan,
 		karyawan.Nama,
 		karyawan.Username,
@@ -81,6 +93,7 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 		karyawan.Alamat,
 		karyawan.NoTelp,
 		karyawan.JenisKelamin,
+		sipValue,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("gagal menambahkan karyawan: %v", err)
@@ -91,7 +104,7 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 		return 0, fmt.Errorf("gagal mendapatkan ID Karyawan: %v", err)
 	}
 
-	// 6. Insert record di Management_Karyawan (deleted_by diset NULL)
+	// 6. Insert record di Management_Karyawan
 	insertManagement := `
 		INSERT INTO Management_Karyawan (id_management, id_karyawan, created_by, updated_by, deleted_by)
 		VALUES (?, ?, ?, ?, ?)
@@ -101,7 +114,7 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 		return 0, fmt.Errorf("gagal mencatat di Management_Karyawan: %v", err)
 	}
 
-	// 7. Insert record di Detail_Role_Karyawan untuk mengaitkan karyawan dengan role
+	// 7. Insert record di Detail_Role_Karyawan
 	insertDetailRole := `
 		INSERT INTO Detail_Role_Karyawan (id_role, id_karyawan)
 		VALUES (?, ?)
@@ -118,7 +131,6 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 
 	return newID, nil
 }
-
 
 
 func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string, idManagement int) (int64, error) {

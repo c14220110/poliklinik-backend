@@ -20,6 +20,7 @@ type AddKaryawanRequest struct {
 	Alamat       string `json:"alamat"`
 	NoTelp       string `json:"no_telp"`
 	Role         string `json:"role"`
+	NomorSIP     string `json:"nomor_sip"` // Added new field
 	Username     string `json:"username"`
 	Password     string `json:"password"`
 }
@@ -65,7 +66,7 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 		})
 	}
 
-	// Buat objek Karyawan, termasuk field jenis_kelamin
+	// Buat objek Karyawan, termasuk field jenis_kelamin dan sip
 	karyawan := models.Karyawan{
 		NIK:          req.NIK,
 		Nama:         req.Nama,
@@ -75,6 +76,7 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 		NoTelp:       req.NoTelp,
 		Username:     req.Username,
 		Password:     req.Password,
+		Sip:          req.NomorSIP, // Map nomor_sip to sip
 	}
 
 	// Ambil klaim JWT dari context
@@ -97,7 +99,7 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 		})
 	}
 
-	// Panggil service untuk menambahkan karyawan dengan created_by dan updated_by sebagai idManagement
+	// Panggil service untuk menambahkan karyawan
 	idKaryawan, err := kc.Service.AddKaryawan(karyawan, req.Role, idManagement, idManagement, idManagement)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
@@ -115,7 +117,6 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 		},
 	})
 }
-
 
 
 

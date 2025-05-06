@@ -12,7 +12,8 @@ type Karyawan struct {
 	TanggalLahir time.Time `json:"tanggal_lahir"`
 	Alamat       string    `json:"alamat"`
 	NoTelp       string    `json:"no_telp"`
-	IDRole       int64     `json:"id_role"` // pastikan kolom ini ada untuk mengaitkan ke tabel Role
+	Sip          string    `json:"sip"` // Added to match DDL
+	IDRole       int64     `json:"id_role"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	CreatedAt    time.Time `json:"created_at"`
 	DeletedAt    time.Time `json:"deleted_at,omitempty"`
