@@ -241,11 +241,6 @@ func (s *ShiftService) GetShiftPoliList(idPoliFilter string) ([]map[string]inter
 	return results, nil
 }
 
-// GetListKaryawanFiltered mengambil daftar karyawan berdasarkan:
-// - id_poli (wajib)
-// - id_shift (wajib)
-// - id_role (opsional; jika tidak ada, tampilkan semua)
-// - tanggal (opsional; jika kosong, hari ini)
 func (s *ShiftService) GetListKaryawanFiltered(
 	idPoliFilter, idShiftFilter, idRoleFilter, tanggalFilter string,
 ) ([]map[string]interface{}, error) {
@@ -271,81 +266,7 @@ func (s *ShiftService) GetListKaryawanFiltered(
 		tanggal = parsed.Format("2006-01-02")
 	}
 
-	// Jika filter id_role disediakan
-	if strings.TrimSpace(idRoleFilter) != "" {
-		idRole, err := strconv.Atoi(idRoleFilter)
-		if err != nil {
-			return nil, fmt.Errorf("invalid id_role value: %v", err)
-		}
-		
-		query := `
-		SELECT
-			k.id_karyawan,
-			k.nama,
-			k.nik,
-			k.username,
-			k.no_telp,
-			k.alamat,
-			k.jenis_kelamin,
-			sk.custom_jam_mulai,
-			sk.custom_jam_selesai,
-			sk.id_shift_karyawan,
-			r.nama_role
-		FROM Karyawan k
-		JOIN Shift_Karyawan sk
-			ON k.id_karyawan = sk.id_karyawan
-			AND sk.id_poli = ?
-			AND sk.id_shift = ?
-			AND sk.tanggal = ?
-		JOIN Detail_Role_Karyawan drk
-			ON k.id_karyawan = drk.id_karyawan
-			AND drk.id_role = ?
-		JOIN Role r
-			ON drk.id_role = r.id_role
-		ORDER BY k.id_karyawan
-		`
-		args := []interface{}{idPoli, idShift, tanggal, idRole}
-		rows, err := s.DB.Query(query, args...)
-		if err != nil {
-			return nil, fmt.Errorf("query error: %v", err)
-		}
-		defer rows.Close()
-
-		var results []map[string]interface{}
-		for rows.Next() {
-			var (
-				idKaryawan       int
-				nama, nik, username, noTelp, alamat, jenisKelamin string
-				customJamMulai, customJamSelesai                string
-				idShiftKaryawan                                 int
-				namaRole                                        string
-			)
-			if err := rows.Scan(
-				&idKaryawan, &nama, &nik, &username, &noTelp,
-				&alamat, &jenisKelamin, &customJamMulai,
-				&customJamSelesai, &idShiftKaryawan, &namaRole,
-			); err != nil {
-				return nil, fmt.Errorf("scan error: %v", err)
-			}
-			record := map[string]interface{}{
-				"id_karyawan":        idKaryawan,
-				"nama":               nama,
-				"NIK":                nik,
-				"username":           username,
-				"role":               namaRole,
-				"no_telp":            noTelp,
-				"alamat":             alamat,
-				"jenis_kelamin":      jenisKelamin,
-				"custom_jam_mulai":   customJamMulai,
-				"custom_jam_selesai": customJamSelesai,
-				"id_shift_karyawan":  idShiftKaryawan,
-			}
-			results = append(results, record)
-		}
-		return results, nil
-	}
-
-	// Tanpa filter id_role: agregasi semua nama_role per karyawan
+	// Gunakan query utama dengan GROUP_CONCAT untuk semua role
 	query := `
 		SELECT
 			k.id_karyawan,
@@ -358,7 +279,7 @@ func (s *ShiftService) GetListKaryawanFiltered(
 			sk.custom_jam_mulai,
 			sk.custom_jam_selesai,
 			sk.id_shift_karyawan,
-			GROUP_CONCAT(r.nama_role SEPARATOR ',') AS roles
+			GROUP_CONCAT(DISTINCT r.nama_role SEPARATOR ', ') AS roles
 		FROM Karyawan k
 		JOIN Shift_Karyawan sk
 			ON k.id_karyawan = sk.id_karyawan
@@ -375,50 +296,149 @@ func (s *ShiftService) GetListKaryawanFiltered(
 			sk.custom_jam_mulai, sk.custom_jam_selesai,
 			sk.id_shift_karyawan
 		ORDER BY k.id_karyawan
-		`
+	`
 	args := []interface{}{idPoli, idShift, tanggal}
+
+	// Tambahkan filter id_role jika disediakan
+	if strings.TrimSpace(idRoleFilter) != "" {
+		idRole, err := strconv.Atoi(idRoleFilter)
+		if err != nil {
+			return nil, fmt.Errorf("invalid id_role value: %v", err)
+		}
+		var roleName string
+		switch idRole {
+		case 1:
+			roleName = "Administrasi"
+		case 2:
+			roleName = "Suster"
+		case 3:
+			roleName = "Dokter"
+		default:
+			return nil, fmt.Errorf("id_role %d tidak valid", idRole)
+		}
+		query += " HAVING GROUP_CONCAT(DISTINCT r.nama_role SEPARATOR ', ') LIKE ?"
+		args = append(args, fmt.Sprintf("%%%s%%", roleName))
+	}
+
+	// Eksekusi query
 	rows, err := s.DB.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query error: %v", err)
 	}
 	defer rows.Close()
 
-	var results []map[string]interface{}
+	// Simpan hasil sementara
+	var tempResults []struct {
+		idKaryawan       int
+		nama             string
+		nik              string
+		username         string
+		noTelp           string
+		alamat           string
+		jenisKelamin     string
+		customJamMulai   string
+		customJamSelesai string
+		idShiftKaryawan  int
+		rolesStr         string
+	}
 	for rows.Next() {
-		var (
+		var temp struct {
 			idKaryawan       int
-			nama, nik, username, noTelp, alamat, jenisKelamin string
-			customJamMulai, customJamSelesai                string
-			idShiftKaryawan                                 int
-			rolesStr                                       sql.NullString
-		)
+			nama             string
+			nik              string
+			username         string
+			noTelp           string
+			alamat           string
+			jenisKelamin     string
+			customJamMulai   string
+			customJamSelesai string
+			idShiftKaryawan  int
+			rolesStr         sql.NullString
+		}
 		if err := rows.Scan(
-			&idKaryawan, &nama, &nik, &username, &noTelp,
-			&alamat, &jenisKelamin, &customJamMulai,
-			&customJamSelesai, &idShiftKaryawan, &rolesStr,
+			&temp.idKaryawan, &temp.nama, &temp.nik, &temp.username, &temp.noTelp,
+			&temp.alamat, &temp.jenisKelamin, &temp.customJamMulai,
+			&temp.customJamSelesai, &temp.idShiftKaryawan, &temp.rolesStr,
 		); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
-
-		roleOutput := ""
-		if rolesStr.Valid {
-			roleOutput = rolesStr.String
+		var rolesStr string
+		if temp.rolesStr.Valid {
+			rolesStr = temp.rolesStr.String
 		}
-		record := map[string]interface{}{
-			"id_karyawan":        idKaryawan,
-			"nama":               nama,
-			"NIK":                nik,
-			"username":           username,
-			"role":               roleOutput,
-			"no_telp":            noTelp,
-			"alamat":             alamat,
-			"jenis_kelamin":      jenisKelamin,
-			"custom_jam_mulai":   customJamMulai,
-			"custom_jam_selesai": customJamSelesai,
-			"id_shift_karyawan":  idShiftKaryawan,
-		}
-		results = append(results, record)
+		tempResults = append(tempResults, struct {
+			idKaryawan       int
+			nama             string
+			nik              string
+			username         string
+			noTelp           string
+			alamat           string
+			jenisKelamin     string
+			customJamMulai   string
+			customJamSelesai string
+			idShiftKaryawan  int
+			rolesStr         string
+		}{temp.idKaryawan, temp.nama, temp.nik, temp.username, temp.noTelp, temp.alamat, temp.jenisKelamin, temp.customJamMulai, temp.customJamSelesai, temp.idShiftKaryawan, rolesStr})
 	}
+
+	// Proses pengelompokan role
+	var results []map[string]interface{}
+	for _, tr := range tempResults {
+		roles := strings.Split(tr.rolesStr, ", ")
+		hasAdminSuster := false
+		hasDokter := false
+		var otherRoles []string
+
+		for _, role := range roles {
+			trimmedRole := strings.TrimSpace(role)
+			switch trimmedRole {
+			case "Administrasi":
+				hasAdminSuster = true
+				otherRoles = append(otherRoles, "Admin")
+			case "Suster":
+				hasAdminSuster = true
+				otherRoles = append(otherRoles, "Suster")
+			case "Dokter":
+				hasDokter = true
+			}
+		}
+
+		// Gabungkan Admin dan Suster jika ada
+		if hasAdminSuster && len(otherRoles) > 0 {
+			record := map[string]interface{}{
+				"id_karyawan":        tr.idKaryawan,
+				"nama":               tr.nama,
+				"NIK":                tr.nik,
+				"username":           tr.username,
+				"roles":              strings.Join(otherRoles, ", "),
+				"no_telp":            tr.noTelp,
+				"alamat":             tr.alamat,
+				"jenis_kelamin":      tr.jenisKelamin,
+				"custom_jam_mulai":   tr.customJamMulai,
+				"custom_jam_selesai": tr.customJamSelesai,
+				"id_shift_karyawan":  tr.idShiftKaryawan,
+			}
+			results = append(results, record)
+		}
+		// Tambahkan record terpisah untuk Dokter jika ada
+		if hasDokter {
+			record := map[string]interface{}{
+				"id_karyawan":        tr.idKaryawan,
+				"nama":               tr.nama,
+				"NIK":                tr.nik,
+				"username":           tr.username,
+				"roles":              "Dokter",
+				"no_telp":            tr.noTelp,
+				"alamat":             tr.alamat,
+				"jenis_kelamin":      tr.jenisKelamin,
+				"custom_jam_mulai":   tr.customJamMulai,
+				"custom_jam_selesai": tr.customJamSelesai,
+				"id_shift_karyawan":  tr.idShiftKaryawan,
+			}
+			results = append(results, record)
+		}
+	}
+
 	return results, nil
 }
 

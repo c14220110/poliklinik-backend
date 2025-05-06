@@ -261,8 +261,27 @@ func (sc *ShiftController) GetKaryawanListHandler(c echo.Context) error {
 	idRole := c.QueryParam("id_role")
 	tanggal := c.QueryParam("tanggal") // Jika kosong, otomatis hari ini
 
+	// Validasi parameter wajib
+	if idPoli == "" {
+		slog.Warn("Missing id_poli parameter")
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "parameter id_poli wajib diisi",
+			"data":    nil,
+		})
+	}
+	if idShift == "" {
+		slog.Warn("Missing id_shift parameter")
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "parameter id_shift wajib diisi",
+			"data":    nil,
+		})
+	}
+
 	list, err := sc.Service.GetListKaryawanFiltered(idPoli, idShift, idRole, tanggal)
 	if err != nil {
+		slog.Error("Failed to retrieve karyawan list", "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
 			"message": "Failed to retrieve karyawan list: " + err.Error(),
@@ -270,12 +289,14 @@ func (sc *ShiftController) GetKaryawanListHandler(c echo.Context) error {
 		})
 	}
 
+	slog.Info("Successfully retrieved karyawan list", "count", len(list))
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Karyawan list retrieved successfully",
 		"data":    list,
 	})
 }
+
 
 func (mc *ShiftController) GetKaryawanTanpaShiftHandler(c echo.Context) error {
     // 1. Ambil query parameters
