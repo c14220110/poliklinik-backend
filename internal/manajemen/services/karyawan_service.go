@@ -249,7 +249,7 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 
 
 
-func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusFilter string) ([]map[string]interface{}, error) {
+func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusFilter string, idKaryawanFilter string) ([]map[string]interface{}, error) {
 	baseQuery := `
 		SELECT 
 			k.id_karyawan, 
@@ -260,13 +260,24 @@ func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusF
 			k.nik,
 			k.tanggal_lahir,
 			k.alamat,
-			k.no_telp
+			k.no_telp,
+			k.sip AS nomor_sip
 		FROM Karyawan k
 		JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
 		JOIN Role r ON drk.id_role = r.id_role
 	`
 	conditions := []string{}
 	params := []interface{}{}
+
+	// Filter berdasarkan id_karyawan jika disediakan
+	if idKaryawanFilter != "" {
+		idKaryawanInt, err := strconv.Atoi(idKaryawanFilter)
+		if err != nil {
+			return nil, fmt.Errorf("invalid id_karyawan value: %v", err)
+		}
+		conditions = append(conditions, "k.id_karyawan = ?")
+		params = append(params, idKaryawanInt)
+	}
 
 	// Filter berdasarkan id_role jika disediakan
 	if idRoleFilter != "" {
@@ -308,8 +319,9 @@ func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusF
 		var nama, username, nik string
 		var tanggalLahir sql.NullTime
 		var alamat, noTelp string
+		var nomorSip sql.NullString // Untuk menangani sip yang bisa NULL
 
-		if err := rows.Scan(&idKaryawan, &idRole, &namaRole, &nama, &username, &nik, &tanggalLahir, &alamat, &noTelp); err != nil {
+		if err := rows.Scan(&idKaryawan, &idRole, &namaRole, &nama, &username, &nik, &tanggalLahir, &alamat, &noTelp, &nomorSip); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
 
@@ -330,11 +342,13 @@ func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusF
 		if tanggalLahir.Valid {
 			record["tanggal_lahir"] = tanggalLahir.Time.Format("2006-01-02")
 		}
+		if nomorSip.Valid {
+			record["nomor_sip"] = nomorSip.String
+		}
 		list = append(list, record)
 	}
 	return list, nil
 }
-
 
 func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy string) error {
 	// 1. Update kolom deleted_at di tabel Karyawan

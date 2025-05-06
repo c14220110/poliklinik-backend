@@ -123,8 +123,9 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
 	idRole := c.QueryParam("id_role")
 	status := c.QueryParam("status")
+	idKaryawan := c.QueryParam("id_karyawan") // Parameter opsional baru
 
-	list, err := kc.Service.GetKaryawanListFiltered(idRole, status)
+	list, err := kc.Service.GetKaryawanListFiltered(idRole, status, idKaryawan)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
@@ -139,7 +140,6 @@ func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
 		"data":    list,
 	})
 }
-
 
 
 func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
