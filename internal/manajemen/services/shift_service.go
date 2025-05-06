@@ -591,152 +591,159 @@ func (s *ShiftService) GetKaryawanTanpaShift(idShift int, idRole *int, tanggalSt
 
 // AssignShiftRequest adalah struktur untuk request assign shift
 type AssignShiftRequest struct {
-    IDKaryawan int      `json:"id_karyawan"`
-    Roles      []string `json:"nama"` // Changed from id_role to array of role names
-    JamMulai   string   `json:"jam_mulai"`
-    JamAkhir   string   `json:"jam_akhir"`
+	IDKaryawan int      `json:"id_karyawan"`
+	NamaRole   []string `json:"nama_role"` // Ubah dari IDRole ke NamaRole sebagai array
+	JamMulai   string   `json:"jam_mulai"`
+	JamAkhir   string   `json:"jam_akhir"`
 }
+
 func (s *ShiftService) AssignShiftNew(idPoli, idShift, idManagement int, tanggalStr string, requests []AssignShiftRequest) error {
-    // 1. Validasi format tanggal DD/MM/YYYY
-    tanggal, err := time.Parse("02/01/2006", tanggalStr)
-    if err != nil {
-        return fmt.Errorf("format tanggal tidak valid, gunakan DD/MM/YYYY: %v", err)
-    }
-    tanggalFormatted := tanggal.Format("2006-01-02") // Format untuk SQL: YYYY-MM-DD
+	// 1. Validasi format tanggal DD/MM/YYYY
+	tanggal, err := time.Parse("02/01/2006", tanggalStr)
+	if err != nil {
+		return fmt.Errorf("format tanggal tidak valid, gunakan DD/MM/YYYY: %v", err)
+	}
+	tanggalFormatted := tanggal.Format("2006-01-02") // Format untuk SQL: YYYY-MM-DD
 
-    // Mulai transaksi
-    tx, err := s.DB.Begin()
-    if err != nil {
-        return fmt.Errorf("gagal memulai transaksi: %v", err)
-    }
+	// Mulai transaksi
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("gagal memulai transaksi: %v", err)
+	}
 
-    // 2. Ambil jam_mulai dan jam_selesai dari tabel Shift untuk id_shift
-    var shiftJamMulai, shiftJamSelesai string
-    err = tx.QueryRow("SELECT jam_mulai, jam_selesai FROM Shift WHERE id_shift = ?", idShift).Scan(&shiftJamMulai, &shiftJamSelesai)
-    if err != nil {
-        tx.Rollback()
-        if err == sql.ErrNoRows {
-            return fmt.Errorf("id_shift %d tidak ditemukan", idShift)
-        }
-        return fmt.Errorf("gagal mengambil data shift: %v", err)
-    }
+	// 2. Ambil jam_mulai dan jam_selesai dari tabel Shift untuk id_shift
+	var shiftJamMulai, shiftJamSelesai string
+	err = tx.QueryRow("SELECT jam_mulai, jam_selesai FROM Shift WHERE id_shift = ?", idShift).Scan(&shiftJamMulai, &shiftJamSelesai)
+	if err != nil {
+		tx.Rollback()
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("id_shift %d tidak ditemukan", idShift)
+		}
+		return fmt.Errorf("gagal mengambil data shift: %v", err)
+	}
 
-    // Parse jam dari tabel Shift ke time.Time
-    shiftStart, err := time.Parse("15:04:05", shiftJamMulai)
-    if err != nil {
-        tx.Rollback()
-        return fmt.Errorf("format jam_mulai pada tabel Shift tidak valid: %v", err)
-    }
-    shiftEnd, err := time.Parse("15:04:05", shiftJamSelesai)
-    if err != nil {
-        tx.Rollback()
-        return fmt.Errorf("format jam_selesai pada tabel Shift tidak valid: %v", err)
-    }
+	// Parse jam dari tabel Shift ke time.Time
+	shiftStart, err := time.Parse("15:04:05", shiftJamMulai)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("format jam_mulai pada tabel Shift tidak valid: %v", err)
+	}
+	shiftEnd, err := time.Parse("15:04:05", shiftJamSelesai)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("format jam_selesai pada tabel Shift tidak valid: %v", err)
+	}
 
-    // Proses setiap request
-    for _, req := range requests {
-        // 3. Validasi format jam_mulai dan jam_akhir
-        customStart, err := time.Parse("15:04:05", req.JamMulai)
-        if err != nil {
-            tx.Rollback()
-            return fmt.Errorf("format jam_mulai untuk karyawan %d tidak valid: %v", req.IDKaryawan, err)
-        }
-        customEnd, err := time.Parse("15:04:05", req.JamAkhir)
-        if err != nil {
-            tx.Rollback()
-            return fmt.Errorf("format jam_akhir untuk karyawan %d tidak valid: %v", req.IDKaryawan, err)
-        }
+	// Proses setiap request
+	for _, req := range requests {
+		// 3. Validasi format jam_mulai dan jam_akhir
+		customStart, err := time.Parse("15:04:05", req.JamMulai)
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("format jam_mulai untuk karyawan %d tidak valid: %v", req.IDKaryawan, err)
+		}
+		customEnd, err := time.Parse("15:04:05", req.JamAkhir)
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("format jam_akhir untuk karyawan %d tidak valid: %v", req.IDKaryawan, err)
+		}
 
-        // 4. Validasi rentang jam
-        if customStart.Before(shiftStart) || customStart.After(shiftEnd) {
-            tx.Rollback()
-            return fmt.Errorf("jam_mulai %s untuk karyawan %d harus dalam rentang %s - %s", req.JamMulai, req.IDKaryawan, shiftJamMulai, shiftJamSelesai)
-        }
-        if customEnd.Before(shiftStart) || customEnd.After(shiftEnd) {
-            tx.Rollback()
-            return fmt.Errorf("jam_akhir %s untuk karyawan %d harus dalam rentang %s - %s", req.JamAkhir, req.IDKaryawan, shiftJamMulai, shiftJamSelesai)
-        }
-        if customEnd.Before(customStart) {
-            tx.Rollback()
-            return fmt.Errorf("jam_akhir %s untuk karyawan %d tidak boleh sebelum jam_mulai %s", req.JamAkhir, req.IDKaryawan, req.JamMulai)
-        }
+		// 4. Validasi rentang jam
+		if customStart.Before(shiftStart) || customStart.After(shiftEnd) {
+			tx.Rollback()
+			return fmt.Errorf("jam_mulai %s untuk karyawan %d harus dalam rentang %s - %s", req.JamMulai, req.IDKaryawan, shiftJamMulai, shiftJamSelesai)
+		}
+		if customEnd.Before(shiftStart) || customEnd.After(shiftEnd) {
+			tx.Rollback()
+			return fmt.Errorf("jam_akhir %s untuk karyawan %d harus dalam rentang %s - %s", req.JamAkhir, req.IDKaryawan, shiftJamMulai, shiftJamSelesai)
+		}
+		if customEnd.Before(customStart) {
+			tx.Rollback()
+			return fmt.Errorf("jam_akhir %s untuk karyawan %d tidak boleh sebelum jam_mulai %s", req.JamAkhir, req.IDKaryawan, req.JamMulai)
+		}
 
-        // Proses setiap role dalam array Roles
-        for _, roleName := range req.Roles {
-            // 5. Ambil id_role berdasarkan nama role
-            var idRole int
-            err = tx.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", roleName).Scan(&idRole)
-            if err != nil {
-                tx.Rollback()
-                if err == sql.ErrNoRows {
-                    return fmt.Errorf("role %s tidak ditemukan", roleName)
-                }
-                return fmt.Errorf("gagal mengambil id_role untuk %s: %v", roleName, err)
-            }
+		// 5. Validasi dan konversi nama_role ke id_role
+		if len(req.NamaRole) == 0 {
+			tx.Rollback()
+			return fmt.Errorf("nama_role untuk karyawan %d tidak boleh kosong", req.IDKaryawan)
+		}
 
-            // 6. Cek apakah karyawan memiliki role yang sesuai
-            var roleCount int
-            err = tx.QueryRow(
-                "SELECT COUNT(*) FROM Detail_Role_Karyawan WHERE id_karyawan = ? AND id_role = ?",
-                req.IDKaryawan, idRole,
-            ).Scan(&roleCount)
-            if err != nil {
-                tx.Rollback()
-                return fmt.Errorf("gagal memeriksa role untuk karyawan %d: %v", req.IDKaryawan, err)
-            }
-            if roleCount == 0 {
-                tx.Rollback()
-                return fmt.Errorf("karyawan dengan id %d tidak memiliki role %s", req.IDKaryawan, roleName)
-            }
+		roleMap := map[string]int{
+			"Administrasi": 1,
+			"Suster":       2,
+			"Dokter":       3,
+		}
 
-            // 7. Cek apakah karyawan sudah memiliki shift yang sama di poli pada tanggal ini dengan role ini
-            var existingCount int
-            err = tx.QueryRow(
-                "SELECT COUNT(*) FROM Shift_Karyawan WHERE id_karyawan = ? AND id_poli = ? AND id_shift = ? AND tanggal = ? AND id_role = ?",
-                req.IDKaryawan, idPoli, idShift, tanggalFormatted, idRole,
-            ).Scan(&existingCount)
-            if err != nil {
-                tx.Rollback()
-                return fmt.Errorf("gagal memeriksa shift yang ada untuk karyawan %d dengan role %s: %v", req.IDKaryawan, roleName, err)
-            }
-            if existingCount > 0 {
-                tx.Rollback()
-                return fmt.Errorf("karyawan %d dengan role %s sudah memiliki shift %d di poli %d pada tanggal %s", req.IDKaryawan, roleName, idShift, idPoli, tanggalStr)
-            }
+		for _, roleName := range req.NamaRole {
+			idRole, ok := roleMap[roleName]
+			if !ok {
+				tx.Rollback()
+				return fmt.Errorf("nama_role %s untuk karyawan %d tidak valid", roleName, req.IDKaryawan)
+			}
 
-            // 8. Insert ke tabel Shift_Karyawan dengan jam custom dan id_role
-            insertQuery := `
-                INSERT INTO Shift_Karyawan (id_poli, id_shift, id_karyawan, id_role, custom_jam_mulai, custom_jam_selesai, tanggal)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            `
-            res, err := tx.Exec(insertQuery, idPoli, idShift, req.IDKaryawan, idRole, req.JamMulai, req.JamAkhir, tanggalFormatted)
-            if err != nil {
-                tx.Rollback()
-                return fmt.Errorf("gagal memasukkan shift untuk karyawan %d dengan role %s: %v", req.IDKaryawan, roleName, err)
-            }
-            idShiftKaryawan, err := res.LastInsertId()
-            if err != nil {
-                tx.Rollback()
-                return fmt.Errorf("gagal mendapatkan id_shift_karyawan untuk karyawan %d dengan role %s: %v", req.IDKaryawan, roleName, err)
-            }
+			// 6. Cek apakah karyawan memiliki role yang sesuai
+			var roleCount int
+			err = tx.QueryRow(
+				"SELECT COUNT(*) FROM Detail_Role_Karyawan WHERE id_karyawan = ? AND id_role = ?",
+				req.IDKaryawan, idRole,
+			).Scan(&roleCount)
+			if err != nil {
+				tx.Rollback()
+				return fmt.Errorf("gagal memeriksa role %s untuk karyawan %d: %v", roleName, req.IDKaryawan, err)
+			}
+			if roleCount == 0 {
+				tx.Rollback()
+				return fmt.Errorf("karyawan dengan id %d tidak memiliki role %s", req.IDKaryawan, roleName)
+			}
 
-            // 9. Insert ke tabel Management_Shift_Karyawan
-            insertManagementShiftQuery := `
-                INSERT INTO Management_Shift_Karyawan (id_management, id_shift_karyawan, created_by, updated_by, deleted_by)
-                VALUES (?, ?, ?, ?, ?)
-            `
-            _, err = tx.Exec(insertManagementShiftQuery, idManagement, idShiftKaryawan, idManagement, idManagement, 0)
-            if err != nil {
-                tx.Rollback()
-                return fmt.Errorf("gagal memasukkan management shift untuk karyawan %d dengan role %s: %v", req.IDKaryawan, roleName, err)
-            }
-        }
-    }
+			// 7. Cek apakah karyawan sudah memiliki shift yang sama di poli pada tanggal ini
+			var existingCount int
+			err = tx.QueryRow(
+				"SELECT COUNT(*) FROM Shift_Karyawan WHERE id_karyawan = ? AND id_poli = ? AND id_shift = ? AND tanggal = ?",
+				req.IDKaryawan, idPoli, idShift, tanggalFormatted,
+			).Scan(&existingCount)
+			if err != nil {
+				tx.Rollback()
+				return fmt.Errorf("gagal memeriksa shift yang ada untuk karyawan %d: %v", req.IDKaryawan, err)
+			}
+			if existingCount > 0 {
+				tx.Rollback()
+				return fmt.Errorf("karyawan %d sudah memiliki shift %d di poli %d pada tanggal %s", req.IDKaryawan, idShift, idPoli, tanggalStr)
+			}
 
-    // Commit transaksi
-    if err = tx.Commit(); err != nil {
-        return fmt.Errorf("gagal commit transaksi: %v", err)
-    }
+			// 8. Insert ke tabel Shift_Karyawan untuk setiap role
+			insertQuery := `
+				INSERT INTO Shift_Karyawan (id_poli, id_shift, id_karyawan, custom_jam_mulai, custom_jam_selesai, tanggal)
+				VALUES (?, ?, ?, ?, ?, ?)
+			`
+			res, err := tx.Exec(insertQuery, idPoli, idShift, req.IDKaryawan, req.JamMulai, req.JamAkhir, tanggalFormatted)
+			if err != nil {
+				tx.Rollback()
+				return fmt.Errorf("gagal memasukkan shift untuk karyawan %d dengan role %s: %v", req.IDKaryawan, roleName, err)
+			}
+			idShiftKaryawan, err := res.LastInsertId()
+			if err != nil {
+				tx.Rollback()
+				return fmt.Errorf("gagal mendapatkan id_shift_karyawan untuk karyawan %d dengan role %s: %v", req.IDKaryawan, roleName, err)
+			}
 
-    return nil
+			// 9. Insert ke tabel Management_Shift_Karyawan
+			insertManagementShiftQuery := `
+				INSERT INTO Management_Shift_Karyawan (id_management, id_shift_karyawan, created_by, updated_by, deleted_by)
+				VALUES (?, ?, ?, ?, ?)
+			`
+			_, err = tx.Exec(insertManagementShiftQuery, idManagement, idShiftKaryawan, idManagement, idManagement, 0)
+			if err != nil {
+				tx.Rollback()
+				return fmt.Errorf("gagal memasukkan management shift untuk karyawan %d dengan role %s: %v", req.IDKaryawan, roleName, err)
+			}
+		}
+	}
+
+	// Commit transaksi
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("gagal commit transaksi: %v", err)
+	}
+
+	return nil
 }
