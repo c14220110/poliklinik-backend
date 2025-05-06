@@ -379,99 +379,96 @@ func (mc *ShiftController) GetKaryawanTanpaShiftHandler(c echo.Context) error {
 }
 
 
-// AssignShiftHandler menerima query parameter id_poli, id_shift, tanggal,
-// dan request body berisi array dari AssignShiftRequest.
-// id_management diambil dari JWT.
-// AssignShiftHandler menerima query parameter id_poli, id_shift, tanggal,
+// AssignShiftHandlerNew menerima query parameter id_poli, id_shift, tanggal,
 // dan request body berisi array dari AssignShiftRequest.
 // id_management diambil dari JWT.
 func (sc *ShiftController) AssignShiftHandlerNew(c echo.Context) error {
-    // Ambil query parameter
-    idPoliStr := c.QueryParam("id_poli")
-    idShiftStr := c.QueryParam("id_shift")
-    tanggalStr := c.QueryParam("tanggal")
-    if idPoliStr == "" || idShiftStr == "" || tanggalStr == "" {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "id_poli, id_shift, dan tanggal harus disediakan",
-            "data":    nil,
-        })
-    }
+	// Ambil query parameter
+	idPoliStr := c.QueryParam("id_poli")
+	idShiftStr := c.QueryParam("id_shift")
+	tanggalStr := c.QueryParam("tanggal")
+	if idPoliStr == "" || idShiftStr == "" || tanggalStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_poli, id_shift, dan tanggal harus disediakan",
+			"data":    nil,
+		})
+	}
 
-    idPoli, err := strconv.Atoi(idPoliStr)
-    if err != nil {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "id_poli harus berupa angka",
-            "data":    nil,
-        })
-    }
-    idShift, err := strconv.Atoi(idShiftStr)
-    if err != nil {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "id_shift harus berupa angka",
-            "data":    nil,
-        })
-    }
+	idPoli, err := strconv.Atoi(idPoliStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_poli harus berupa angka",
+			"data":    nil,
+		})
+	}
+	idShift, err := strconv.Atoi(idShiftStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_shift harus berupa angka",
+			"data":    nil,
+		})
+	}
 
-    // Validasi format tanggal DD/MM/YYYY
-    if _, err := time.Parse("02/01/2006", tanggalStr); err != nil {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "tanggal harus dalam format DD/MM/YYYY",
-            "data":    nil,
-        })
-    }
+	// Validasi format tanggal DD/MM/YYYY
+	if _, err := time.Parse("02/01/2006", tanggalStr); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "tanggal harus dalam format DD/MM/YYYY",
+			"data":    nil,
+		})
+	}
 
-    // Ambil data dari request body: array dari AssignShiftRequest
-    var requests []services.AssignShiftRequest
-    if err := c.Bind(&requests); err != nil {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "invalid request payload: " + err.Error(),
-            "data":    nil,
-        })
-    }
-    if len(requests) == 0 {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "request body tidak boleh kosong",
-            "data":    nil,
-        })
-    }
+	// Ambil data dari request body: array dari AssignShiftRequest
+	var requests []services.AssignShiftRequest
+	if err := c.Bind(&requests); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "invalid request payload: " + err.Error(),
+			"data":    nil,
+		})
+	}
+	if len(requests) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "request body tidak boleh kosong",
+			"data":    nil,
+		})
+	}
 
-    // Ambil id_management dari JWT
-    claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
-    if !ok || claims == nil {
-        return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-            "status":  http.StatusUnauthorized,
-            "message": "invalid or missing token claims",
-            "data":    nil,
-        })
-    }
-    idManagement, err := strconv.Atoi(claims.IDKaryawan)
-    if err != nil || idManagement <= 0 {
-        return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-            "status":  http.StatusUnauthorized,
-            "message": "invalid management id in token",
-            "data":    nil,
-        })
-    }
+	// Ambil id_management dari JWT
+	claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
+	if !ok || claims == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "invalid or missing token claims",
+			"data":    nil,
+		})
+	}
+	idManagement, err := strconv.Atoi(claims.IDKaryawan)
+	if err != nil || idManagement <= 0 {
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "invalid management id in token",
+			"data":    nil,
+		})
+	}
 
-    // Panggil fungsi service untuk assign shift
-    err = sc.Service.AssignShiftNew(idPoli, idShift, idManagement, tanggalStr, requests)
-    if err != nil {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "failed to assign shift: " + err.Error(),
-            "data":    nil,
-        })
-    }
+	// Panggil fungsi service untuk assign shift
+	err = sc.Service.AssignShiftNew(idPoli, idShift, idManagement, tanggalStr, requests)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "failed to assign shift: " + err.Error(),
+			"data":    nil,
+		})
+	}
 
-    return c.JSON(http.StatusOK, map[string]interface{}{
-        "status":  http.StatusOK,
-        "message": "shift berhasil ditambahkan",
-        "data":    nil,
-    })
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "shift berhasil ditambahkan",
+		"data":    nil,
+	})
 }
