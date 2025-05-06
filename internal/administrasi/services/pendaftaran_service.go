@@ -379,17 +379,20 @@ func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(
 
 
 func (s *PendaftaranService) GetAllPasienDataFiltered(namaFilter string, page, limit int) ([]map[string]interface{}, error) {
-	// Base query untuk mengambil data pasien
+	// Base query untuk mengambil data pasien dengan join ke tabel Agama
 	query := `
-		SELECT id_pasien, nama, tanggal_lahir, jenis_kelamin, tempat_lahir, nik, kelurahan, kecamatan, kota_tinggal, alamat, no_telp, tanggal_regist
-		FROM Pasien
+		SELECT p.id_pasien, p.nama, p.tanggal_lahir, p.jenis_kelamin, p.tempat_lahir, p.nik, 
+		       p.kelurahan, p.kecamatan, p.kota_tinggal, p.alamat, p.no_telp, p.tanggal_regist,
+		       p.pekerjaan, a.nama AS agama_nama, p.status_perkawinan
+		FROM Pasien p
+		LEFT JOIN Agama a ON p.id_agama = a.id_agama
 	`
 	conditions := []string{}
 	args := []interface{}{}
 
 	// Jika ada filter nama, tambahkan kondisi WHERE
 	if strings.TrimSpace(namaFilter) != "" {
-		conditions = append(conditions, "nama LIKE ?")
+		conditions = append(conditions, "p.nama LIKE ?")
 		args = append(args, "%"+namaFilter+"%")
 	}
 
@@ -397,7 +400,7 @@ func (s *PendaftaranService) GetAllPasienDataFiltered(namaFilter string, page, l
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	query += " ORDER BY tanggal_regist DESC"
+	query += " ORDER BY p.tanggal_regist DESC"
 
 	// Hitung offset berdasarkan page dan limit
 	offset := (page - 1) * limit
@@ -413,34 +416,49 @@ func (s *PendaftaranService) GetAllPasienDataFiltered(namaFilter string, page, l
 	var results []map[string]interface{}
 	for rows.Next() {
 		var idPasien int
-		var nama string
-		var tanggalLahir string
-		var jenisKelamin, tempatLahir, nik, kelurahan, kecamatan, kotaTinggal, alamat, noTelp string
-		var tanggalRegist string
+		var nama, tanggalLahir, jenisKelamin, tempatLahir, nik, kelurahan, kecamatan, kotaTinggal, alamat, noTelp, tanggalRegist string
+		var pekerjaan, agamaNama sql.NullString
+		var statusPerkawinan sql.NullInt64
 
-		if err := rows.Scan(&idPasien, &nama, &tanggalLahir, &jenisKelamin, &tempatLahir, &nik, &kelurahan, &kecamatan, &kotaTinggal, &alamat, &noTelp, &tanggalRegist); err != nil {
+		if err := rows.Scan(&idPasien, &nama, &tanggalLahir, &jenisKelamin, &tempatLahir, &nik, &kelurahan, &kecamatan, 
+			&kotaTinggal, &alamat, &noTelp, &tanggalRegist, &pekerjaan, &agamaNama, &statusPerkawinan); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
 
+		// Konversi status_perkawinan dari integer ke string
+		var statusPerkawinanStr string
+		if statusPerkawinan.Valid {
+			if statusPerkawinan.Int64 == 1 {
+				statusPerkawinanStr = "sudah kawin"
+			} else if statusPerkawinan.Int64 == 0 {
+				statusPerkawinanStr = "belum kawin"
+			}
+		} else {
+			statusPerkawinanStr = ""
+		}
+
+		// Buat record dengan data tambahan
 		record := map[string]interface{}{
-			"ID_Pasien":      idPasien,
-			"Nama":           nama,
-			"Tanggal_Lahir":  tanggalLahir,
-			"Jenis_Kelamin":  jenisKelamin,
-			"Tempat_Lahir":   tempatLahir,
-			"NIK":            nik,
-			"Kelurahan":      kelurahan,
-			"Kecamatan":      kecamatan,
-			"Kota_Tinggal":   kotaTinggal,
-			"Alamat":         alamat,
-			"No_Telp":        noTelp,
-			"Tanggal_Regist": tanggalRegist,
+			"ID_Pasien":        idPasien,
+			"Nama":             nama,
+			"Tanggal_Lahir":    tanggalLahir,
+			"Jenis_Kelamin":    jenisKelamin,
+			"Tempat_Lahir":     tempatLahir,
+			"NIK":              nik,
+			"Kelurahan":        kelurahan,
+			"Kecamatan":        kecamatan,
+			"Kota_Tinggal":     kotaTinggal,
+			"Alamat":           alamat,
+			"No_Telp":          noTelp,
+			"Tanggal_Regist":   tanggalRegist,
+			"Pekerjaan":        pekerjaan.String,
+			"Agama":            agamaNama.String,
+			"Status_Perkawinan": statusPerkawinanStr,
 		}
 		results = append(results, record)
 	}
 	return results, nil
 }
-
 
 func (s *PendaftaranService) TundaPasien(idAntrian int) error {
     // 1. Periksa apakah antrian ada
