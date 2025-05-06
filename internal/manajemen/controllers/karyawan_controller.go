@@ -295,6 +295,9 @@ func (kc *KaryawanController) SoftDeleteKaryawanHandler(c echo.Context) error {
 		"data":    nil,
 	})
 }
+
+
+
 func (kc *KaryawanController) AddPrivilegeHandler(c echo.Context) error {
 	// Ambil id_karyawan dari query parameter
 	idKaryawanStr := c.QueryParam("id_karyawan")

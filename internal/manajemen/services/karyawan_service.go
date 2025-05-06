@@ -387,18 +387,25 @@ func (s *ManagementService) AddPrivilegesToKaryawan(idKaryawan int, privileges [
 		}
 	}()
 	
-	// Loop untuk setiap privilege yang akan ditambahkan
+	// 1. Hapus semua privilege lama untuk karyawan ini
+	_, err = tx.Exec("DELETE FROM Detail_Privilege_Karyawan WHERE id_karyawan = ?", idKaryawan)
+	if err != nil {
+		return fmt.Errorf("gagal menghapus privilege lama: %v", err)
+	}
+	
+	// 2. Loop untuk setiap privilege baru yang akan ditambahkan
 	for _, priv := range privileges {
-		// Opsional: cek apakah privilege sudah ada untuk mencegah duplikasi
+		// Validasi apakah privilege ada di tabel Privilege
 		var exists int
-		err = tx.QueryRow("SELECT COUNT(*) FROM Detail_Privilege_Karyawan WHERE id_privilege = ? AND id_karyawan = ?", priv, idKaryawan).Scan(&exists)
+		err = tx.QueryRow("SELECT COUNT(*) FROM Privilege WHERE id_privilege = ?", priv).Scan(&exists)
 		if err != nil {
-			return fmt.Errorf("gagal memeriksa privilege: %v", err)
+			return fmt.Errorf("gagal memeriksa privilege %d: %v", priv, err)
 		}
-		if exists > 0 {
-			// Lewati jika privilege sudah terdaftar (atau bisa mengembalikan error sesuai kebutuhan)
-			continue
+		if exists == 0 {
+			return fmt.Errorf("privilege %d tidak ditemukan", priv)
 		}
+		
+		// Insert privilege baru
 		_, err = tx.Exec("INSERT INTO Detail_Privilege_Karyawan (id_privilege, id_karyawan) VALUES (?, ?)", priv, idKaryawan)
 		if err != nil {
 			return fmt.Errorf("gagal menambahkan privilege %d untuk karyawan %d: %v", priv, idKaryawan, err)
