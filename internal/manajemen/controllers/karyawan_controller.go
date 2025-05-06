@@ -28,16 +28,16 @@ type AddKaryawanRequest struct {
 
 
 type UpdateKaryawanRequest struct {
-	// Tidak perlu menyertakan id_karyawan di body, karena diambil dari query
-	NIK          string `json:"nik"`
-	Nama         string `json:"nama"`
-	Username     string `json:"username"`
-	Password     string `json:"password"`
-	TanggalLahir string `json:"tanggal_lahir"`
-	Alamat       string `json:"alamat"`
-	NoTelp       string `json:"no_telp"`
-	Role         string `json:"role"`
+	NIK          string   `json:"nik"`
+	Nama         string   `json:"nama"`
+	Username     string   `json:"username"`
+	Password     string   `json:"password"`
+	TanggalLahir string   `json:"tanggal_lahir"`
+	Alamat       string   `json:"alamat"`
+	NoTelp       string   `json:"no_telp"`
+	Roles        []string `json:"roles"` // Changed from Role string to Roles []string
 }
+
 
 type KaryawanController struct {
     Service *services.ManagementService
@@ -140,7 +140,6 @@ func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
 	})
 }
 
-
 func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 	// Ambil id_karyawan dari query parameter
 	idKaryawanStr := c.QueryParam("id_karyawan")
@@ -159,7 +158,6 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-	// Konversi ke int64
 	idKaryawan := int64(idKaryawanInt)
 
 	var req UpdateKaryawanRequest
@@ -189,7 +187,7 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 		})
 	}
 
-	// Buat objek Karyawan untuk update; IDKaryawan diisi dari query parameter yang telah dikonversi
+	// Buat objek Karyawan untuk update
 	karyawan := models.Karyawan{
 		IDKaryawan:   idKaryawan,
 		NIK:          req.NIK,
@@ -222,8 +220,8 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 	}
 	idManagement := idManagementInt
 
-	// Panggil service untuk update karyawan
-	updatedID, err := kc.Service.UpdateKaryawan(karyawan, req.Role, idManagement)
+	// Panggil service untuk update karyawan dengan multiple roles
+	updatedID, err := kc.Service.UpdateKaryawan(karyawan, req.Roles, idManagement)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
@@ -240,7 +238,6 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 		},
 	})
 }
-
 
 
 

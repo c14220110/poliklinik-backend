@@ -139,7 +139,7 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, roles []string
 }
 
 
-func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string, idManagement int) (int64, error) {
+func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []string, idManagement int) (int64, error) {
 	// Mulai transaksi
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -189,16 +189,7 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 	}
 	karyawan.Password = string(hashedPassword)
 
-	// 5. Cari Role yang sesuai (role harus sudah ada, tidak membuat role baru)
-	var idRole int64
-	err = tx.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", role).Scan(&idRole)
-	if err == sql.ErrNoRows {
-		return 0, fmt.Errorf("role %s tidak ditemukan", role)
-	} else if err != nil {
-		return 0, fmt.Errorf("gagal memeriksa role: %v", err)
-	}
-
-	// 6. Update record Karyawan (tidak ada kolom id_role)
+	// 5. Update record Karyawan
 	updateKaryawan := `
 		UPDATE Karyawan 
 		SET nama = ?, username = ?, password = ?, nik = ?, tanggal_lahir = ?, alamat = ?, no_telp = ?
@@ -218,7 +209,7 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 		return 0, fmt.Errorf("gagal mengupdate karyawan: %v", err)
 	}
 
-	// 7. Update Management_Karyawan untuk mencatat siapa yang melakukan pembaruan
+	// 6. Update Management_Karyawan untuk mencatat siapa yang melakukan pembaruan
 	updateManagement := `
 		UPDATE Management_Karyawan 
 		SET updated_by = ?
@@ -229,20 +220,30 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 		return 0, fmt.Errorf("gagal mencatat di Management_Karyawan: %v", err)
 	}
 
-	// 8. Update Detail_Role_Karyawan:
-	// Hapus record role lama dan masukkan record baru untuk karyawan tersebut
+	// 7. Hapus semua role lama di Detail_Role_Karyawan
 	_, err = tx.Exec("DELETE FROM Detail_Role_Karyawan WHERE id_karyawan = ?", karyawan.IDKaryawan)
 	if err != nil {
 		return 0, fmt.Errorf("gagal menghapus detail role lama: %v", err)
 	}
 
+	// 8. Validasi dan masukkan role baru
 	insertDetailRole := `
 		INSERT INTO Detail_Role_Karyawan (id_role, id_karyawan)
 		VALUES (?, ?)
 	`
-	_, err = tx.Exec(insertDetailRole, idRole, karyawan.IDKaryawan)
-	if err != nil {
-		return 0, fmt.Errorf("gagal mencatat detail role baru: %v", err)
+	for _, role := range roles {
+		var idRole int64
+		err = tx.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", role).Scan(&idRole)
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("role %s tidak ditemukan", role)
+		} else if err != nil {
+			return 0, fmt.Errorf("gagal memeriksa role: %v", err)
+		}
+
+		_, err = tx.Exec(insertDetailRole, idRole, karyawan.IDKaryawan)
+		if err != nil {
+			return 0, fmt.Errorf("gagal mencatat detail role baru untuk %s: %v", role, err)
+		}
 	}
 
 	// Commit transaksi
