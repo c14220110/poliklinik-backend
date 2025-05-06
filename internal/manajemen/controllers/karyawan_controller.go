@@ -241,52 +241,60 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 	})
 }
 
-
 func (kc *KaryawanController) SoftDeleteKaryawanHandler(c echo.Context) error {
-    idStr := c.QueryParam("id_karyawan")
-    if idStr == "" {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "id_karyawan parameter is required",
-            "data":    nil,
-        })
-    }
+	idStr := c.QueryParam("id_karyawan")
+	if idStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_karyawan parameter is required",
+			"data":    nil,
+		})
+	}
 
-    idKaryawan, err := strconv.Atoi(idStr)
-    if err != nil {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "status":  http.StatusBadRequest,
-            "message": "id_karyawan must be a number",
-            "data":    nil,
-        })
-    }
+	idKaryawan, err := strconv.Atoi(idStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_karyawan must be a number",
+			"data":    nil,
+		})
+	}
 
-    // Ambil klaim JWT dari context
-    claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
-    if !ok || claims == nil {
-        return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-            "status":  http.StatusUnauthorized,
-            "message": "Invalid or missing token claims",
-            "data":    nil,
-        })
-    }
+	// Ambil klaim JWT dari context
+	claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
+	if !ok || claims == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "Invalid or missing token claims",
+			"data":    nil,
+		})
+	}
 
-    err = kc.Service.SoftDeleteKaryawan(idKaryawan, claims.Username)
-    if err != nil {
-        return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-            "status":  http.StatusInternalServerError,
-            "message": "Failed to soft delete karyawan: " + err.Error(),
-            "data":    nil,
-        })
-    }
+	// Asumsikan claims.IDKaryawan adalah string, konversi ke int
+	deletedByID, err := strconv.Atoi(claims.IDKaryawan)
+	if err != nil {
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+			"status":  http.StatusUnauthorized,
+			"message": "Invalid IDKaryawan in token",
+			"data":    nil,
+		})
+	}
 
-    return c.JSON(http.StatusOK, map[string]interface{}{
-        "status":  http.StatusOK,
-        "message": "Karyawan soft-deleted successfully",
-        "data":    nil,
-    })
+	err = kc.Service.SoftDeleteKaryawan(idKaryawan, deletedByID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to soft delete karyawan: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Karyawan soft-deleted successfully",
+		"data":    nil,
+	})
 }
-
 func (kc *KaryawanController) AddPrivilegeHandler(c echo.Context) error {
 	// Ambil id_karyawan dari query parameter
 	idKaryawanStr := c.QueryParam("id_karyawan")

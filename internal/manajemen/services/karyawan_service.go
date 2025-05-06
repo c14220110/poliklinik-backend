@@ -357,7 +357,7 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 	return list, nil
 }
 
-func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy string) error {
+func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy int) error {
 	// 1. Update kolom deleted_at di tabel Karyawan
 	queryKaryawan := `UPDATE Karyawan SET deleted_at = NOW() WHERE id_karyawan = ?`
 	_, err := s.DB.Exec(queryKaryawan, idKaryawan)
