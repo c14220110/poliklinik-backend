@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -16,20 +17,7 @@ import (
 )
 
 // ExtendedPasienRequest defines payload untuk pendaftaran pasien
-type ExtendedPasienRequest struct {
-	Nama               string `json:"nama"`
-	TanggalLahir       string `json:"tanggal_lahir"`
-	JenisKelamin       string `json:"jenis_kelamin"`
-	TempatLahir        string `json:"tempat_lahir"`
-	Nik                string `json:"nik"`
-	Kelurahan          string `json:"kelurahan"`
-	Kecamatan          string `json:"kecamatan"`
-	KotaTempatTinggal  string `json:"kota_tempat_tinggal"`
-	Alamat             string `json:"alamat"`
-	NoTelp             string `json:"no_telp"`
-	IDPoli             int    `json:"id_poli"`
-	KeluhanUtama       string `json:"keluhan_utama"`
-}
+
 
 type PasienController struct {
 	Service *services.PendaftaranService
@@ -39,10 +27,9 @@ func NewPasienController(service *services.PendaftaranService) *PasienController
 	return &PasienController{Service: service}
 }
 
-
 // RegisterPasien mendaftarkan pasien baru + kunjungan + broadcast WS
 func (pc *PasienController) RegisterPasien(c echo.Context) error {
-	var req ExtendedPasienRequest
+	var req models.ExtendedPasienRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
@@ -50,16 +37,14 @@ func (pc *PasienController) RegisterPasien(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-
 	// Validasi field wajib
-	if req.Nama == "" || req.TanggalLahir == "" || req.Nik == "" || req.IDPoli == 0 {
+	if req.Nama == "" || req.TanggalLahir == "" || req.Nik == "" || req.IDPoli == 0 || req.Agama == "" || req.StatusPerkawinan == "" {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "Nama, tanggal_lahir, nik, dan id_poli harus diisi",
+			"message": "Nama, tanggal_lahir, nik, id_poli, agama, dan status_perkawinan harus diisi",
 			"data":    nil,
 		})
 	}
-
 	// Parse tanggal lahir
 	parsedDate, err := time.Parse("2006-01-02", req.TanggalLahir)
 	if err != nil {
@@ -69,7 +54,6 @@ func (pc *PasienController) RegisterPasien(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-
 	// Ambil operatorID dari JWT
 	claims := c.Get(string(common.ContextKeyClaims)).(*jwtUtils.Claims)
 	operatorID, err := strconv.Atoi(claims.IDKaryawan)
@@ -80,24 +64,55 @@ func (pc *PasienController) RegisterPasien(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-
+	// Cari ID agama berdasarkan nama agama
+	var idAgama int
+	err = pc.Service.DB.QueryRow("SELECT id_agama FROM Agama WHERE nama = ?", req.Agama).Scan(&idAgama)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status":  http.StatusBadRequest,
+				"message": "Agama tidak ditemukan",
+				"data":    nil,
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Gagal mencari agama: " + err.Error(),
+			"data":    nil,
+		})
+	}
+	// Konversi status perkawinan
+	var statusPerkawinan int
+	if strings.ToLower(req.StatusPerkawinan) == "sudah kawin" {
+		statusPerkawinan = 1
+	} else if strings.ToLower(req.StatusPerkawinan) == "belum kawin" {
+		statusPerkawinan = 0
+	} else {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Status perkawinan tidak valid. Harus 'sudah kawin' atau 'belum kawin'",
+			"data":    nil,
+		})
+	}
 	// Bangun objek Pasien
 	p := models.Pasien{
-		Nama:         req.Nama,
-		TanggalLahir: parsedDate,
-		JenisKelamin: req.JenisKelamin,
-		TempatLahir:  req.TempatLahir,
-		NIK:          req.Nik,
-		Kelurahan:    req.Kelurahan,
-		Kecamatan:    req.Kecamatan,
-		KotaTinggal:  req.KotaTempatTinggal,
-		Alamat:       req.Alamat,
-		NoTelp:       req.NoTelp,
+		Nama:             req.Nama,
+		TanggalLahir:     parsedDate,
+		JenisKelamin:     req.JenisKelamin,
+		TempatLahir:      req.TempatLahir,
+		NIK:              req.Nik,
+		Kelurahan:        req.Kelurahan,
+		Kecamatan:        req.Kecamatan,
+		KotaTinggal:      req.KotaTempatTinggal,
+		Alamat:           req.Alamat,
+		NoTelp:           req.NoTelp,
+		IDAgama:          idAgama,
+		StatusPerkawinan: statusPerkawinan,
+		Pekerjaan:        req.Pekerjaan,
 	}
-
 	// Panggil service
 	patientID, idAntrian, nomorAntrian, idRM, idStatus, namaPoli, err :=
-		pc.Service.RegisterPasienWithKunjungan(p, req.IDPoli, operatorID, req.KeluhanUtama)
+		pc.Service.RegisterPasienWithKunjungan(p, req.IDPoli, operatorID, req.KeluhanUtama, req.PenanggungJawab)
 	if err != nil {
 		if err.Error() == "NIK sudah terdaftar" {
 			return c.JSON(http.StatusConflict, map[string]interface{}{
@@ -112,19 +127,18 @@ func (pc *PasienController) RegisterPasien(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-
 	// Siapkan payload WS
 	inner := map[string]interface{}{
-		"id_antrian":    idAntrian,
-		"id_pasien":     patientID,
-		"id_poli":       req.IDPoli,
-		"id_rm":         idRM,
-		"id_status":     idStatus,
-		"nama":          req.Nama,
-		"nama_poli":     namaPoli,
-		"nomor_antrian": nomorAntrian,
+		"id_antrian":     idAntrian,
+		"id_pasien":      patientID,
+		"id_poli":        req.IDPoli,
+		"id_rm":          idRM,
+		"id_status":      idStatus,
+		"nama":           req.Nama,
+		"nama_poli":      namaPoli,
+		"nomor_antrian":  nomorAntrian,
 		"priority_order": nomorAntrian,
-		"status":        "Menunggu",
+		"status":         "Menunggu",
 	}
 	wrapper := map[string]interface{}{
 		"type": "antrian_update",
@@ -132,21 +146,20 @@ func (pc *PasienController) RegisterPasien(c echo.Context) error {
 	}
 	msg, _ := json.Marshal(wrapper)
 	ws.HubInstance.Broadcast <- msg
-
 	// Response API
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
 		"message": "Pasien berhasil didaftarkan",
 		"data": map[string]interface{}{
-			"id_pasien":    patientID,
-			"id_antrian":   idAntrian,
+			"id_pasien":     patientID,
+			"id_antrian":    idAntrian,
 			"nomor_antrian": nomorAntrian,
 		},
 	})
 }
 
 func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
-	var req ExtendedPasienRequest
+	var req models.ExtendedPasienRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
@@ -154,7 +167,7 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-	// validasi minimal
+	// Validasi minimal
 	if req.Nik == "" || req.IDPoli == 0 {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
@@ -162,7 +175,7 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-	// parse tanggal lahir (jika disertakan)
+	// Parse tanggal lahir
 	parsedDate, err := time.Parse("2006-01-02", req.TanggalLahir)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
@@ -172,23 +185,59 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 		})
 	}
 
-	// Siapkan model Pasien (NIK tidak diubah)
-	p := models.Pasien{
-		Nama:          req.Nama,
-		TanggalLahir:  parsedDate,
-		JenisKelamin:  req.JenisKelamin,
-		TempatLahir:   req.TempatLahir,
-		NIK:           req.Nik,
-		Kelurahan:     req.Kelurahan,
-		Kecamatan:     req.Kecamatan,
-		KotaTinggal:   req.KotaTempatTinggal,
-		Alamat:        req.Alamat,
-		NoTelp:        req.NoTelp,
+	// Cari id_agama berdasarkan nama agama
+	var idAgama int
+	err = pc.Service.DB.QueryRow("SELECT id_agama FROM Agama WHERE nama = ?", req.Agama).Scan(&idAgama)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status":  http.StatusBadRequest,
+				"message": "Agama not found",
+				"data":    nil,
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to find agama: " + err.Error(),
+			"data":    nil,
+		})
 	}
 
-	// Panggil service
+	// Konversi status_perkawinan
+	var statusPerkawinan int
+	switch strings.ToLower(req.StatusPerkawinan) {
+	case "sudah kawin":
+		statusPerkawinan = 1
+	case "belum kawin":
+		statusPerkawinan = 0
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Invalid status_perkawinan. Must be 'sudah kawin' or 'belum kawin'",
+			"data":    nil,
+		})
+	}
+
+	// Siapkan model Pasien
+	p := models.Pasien{
+		Nama:             req.Nama,
+		TanggalLahir:     parsedDate,
+		JenisKelamin:     req.JenisKelamin,
+		TempatLahir:      req.TempatLahir,
+		NIK:              req.Nik,
+		Kelurahan:        req.Kelurahan,
+		Kecamatan:        req.Kecamatan,
+		KotaTinggal:      req.KotaTempatTinggal,
+		Alamat:           req.Alamat,
+		NoTelp:           req.NoTelp,
+		IDAgama:          idAgama,
+		StatusPerkawinan: statusPerkawinan,
+		Pekerjaan:        req.Pekerjaan,
+	}
+
+	// Panggil service dengan penanggung_jawab
 	idPasien, idAntrian, nomorAntrian, idRM, idStatus, namaPoli, err :=
-		pc.Service.UpdatePasienAndRegisterKunjungan(p, req.IDPoli, req.KeluhanUtama)
+		pc.Service.UpdatePasienAndRegisterKunjungan(p, req.IDPoli, req.KeluhanUtama, req.PenanggungJawab)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
@@ -222,8 +271,8 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 		"status":  http.StatusOK,
 		"message": "Kunjungan registered successfully",
 		"data": map[string]interface{}{
-			"id_pasien":    idPasien,
-			"id_antrian":   idAntrian,
+			"id_pasien":     idPasien,
+			"id_antrian":    idAntrian,
 			"nomor_antrian": nomorAntrian,
 		},
 	})

@@ -17,26 +17,18 @@ func NewPendaftaranService(db *sql.DB) *PendaftaranService {
 	return &PendaftaranService{DB: db}
 }
 
-// RegisterPasienWithKunjungan melakukan registrasi pasien baru beserta:
-// - Insert data Pasien
-// - Pembuatan Rekam Medis (dengan ID_Pasien)
-// - Pencatatan Riwayat Kunjungan (dengan ID_RM)
-// - Hubungan Kunjungan dengan Poli (di tabel Kunjungan_Poli)
-// - Pembuatan nomor antrian di tabel Antrian (nomor antrian unik per poli per hari)
-// Catatan: Kolom Status di tabel Antrian telah diganti menjadi id_status yang mengacu ke tabel Status_Antrian.
 // RegisterPasienWithKunjungan melakukan registrasi pasien, rekam medis,
 // riwayat kunjungan, kunjungan_poli, antrian, dan billing.
 func (s *PendaftaranService) RegisterPasienWithKunjungan(
 	p models.Pasien,
 	idPoli, operatorID int,
-	keluhanUtama string,
+	keluhanUtama, namaPenanggungJawab string,
 ) (patientID int64, idAntrian int64, nomorAntrian int64, idRM string, idStatus int, namaPoli string, err error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return
 	}
 	defer tx.Rollback()
-
 	// 1. Cek NIK
 	var existingID int
 	err = tx.QueryRow("SELECT id_pasien FROM Pasien WHERE NIK = ?", p.NIK).Scan(&existingID)
@@ -46,15 +38,16 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 	} else if err != sql.ErrNoRows {
 		return
 	}
-
 	// 2. Insert Pasien
 	res, err := tx.Exec(`
 		INSERT INTO Pasien
 		  (Nama, Tanggal_Lahir, Jenis_Kelamin, Tempat_Lahir,
-		   NIK, Kelurahan, Kecamatan, Alamat, No_Telp, kota_tinggal)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   NIK, Kelurahan, Kecamatan, Alamat, No_Telp, kota_tinggal,
+		   id_agama, status_perkawinan, pekerjaan)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.Nama, p.TanggalLahir, p.JenisKelamin, p.TempatLahir,
 		p.NIK, p.Kelurahan, p.Kecamatan, p.Alamat, p.NoTelp, p.KotaTinggal,
+		p.IDAgama, p.StatusPerkawinan, p.Pekerjaan,
 	)
 	if err != nil {
 		return
@@ -63,7 +56,6 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 	if err != nil {
 		return
 	}
-
 	// 3. Generate id_rm via Counter_RM
 	tahun := time.Now().Year()
 	var count int
@@ -87,7 +79,6 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 		}
 	}
 	idRM = fmt.Sprintf("RM%d%05d", tahun, count)
-
 	// 4. Insert Rekam_Medis
 	_, err = tx.Exec(
 		"INSERT INTO Rekam_Medis (id_rm, id_pasien) VALUES (?, ?)",
@@ -97,7 +88,6 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 		err = fmt.Errorf("failed to insert into Rekam_Medis: %v", err)
 		return
 	}
-
 	// 5. Insert Riwayat_Kunjungan
 	res, err = tx.Exec(
 		"INSERT INTO Riwayat_Kunjungan (id_rm, catatan) VALUES (?, ?)",
@@ -112,7 +102,6 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 		err = fmt.Errorf("failed to get last insert id for Riwayat_Kunjungan: %v", err)
 		return
 	}
-
 	// 6. Insert Kunjungan_Poli
 	_, err = tx.Exec(
 		"INSERT INTO Kunjungan_Poli (id_poli, id_kunjungan) VALUES (?, ?)",
@@ -122,7 +111,6 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 		err = fmt.Errorf("failed to insert into Kunjungan_Poli: %v", err)
 		return
 	}
-
 	// 7. Hitung nomor antrian hari ini
 	today := time.Now().Format("2006-01-02")
 	var maxNomor sql.NullInt64
@@ -138,7 +126,6 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 	if maxNomor.Valid && maxNomor.Int64 > 0 {
 		nomorAntrian = maxNomor.Int64 + 1
 	}
-
 	// 8. Ambil id_status "Menunggu"
 	err = tx.QueryRow(
 		"SELECT id_status FROM Status_Antrian WHERE status='Menunggu' LIMIT 1",
@@ -147,13 +134,12 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 		err = fmt.Errorf("failed to get id_status for 'Menunggu': %v", err)
 		return
 	}
-
 	// 9. Insert Antrian
 	res, err = tx.Exec(`
 		INSERT INTO Antrian
-		  (id_pasien, id_poli, keluhan_utama, nomor_antrian, id_status, priority_order, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-		patientID, idPoli, keluhanUtama, nomorAntrian, idStatus, nomorAntrian,
+		  (id_pasien, id_poli, keluhan_utama, nomor_antrian, id_status, priority_order, created_at, nama_penanggung_jawab)
+		VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)`,
+		patientID, idPoli, keluhanUtama, nomorAntrian, idStatus, nomorAntrian, namaPenanggungJawab,
 	)
 	if err != nil {
 		err = fmt.Errorf("failed to insert into Antrian: %v", err)
@@ -164,7 +150,6 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 		err = fmt.Errorf("failed to get id_antrian: %v", err)
 		return
 	}
-
 	// 10. Insert Billing (tetap dilakukan)
 	_, err = tx.Exec(`
 		INSERT INTO Billing
@@ -177,7 +162,6 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 		err = fmt.Errorf("failed to insert into Billing: %v", err)
 		return
 	}
-
 	// 11. Update Riwayat_Kunjungan hanya dengan id_antrian
 	_, err = tx.Exec(`
 		UPDATE Riwayat_Kunjungan
@@ -189,7 +173,6 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 		err = fmt.Errorf("failed to update Riwayat_Kunjungan: %v", err)
 		return
 	}
-
 	// 12. Ambil nama_poli
 	err = tx.QueryRow(
 		"SELECT nama_poli FROM Poliklinik WHERE id_poli = ?",
@@ -199,21 +182,20 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 		err = fmt.Errorf("failed to get nama_poli: %v", err)
 		return
 	}
-
 	// Commit transaksi
 	err = tx.Commit()
 	return
 }
 
 
-
 // UpdatePasienAndRegisterKunjungan update pasien & buat antrian baru tanpa id_billing di RK
+// UpdatePasienAndRegisterKunjungan updates pasien & creates a new antrian without id_billing in RK
 func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(
 	p models.Pasien,
 	idPoli int,
 	keluhanUtama string,
+	namaPenanggungJawab string,
 ) (idPasien, idAntrian, nomorAntrian int64, idRM string, idStatus int, namaPoli string, err error) {
-
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return
@@ -239,7 +221,7 @@ func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(
 		idPoli, today,
 	).Scan(&lastAntrianPasien)
 	if err == nil && lastAntrianPasien == idPasien {
-		err = fmt.Errorf("duplicate entry: pasien dengan NIK %s baru saja mengambil antrian", p.NIK)
+		err = fmt.Errorf("duplicateili entry: pasien dengan NIK %s baru saja mengambil antrian", p.NIK)
 		return
 	} else if err != nil && err != sql.ErrNoRows {
 		err = fmt.Errorf("failed to check antrian duplicate: %v", err)
@@ -250,10 +232,12 @@ func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(
 	_, err = tx.Exec(`
 		UPDATE Pasien 
 		SET Nama=?, Tanggal_Lahir=?, Jenis_Kelamin=?, Tempat_Lahir=?,
-		    Kelurahan=?, Kecamatan=?, kota_tinggal=?, Alamat=?, No_Telp=?
+		    Kelurahan=?, Kecamatan=?, kota_tinggal=?, Alamat=?, No_Telp=?,
+		    id_agama=?, status_perkawinan=?, pekerjaan=?
 		WHERE id_pasien = ?`,
 		p.Nama, p.TanggalLahir, p.JenisKelamin, p.TempatLahir,
 		p.Kelurahan, p.Kecamatan, p.KotaTinggal, p.Alamat, p.NoTelp,
+		p.IDAgama, p.StatusPerkawinan, p.Pekerjaan,
 		idPasien,
 	)
 	if err != nil {
@@ -331,13 +315,13 @@ func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(
 		return
 	}
 
-	// 8. Insert Antrian
+	// 8. Insert Antrian dengan nama_penanggung_jawab
 	res, err = tx.Exec(`
 		INSERT INTO Antrian
 		  (id_pasien, id_poli, keluhan_utama, nomor_antrian,
-		   id_status, priority_order, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-		idPasien, idPoli, keluhanUtama, nomorAntrian, idStatus, nomorAntrian,
+		   id_status, priority_order, created_at, nama_penanggung_jawab)
+		VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)`,
+		idPasien, idPoli, keluhanUtama, nomorAntrian, idStatus, nomorAntrian, namaPenanggungJawab,
 	)
 	if err != nil {
 		err = fmt.Errorf("failed to insert into Antrian: %v", err)
@@ -391,7 +375,6 @@ func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(
 	err = tx.Commit()
 	return
 }
-
 
 
 
