@@ -249,11 +249,10 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 
 
 
-func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusFilter string, idKaryawanFilter string) ([]map[string]interface{}, error) {
+func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statusFilter string, idKaryawanFilter string) ([]map[string]interface{}, error) {
 	baseQuery := `
 		SELECT 
 			k.id_karyawan, 
-			drk.id_role,
 			r.nama_role,
 			k.nama,
 			k.username,
@@ -279,14 +278,10 @@ func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusF
 		params = append(params, idKaryawanInt)
 	}
 
-	// Filter berdasarkan id_role jika disediakan
-	if idRoleFilter != "" {
-		idRoleInt, err := strconv.Atoi(idRoleFilter)
-		if err != nil {
-			return nil, fmt.Errorf("invalid id_role value: %v", err)
-		}
-		conditions = append(conditions, "drk.id_role = ?")
-		params = append(params, idRoleInt)
+	// Filter berdasarkan nama_role jika disediakan
+	if namaRoleFilter != "" {
+		conditions = append(conditions, "r.nama_role = ?")
+		params = append(params, namaRoleFilter)
 	}
 
 	// Filter berdasarkan status
@@ -314,20 +309,18 @@ func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusF
 	var list []map[string]interface{}
 	for rows.Next() {
 		var idKaryawan int
-		var idRole int
 		var namaRole sql.NullString
 		var nama, username, nik string
 		var tanggalLahir sql.NullTime
 		var alamat, noTelp string
-		var nomorSip sql.NullString // Untuk menangani sip yang bisa NULL
+		var nomorSip sql.NullString
 
-		if err := rows.Scan(&idKaryawan, &idRole, &namaRole, &nama, &username, &nik, &tanggalLahir, &alamat, &noTelp, &nomorSip); err != nil {
+		if err := rows.Scan(&idKaryawan, &namaRole, &nama, &username, &nik, &tanggalLahir, &alamat, &noTelp, &nomorSip); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
 
 		record := map[string]interface{}{
 			"id_karyawan":   idKaryawan,
-			"id_role":       idRole,
 			"nama_role":     nil,
 			"nama":          nama,
 			"username":      username,
@@ -349,7 +342,6 @@ func (s *ManagementService) GetKaryawanListFiltered(idRoleFilter string, statusF
 	}
 	return list, nil
 }
-
 func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy string) error {
 	// 1. Update kolom deleted_at di tabel Karyawan
 	queryKaryawan := `UPDATE Karyawan SET deleted_at = NOW() WHERE id_karyawan = ?`

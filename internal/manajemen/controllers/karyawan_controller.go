@@ -118,14 +118,12 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 	})
 }
 
-
-
 func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
-	idRole := c.QueryParam("id_role")
+	namaRole := c.QueryParam("nama_role") // Menggunakan nama_role sebagai query parameter
 	status := c.QueryParam("status")
-	idKaryawan := c.QueryParam("id_karyawan") // Parameter opsional baru
+	idKaryawan := c.QueryParam("id_karyawan")
 
-	list, err := kc.Service.GetKaryawanListFiltered(idRole, status, idKaryawan)
+	list, err := kc.Service.GetKaryawanListFiltered(namaRole, status, idKaryawan)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
