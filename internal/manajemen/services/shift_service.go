@@ -422,6 +422,7 @@ func (s *ShiftService) GetListKaryawanFiltered(
 	return results, nil
 }
 
+
 func (s *ShiftService) GetKaryawanTanpaShift(idShift int, idRole *int, tanggalStr string, idPoli int) ([]map[string]interface{}, error) {
     // 1. Tentukan tanggal
     var tanggal time.Time
@@ -436,9 +437,10 @@ func (s *ShiftService) GetKaryawanTanpaShift(idShift int, idRole *int, tanggalSt
     }
     tanggalFormatted := tanggal.Format("2006-01-02") // Format YYYY-MM-DD untuk SQL
 
-    // 2. Buat query SQL
+    // 2. Buat query SQL untuk mengambil semua role per karyawan
     query := `
-        SELECT k.id_karyawan, k.nama, k.jenis_kelamin, drk.id_role, r.nama_role, k.no_telp, s.jam_mulai, s.jam_selesai
+        SELECT k.id_karyawan, k.nama, k.jenis_kelamin, k.no_telp, s.jam_mulai, s.jam_selesai,
+               GROUP_CONCAT(DISTINCT r.nama_role SEPARATOR ', ') AS roles
         FROM Karyawan k
         INNER JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
         INNER JOIN Role r ON drk.id_role = r.id_role
@@ -449,13 +451,25 @@ func (s *ShiftService) GetKaryawanTanpaShift(idShift int, idRole *int, tanggalSt
         INNER JOIN Shift s ON s.id_shift = ?
         WHERE sk.id_shift_karyawan IS NULL
         AND (drk.id_role = 2 OR drk.id_role = 3)
+        GROUP BY k.id_karyawan, k.nama, k.jenis_kelamin, k.no_telp, s.jam_mulai, s.jam_selesai
     `
     args := []interface{}{idPoli, idShift, tanggalFormatted, idShift}
 
     // 3. Tambahkan filter id_role jika ada
     if idRole != nil {
-        query += " AND drk.id_role = ?"
-        args = append(args, *idRole)
+        var roleName string
+        switch *idRole {
+        case 1:
+            roleName = "Administrasi"
+        case 2:
+            roleName = "Suster"
+        case 3:
+            roleName = "Dokter"
+        default:
+            return nil, fmt.Errorf("id_role %d tidak valid", *idRole)
+        }
+        query += " HAVING GROUP_CONCAT(DISTINCT r.nama_role SEPARATOR ', ') LIKE ?"
+        args = append(args, fmt.Sprintf("%%%s%%", roleName))
     }
 
     // 4. Eksekusi query
@@ -465,27 +479,93 @@ func (s *ShiftService) GetKaryawanTanpaShift(idShift int, idRole *int, tanggalSt
     }
     defer rows.Close()
 
-    // 5. Simpan hasil
-    var results []map[string]interface{}
+    // 5. Simpan hasil sementara
+    var tempResults []struct {
+        idKaryawan   int
+        nama         string
+        jenisKelamin string
+        noTelp       string
+        jamMulai     string
+        jamSelesai   string
+        rolesStr     string
+    }
     for rows.Next() {
-        var idKaryawan int
-        var nama, jenisKelamin, role, noTelp, jamMulai, jamSelesai string
-        var idRole int
-
-        if err := rows.Scan(&idKaryawan, &nama, &jenisKelamin, &idRole, &role, &noTelp, &jamMulai, &jamSelesai); err != nil {
+        var temp struct {
+            idKaryawan   int
+            nama         string
+            jenisKelamin string
+            noTelp       string
+            jamMulai     string
+            jamSelesai   string
+            rolesStr     sql.NullString
+        }
+        if err := rows.Scan(&temp.idKaryawan, &temp.nama, &temp.jenisKelamin, &temp.noTelp, &temp.jamMulai, &temp.jamSelesai, &temp.rolesStr); err != nil {
             return nil, fmt.Errorf("gagal membaca data karyawan: %v", err)
         }
+        var rolesStr string
+        if temp.rolesStr.Valid {
+            rolesStr = temp.rolesStr.String
+        }
+        tempResults = append(tempResults, struct {
+            idKaryawan   int
+            nama         string
+            jenisKelamin string
+            noTelp       string
+            jamMulai     string
+            jamSelesai   string
+            rolesStr     string
+        }{temp.idKaryawan, temp.nama, temp.jenisKelamin, temp.noTelp, temp.jamMulai, temp.jamSelesai, rolesStr})
+    }
 
-        results = append(results, map[string]interface{}{
-            "id_karyawan":   idKaryawan,
-            "nama":          nama,
-            "jenis_kelamin": jenisKelamin,
-            "id_role":       idRole,
-            "role":          role,
-            "nomor_telepon": noTelp,
-            "jam_mulai":     jamMulai,
-            "jam_akhir":     jamSelesai,
-        })
+    // 6. Proses pengelompokan role
+    var results []map[string]interface{}
+    for _, tr := range tempResults {
+        roles := strings.Split(tr.rolesStr, ", ")
+        hasAdminSuster := false
+        hasDokter := false
+        var otherRoles []string
+
+        for _, role := range roles {
+            switch role {
+            case "Administrasi":
+                hasAdminSuster = true
+                otherRoles = append(otherRoles, "Admin")
+            case "Suster":
+                hasAdminSuster = true
+                otherRoles = append(otherRoles, "Suster")
+            case "Dokter":
+                hasDokter = true
+            }
+        }
+
+        // Gabungkan Admin dan Suster jika ada
+        if hasAdminSuster {
+            if len(otherRoles) > 0 {
+                record := map[string]interface{}{
+                    "id_karyawan":   tr.idKaryawan,
+                    "nama":          tr.nama,
+                    "jenis_kelamin": tr.jenisKelamin,
+                    "roles":         strings.Join(otherRoles, ", "),
+                    "nomor_telepon": tr.noTelp,
+                    "jam_mulai":     tr.jamMulai,
+                    "jam_akhir":     tr.jamSelesai,
+                }
+                results = append(results, record)
+            }
+        }
+        // Tambahkan record terpisah untuk Dokter jika ada
+        if hasDokter {
+            record := map[string]interface{}{
+                "id_karyawan":   tr.idKaryawan,
+                "nama":          tr.nama,
+                "jenis_kelamin": tr.jenisKelamin,
+                "roles":         "Dokter",
+                "nomor_telepon": tr.noTelp,
+                "jam_mulai":     tr.jamMulai,
+                "jam_akhir":     tr.jamSelesai,
+            }
+            results = append(results, record)
+        }
     }
 
     return results, nil

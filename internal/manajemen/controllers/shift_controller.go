@@ -357,6 +357,7 @@ func (mc *ShiftController) GetKaryawanTanpaShiftHandler(c echo.Context) error {
     })
 }
 
+
 // AssignShiftHandler menerima query parameter id_poli, id_shift, tanggal,
 // dan request body berisi array dari AssignShiftRequest.
 // id_management diambil dari JWT.
