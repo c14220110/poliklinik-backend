@@ -255,13 +255,14 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 
 	return karyawan.IDKaryawan, nil
 }
+
 func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statusFilter string, idKaryawanFilter string, page int, limit int) ([]map[string]interface{}, error) {
 	// Base query dengan GROUP BY untuk mengelompokkan per karyawan dan menggabungkan role serta privilege
 	baseQuery := `
 		SELECT 
 			k.id_karyawan, 
-			GROUP_CONCAT(r.nama_role SEPARATOR ', ') AS roles,
-			GROUP_CONCAT(dp.id_privilege SEPARATOR ', ') AS privileges,
+			GROUP_CONCAT(DISTINCT r.nama_role SEPARATOR ', ') AS roles,
+			GROUP_CONCAT(DISTINCT dp.id_privilege SEPARATOR ', ') AS privileges,
 			k.nama,
 			k.username,
 			k.nik,
@@ -349,18 +350,33 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 			"tanggal_lahir": nil,
 			"alamat":        alamat,
 			"no_telp":       noTelp,
+			"nomor_sip":     nil,
 		}
 		if roles.Valid {
-			record["roles"] = strings.Split(roles.String, ", ")
+			roleList := strings.Split(roles.String, ", ")
+			// Filter out duplicates manually if DISTINCT fails (just to be safe)
+			roleMap := make(map[string]bool)
+			var uniqueRoles []string
+			for _, role := range roleList {
+				if role != "" && !roleMap[role] {
+					roleMap[role] = true
+					uniqueRoles = append(uniqueRoles, role)
+				}
+			}
+			if len(uniqueRoles) > 0 {
+				record["roles"] = uniqueRoles
+			}
 		}
 		if privileges.Valid {
 			// Konversi string privileges ke array integer
 			privStr := strings.Split(privileges.String, ", ")
+			privMap := make(map[int]bool)
 			var privInt []int
 			for _, p := range privStr {
 				if p != "" { // Pastikan tidak ada string kosong
 					pInt, err := strconv.Atoi(p)
-					if err == nil {
+					if err == nil && !privMap[pInt] {
+						privMap[pInt] = true
 						privInt = append(privInt, pInt)
 					}
 				}
@@ -379,6 +395,7 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 	}
 	return list, nil
 }
+
 func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy int) error {
 	// 1. Update kolom deleted_at di tabel Karyawan
 	queryKaryawan := `UPDATE Karyawan SET deleted_at = NOW() WHERE id_karyawan = ?`

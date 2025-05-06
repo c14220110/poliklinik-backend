@@ -161,6 +161,7 @@ func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
 		"data":    list,
 	})
 }
+
 func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 	// Ambil id_karyawan dari query parameter
 	idKaryawanStr := c.QueryParam("id_karyawan")
