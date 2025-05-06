@@ -413,46 +413,59 @@ func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy int) er
 
 	return nil
 }
-
 func (s *ManagementService) AddPrivilegesToKaryawan(idKaryawan int, privileges []int) error {
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("gagal memulai transaksi: %v", err)
 	}
+
 	// Pastikan rollback jika terjadi error
 	defer func() {
 		if err != nil {
 			tx.Rollback()
+			return
+		}
+		err = tx.Commit()
+		if err != nil {
+			err = fmt.Errorf("gagal menyelesaikan transaksi: %v", err)
 		}
 	}()
-	
+
 	// 1. Hapus semua privilege lama untuk karyawan ini
-	_, err = tx.Exec("DELETE FROM Detail_Privilege_Karyawan WHERE id_karyawan = ?", idKaryawan)
+	result, err := tx.Exec("DELETE FROM Detail_Privilege_Karyawan WHERE id_karyawan = ?", idKaryawan)
 	if err != nil {
-		return fmt.Errorf("gagal menghapus privilege lama: %v", err)
+		return fmt.Errorf("gagal menghapus privilege lama untuk id_karyawan %d: %v", idKaryawan, err)
 	}
-	
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("gagal memeriksa jumlah baris yang dihapus: %v", err)
+	}
+	if rowsAffected > 0 {
+		fmt.Printf("Berhasil menghapus %d privilege lama untuk id_karyawan %d\n", rowsAffected, idKaryawan)
+	}
+
 	// 2. Loop untuk setiap privilege baru yang akan ditambahkan
 	for _, priv := range privileges {
+		if priv <= 0 {
+			return fmt.Errorf("id_privilege %d tidak valid, harus lebih besar dari 0", priv)
+		}
+
 		// Validasi apakah privilege ada di tabel Privilege
 		var exists int
 		err = tx.QueryRow("SELECT COUNT(*) FROM Privilege WHERE id_privilege = ?", priv).Scan(&exists)
 		if err != nil {
-			return fmt.Errorf("gagal memeriksa privilege %d: %v", priv, err)
+			return fmt.Errorf("gagal memverifikasi privilege %d: %v", priv, err)
 		}
 		if exists == 0 {
-			return fmt.Errorf("privilege %d tidak ditemukan", priv)
+			return fmt.Errorf("privilege dengan id %d tidak ditemukan di tabel Privilege", priv)
 		}
-		
+
 		// Insert privilege baru
 		_, err = tx.Exec("INSERT INTO Detail_Privilege_Karyawan (id_privilege, id_karyawan) VALUES (?, ?)", priv, idKaryawan)
 		if err != nil {
 			return fmt.Errorf("gagal menambahkan privilege %d untuk karyawan %d: %v", priv, idKaryawan, err)
 		}
 	}
-	
-	if err = tx.Commit(); err != nil {
-		return err
-	}
+
 	return nil
 }

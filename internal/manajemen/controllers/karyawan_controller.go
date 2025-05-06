@@ -325,19 +325,20 @@ func (kc *KaryawanController) AddPrivilegeHandler(c echo.Context) error {
 	if idKaryawanStr == "" {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "id_karyawan harus disediakan",
+			"message": "Parameter id_karyawan wajib diisi",
 			"data":    nil,
 		})
 	}
+
 	idKaryawan, err := strconv.Atoi(idKaryawanStr)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "id_karyawan harus berupa angka",
+			"message": "id_karyawan harus berupa angka yang valid",
 			"data":    nil,
 		})
 	}
-	
+
 	// Parsing request body berupa array privilege
 	var req struct {
 		Privileges []int `json:"privileges"`
@@ -345,10 +346,11 @@ func (kc *KaryawanController) AddPrivilegeHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "Invalid request body: " + err.Error(),
+			"message": "Gagal memproses body request: " + err.Error(),
 			"data":    nil,
 		})
 	}
+
 	if len(req.Privileges) == 0 {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
@@ -356,20 +358,22 @@ func (kc *KaryawanController) AddPrivilegeHandler(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-	
+
 	// Panggil service untuk menambahkan privilege
 	err = kc.Service.AddPrivilegesToKaryawan(idKaryawan, req.Privileges)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
-			"message": "Failed to add privileges: " + err.Error(),
+			"message": "Gagal menambahkan privilege: " + err.Error(),
 			"data":    nil,
 		})
 	}
-	
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  http.StatusOK,
-		"message": "Privileges added successfully",
-		"data":    nil,
+		"message": "Privilege berhasil ditambahkan",
+		"data": map[string]interface{}{
+			"id_karyawan": idKaryawan,
+		},
 	})
 }
