@@ -30,6 +30,7 @@ type AddKaryawanRequest struct {
 type UpdateKaryawanRequest struct {
 	NIK          string   `json:"nik"`
 	Nama         string   `json:"nama"`
+	JenisKelamin string   `json:"jenis_kelamin"` // Added field
 	Username     string   `json:"username"`
 	Password     string   `json:"password"`
 	TanggalLahir string   `json:"tanggal_lahir"`
@@ -170,10 +171,10 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 	}
 
 	// Validasi minimal field
-	if req.NIK == "" || req.Nama == "" || req.Username == "" || req.Password == "" {
+	if req.NIK == "" || req.Nama == "" || req.Username == "" || req.Password == "" || req.JenisKelamin == "" {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
-			"message": "nik, nama, username, and password are required",
+			"message": "nik, nama, username, password, and jenis_kelamin are required",
 			"data":    nil,
 		})
 	}
@@ -192,6 +193,7 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 		IDKaryawan:   idKaryawan,
 		NIK:          req.NIK,
 		Nama:         req.Nama,
+		JenisKelamin: req.JenisKelamin, // Map the new field
 		Username:     req.Username,
 		Password:     req.Password,
 		TanggalLahir: parsedDate,
@@ -238,7 +240,6 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 		},
 	})
 }
-
 
 
 func (kc *KaryawanController) SoftDeleteKaryawanHandler(c echo.Context) error {

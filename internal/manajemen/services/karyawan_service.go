@@ -139,6 +139,7 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, roles []string
 }
 
 
+// Service Layer
 func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []string, idManagement int) (int64, error) {
 	// Mulai transaksi
 	tx, err := s.DB.Begin()
@@ -189,10 +190,10 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 	}
 	karyawan.Password = string(hashedPassword)
 
-	// 5. Update record Karyawan
+	// 5. Update record Karyawan, termasuk jenis_kelamin
 	updateKaryawan := `
 		UPDATE Karyawan 
-		SET nama = ?, username = ?, password = ?, nik = ?, tanggal_lahir = ?, alamat = ?, no_telp = ?
+		SET nama = ?, username = ?, password = ?, nik = ?, tanggal_lahir = ?, alamat = ?, no_telp = ?, jenis_kelamin = ?
 		WHERE id_karyawan = ?
 	`
 	_, err = tx.Exec(updateKaryawan,
@@ -203,6 +204,7 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 		karyawan.TanggalLahir,
 		karyawan.Alamat,
 		karyawan.NoTelp,
+		karyawan.JenisKelamin, // Added to update query
 		karyawan.IDKaryawan,
 	)
 	if err != nil {
@@ -253,7 +255,6 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 
 	return karyawan.IDKaryawan, nil
 }
-
 func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statusFilter string, idKaryawanFilter string) ([]map[string]interface{}, error) {
 	// Base query dengan GROUP BY untuk mengelompokkan per karyawan dan menggabungkan role
 	baseQuery := `
