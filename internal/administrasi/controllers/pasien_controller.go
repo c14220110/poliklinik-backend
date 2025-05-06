@@ -580,3 +580,21 @@ func (pc *PasienController) GetDetailAntrianHandler(c echo.Context) error {
         "data":    detail,
     })
 }
+
+// GetAgamaList handles the GET request to fetch the list of religions
+func (pc *PasienController) GetAgamaList(c echo.Context) error {
+	agamaList, err := pc.Service.GetAgamaList()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve agama list: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Agama list retrieved successfully",
+		"data":    agamaList,
+	})
+}

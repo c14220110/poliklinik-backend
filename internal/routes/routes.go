@@ -93,6 +93,8 @@ func Init(e *echo.Echo, db *sql.DB) {
 	administrasi.GET("/antrian/today", pasienController.GetAntrianTodayHandler, middlewares.JWTMiddleware())
 	administrasi.GET("/status_antrian", pasienController.GetAllStatusAntrianHandler, middlewares.JWTMiddleware())
 	administrasi.GET("/poliklinik", poliklinikController.GetPoliklinikList)
+	administrasi.GET("/agama", pasienController.GetAgamaList, middlewares.JWTMiddleware())
+
 	administrasi.PUT("/antrian/batalkan", pasienController.BatalkanAntrianHandler, middlewares.JWTMiddleware())
 	administrasi.GET("/detail-antrian", pasienController.GetDetailAntrianHandler, middlewares.JWTMiddleware())
 

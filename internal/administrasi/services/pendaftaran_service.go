@@ -818,3 +818,32 @@ func (s *PendaftaranService) GetDetailAntrianByID(idAntrian int) (map[string]int
     }
     return result, nil
 }
+
+
+type Agama struct {
+	IDAgama int    `json:"id_agama"`
+	Nama    string `json:"nama"`
+}
+// GetAgamaList retrieves the list of religions from the Agama table
+func (s *PendaftaranService) GetAgamaList() ([]Agama, error) {
+	rows, err := s.DB.Query("SELECT id_agama, nama FROM Agama ORDER BY nama ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var agamaList []Agama
+	for rows.Next() {
+		var agama Agama
+		if err := rows.Scan(&agama.IDAgama, &agama.Nama); err != nil {
+			return nil, err
+		}
+		agamaList = append(agamaList, agama)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return agamaList, nil
+}
