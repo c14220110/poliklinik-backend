@@ -450,7 +450,6 @@ func (s *ShiftService) GetKaryawanTanpaShift(idShift int, idRole *int, tanggalSt
             AND sk.tanggal = ?
         INNER JOIN Shift s ON s.id_shift = ?
         WHERE sk.id_shift_karyawan IS NULL
-        AND (drk.id_role = 2 OR drk.id_role = 3)
         GROUP BY k.id_karyawan, k.nama, k.jenis_kelamin, k.no_telp, s.jam_mulai, s.jam_selesai
     `
     args := []interface{}{idPoli, idShift, tanggalFormatted, idShift}
@@ -526,7 +525,8 @@ func (s *ShiftService) GetKaryawanTanpaShift(idShift int, idRole *int, tanggalSt
         var otherRoles []string
 
         for _, role := range roles {
-            switch role {
+            trimmedRole := strings.TrimSpace(role)
+            switch trimmedRole {
             case "Administrasi":
                 hasAdminSuster = true
                 otherRoles = append(otherRoles, "Admin")
@@ -539,19 +539,17 @@ func (s *ShiftService) GetKaryawanTanpaShift(idShift int, idRole *int, tanggalSt
         }
 
         // Gabungkan Admin dan Suster jika ada
-        if hasAdminSuster {
-            if len(otherRoles) > 0 {
-                record := map[string]interface{}{
-                    "id_karyawan":   tr.idKaryawan,
-                    "nama":          tr.nama,
-                    "jenis_kelamin": tr.jenisKelamin,
-                    "roles":         strings.Join(otherRoles, ", "),
-                    "nomor_telepon": tr.noTelp,
-                    "jam_mulai":     tr.jamMulai,
-                    "jam_akhir":     tr.jamSelesai,
-                }
-                results = append(results, record)
+        if hasAdminSuster && len(otherRoles) > 0 {
+            record := map[string]interface{}{
+                "id_karyawan":   tr.idKaryawan,
+                "nama":          tr.nama,
+                "jenis_kelamin": tr.jenisKelamin,
+                "roles":         strings.Join(otherRoles, ", "),
+                "nomor_telepon": tr.noTelp,
+                "jam_mulai":     tr.jamMulai,
+                "jam_akhir":     tr.jamSelesai,
             }
+            results = append(results, record)
         }
         // Tambahkan record terpisah untuk Dokter jika ada
         if hasDokter {
