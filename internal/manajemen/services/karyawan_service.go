@@ -255,12 +255,13 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 
 	return karyawan.IDKaryawan, nil
 }
-func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statusFilter string, idKaryawanFilter string) ([]map[string]interface{}, error) {
-	// Base query dengan GROUP BY untuk mengelompokkan per karyawan dan menggabungkan role
+func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statusFilter string, idKaryawanFilter string, page int, limit int) ([]map[string]interface{}, error) {
+	// Base query dengan GROUP BY untuk mengelompokkan per karyawan dan menggabungkan role serta privilege
 	baseQuery := `
 		SELECT 
 			k.id_karyawan, 
 			GROUP_CONCAT(r.nama_role SEPARATOR ', ') AS roles,
+			GROUP_CONCAT(dp.id_privilege SEPARATOR ', ') AS privileges,
 			k.nama,
 			k.username,
 			k.nik,
@@ -271,6 +272,7 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 		FROM Karyawan k
 		LEFT JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
 		LEFT JOIN Role r ON drk.id_role = r.id_role
+		LEFT JOIN Detail_Privilege_Karyawan dp ON k.id_karyawan = dp.id_karyawan
 	`
 	conditions := []string{}
 	params := []interface{}{}
@@ -293,7 +295,6 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 			roleConditions = append(roleConditions, "r.nama_role = ?")
 			params = append(params, strings.TrimSpace(role))
 		}
-		// Menggunakan OR untuk mencari karyawan yang memiliki setidaknya salah satu role
 		conditions = append(conditions, "("+strings.Join(roleConditions, " OR ")+")")
 	}
 
@@ -313,6 +314,10 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 	}
 	query += " GROUP BY k.id_karyawan"
 	query += " ORDER BY k.id_karyawan"
+	// Tambahkan pagination
+	offset := (page - 1) * limit
+	query += " LIMIT ? OFFSET ?"
+	params = append(params, limit, offset)
 
 	rows, err := s.DB.Query(query, params...)
 	if err != nil {
@@ -324,18 +329,20 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 	for rows.Next() {
 		var idKaryawan int
 		var roles sql.NullString
+		var privileges sql.NullString
 		var nama, username, nik string
 		var tanggalLahir sql.NullTime
 		var alamat, noTelp string
 		var nomorSip sql.NullString
 
-		if err := rows.Scan(&idKaryawan, &roles, &nama, &username, &nik, &tanggalLahir, &alamat, &noTelp, &nomorSip); err != nil {
+		if err := rows.Scan(&idKaryawan, &roles, &privileges, &nama, &username, &nik, &tanggalLahir, &alamat, &noTelp, &nomorSip); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
 
 		record := map[string]interface{}{
 			"id_karyawan":   idKaryawan,
 			"roles":         nil,
+			"privileges":    nil,
 			"nama":          nama,
 			"username":      username,
 			"nik":           nik,
@@ -345,6 +352,22 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 		}
 		if roles.Valid {
 			record["roles"] = strings.Split(roles.String, ", ")
+		}
+		if privileges.Valid {
+			// Konversi string privileges ke array integer
+			privStr := strings.Split(privileges.String, ", ")
+			var privInt []int
+			for _, p := range privStr {
+				if p != "" { // Pastikan tidak ada string kosong
+					pInt, err := strconv.Atoi(p)
+					if err == nil {
+						privInt = append(privInt, pInt)
+					}
+				}
+			}
+			if len(privInt) > 0 {
+				record["privileges"] = privInt
+			}
 		}
 		if tanggalLahir.Valid {
 			record["tanggal_lahir"] = tanggalLahir.Time.Format("2006-01-02")
@@ -356,7 +379,6 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 	}
 	return list, nil
 }
-
 func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy int) error {
 	// 1. Update kolom deleted_at di tabel Karyawan
 	queryKaryawan := `UPDATE Karyawan SET deleted_at = NOW() WHERE id_karyawan = ?`

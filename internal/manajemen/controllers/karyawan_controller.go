@@ -121,11 +121,32 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 }
 
 func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
-	namaRole := c.QueryParam("nama_role") // Menggunakan nama_role sebagai query parameter
+	namaRole := c.QueryParam("nama_role")
 	status := c.QueryParam("status")
 	idKaryawan := c.QueryParam("id_karyawan")
 
-	list, err := kc.Service.GetKaryawanListFiltered(namaRole, status, idKaryawan)
+	// Pagination parameters
+	pageStr := c.QueryParam("page")
+	limitStr := c.QueryParam("limit")
+
+	// Default pagination values
+	page := 1
+	limit := 10
+	var err error
+	if pageStr != "" {
+		page, err = strconv.Atoi(pageStr)
+		if err != nil || page < 1 {
+			page = 1
+		}
+	}
+	if limitStr != "" {
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil || limit < 1 {
+			limit = 10
+		}
+	}
+
+	list, err := kc.Service.GetKaryawanListFiltered(namaRole, status, idKaryawan, page, limit)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
@@ -140,7 +161,6 @@ func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
 		"data":    list,
 	})
 }
-
 func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 	// Ambil id_karyawan dari query parameter
 	idKaryawanStr := c.QueryParam("id_karyawan")
