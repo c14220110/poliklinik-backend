@@ -11,7 +11,7 @@ import (
 )
 
 
-func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, idManagement, createdBy, updatedBy int) (int64, error) {
+func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, roles []string, idManagement, createdBy, updatedBy int) (int64, error) {
 	// Mulai transaksi
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -48,22 +48,26 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 		}
 	}
 
-	// 2. Cek apakah Role sudah ada
-	var idRole int64
-	err = tx.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", role).Scan(&idRole)
-	if err == sql.ErrNoRows {
-		// Jika tidak ada, insert role baru
-		insertRole := "INSERT INTO Role (nama_role) VALUES (?)"
-		res, err := tx.Exec(insertRole, role)
-		if err != nil {
-			return 0, fmt.Errorf("gagal menambahkan role: %v", err)
+	// 2. Cek dan tambahkan role jika belum ada, lalu kumpulkan id_role
+	roleIDs := make([]int64, 0, len(roles))
+	for _, role := range roles {
+		var idRole int64
+		err = tx.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", role).Scan(&idRole)
+		if err == sql.ErrNoRows {
+			// Jika role tidak ada, insert role baru
+			insertRole := "INSERT INTO Role (nama_role) VALUES (?)"
+			res, err := tx.Exec(insertRole, role)
+			if err != nil {
+				return 0, fmt.Errorf("gagal menambahkan role %s: %v", role, err)
+			}
+			idRole, err = res.LastInsertId()
+			if err != nil {
+				return 0, fmt.Errorf("gagal mendapatkan ID Role untuk %s: %v", role, err)
+			}
+		} else if err != nil {
+			return 0, fmt.Errorf("gagal memeriksa role %s: %v", role, err)
 		}
-		idRole, err = res.LastInsertId()
-		if err != nil {
-			return 0, fmt.Errorf("gagal mendapatkan ID Role: %v", err)
-		}
-	} else if err != nil {
-		return 0, fmt.Errorf("gagal memeriksa role: %v", err)
+		roleIDs = append(roleIDs, idRole)
 	}
 
 	// 4. Hash password sebelum disimpan
@@ -114,14 +118,16 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, role string, i
 		return 0, fmt.Errorf("gagal mencatat di Management_Karyawan: %v", err)
 	}
 
-	// 7. Insert record di Detail_Role_Karyawan
+	// 7. Insert record di Detail_Role_Karyawan untuk setiap role
 	insertDetailRole := `
 		INSERT INTO Detail_Role_Karyawan (id_role, id_karyawan)
 		VALUES (?, ?)
 	`
-	_, err = tx.Exec(insertDetailRole, idRole, newID)
-	if err != nil {
-		return 0, fmt.Errorf("gagal mencatat di Detail_Role_Karyawan: %v", err)
+	for _, idRole := range roleIDs {
+		_, err = tx.Exec(insertDetailRole, idRole, newID)
+		if err != nil {
+			return 0, fmt.Errorf("gagal mencatat role ID %d di Detail_Role_Karyawan: %v", idRole, err)
+		}
 	}
 
 	// Commit transaksi
@@ -247,13 +253,12 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, role string
 	return karyawan.IDKaryawan, nil
 }
 
-
-
 func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statusFilter string, idKaryawanFilter string) ([]map[string]interface{}, error) {
+	// Base query dengan GROUP BY untuk mengelompokkan per karyawan dan menggabungkan role
 	baseQuery := `
 		SELECT 
 			k.id_karyawan, 
-			r.nama_role,
+			GROUP_CONCAT(r.nama_role SEPARATOR ', ') AS roles,
 			k.nama,
 			k.username,
 			k.nik,
@@ -262,8 +267,8 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 			k.no_telp,
 			k.sip AS nomor_sip
 		FROM Karyawan k
-		JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
-		JOIN Role r ON drk.id_role = r.id_role
+		LEFT JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
+		LEFT JOIN Role r ON drk.id_role = r.id_role
 	`
 	conditions := []string{}
 	params := []interface{}{}
@@ -280,8 +285,14 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 
 	// Filter berdasarkan nama_role jika disediakan
 	if namaRoleFilter != "" {
-		conditions = append(conditions, "r.nama_role = ?")
-		params = append(params, namaRoleFilter)
+		roleNames := strings.Split(namaRoleFilter, ",")
+		roleConditions := []string{}
+		for _, role := range roleNames {
+			roleConditions = append(roleConditions, "r.nama_role = ?")
+			params = append(params, strings.TrimSpace(role))
+		}
+		// Menggunakan OR untuk mencari karyawan yang memiliki setidaknya salah satu role
+		conditions = append(conditions, "("+strings.Join(roleConditions, " OR ")+")")
 	}
 
 	// Filter berdasarkan status
@@ -298,6 +309,7 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
+	query += " GROUP BY k.id_karyawan"
 	query += " ORDER BY k.id_karyawan"
 
 	rows, err := s.DB.Query(query, params...)
@@ -309,19 +321,19 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 	var list []map[string]interface{}
 	for rows.Next() {
 		var idKaryawan int
-		var namaRole sql.NullString
+		var roles sql.NullString
 		var nama, username, nik string
 		var tanggalLahir sql.NullTime
 		var alamat, noTelp string
 		var nomorSip sql.NullString
 
-		if err := rows.Scan(&idKaryawan, &namaRole, &nama, &username, &nik, &tanggalLahir, &alamat, &noTelp, &nomorSip); err != nil {
+		if err := rows.Scan(&idKaryawan, &roles, &nama, &username, &nik, &tanggalLahir, &alamat, &noTelp, &nomorSip); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
 
 		record := map[string]interface{}{
 			"id_karyawan":   idKaryawan,
-			"nama_role":     nil,
+			"roles":         nil,
 			"nama":          nama,
 			"username":      username,
 			"nik":           nik,
@@ -329,8 +341,8 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 			"alamat":        alamat,
 			"no_telp":       noTelp,
 		}
-		if namaRole.Valid {
-			record["nama_role"] = namaRole.String
+		if roles.Valid {
+			record["roles"] = strings.Split(roles.String, ", ")
 		}
 		if tanggalLahir.Valid {
 			record["tanggal_lahir"] = tanggalLahir.Time.Format("2006-01-02")
@@ -342,6 +354,7 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 	}
 	return list, nil
 }
+
 func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy string) error {
 	// 1. Update kolom deleted_at di tabel Karyawan
 	queryKaryawan := `UPDATE Karyawan SET deleted_at = NOW() WHERE id_karyawan = ?`

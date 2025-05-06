@@ -13,17 +13,18 @@ import (
 )
 
 type AddKaryawanRequest struct {
-	NIK          string `json:"nik"`
-	Nama         string `json:"nama"`
-	JenisKelamin string `json:"jenis_kelamin"`  // ditambahkan
-	TanggalLahir string `json:"tanggal_lahir"`
-	Alamat       string `json:"alamat"`
-	NoTelp       string `json:"no_telp"`
-	Role         string `json:"role"`
-	NomorSIP     string `json:"nomor_sip"` // Added new field
-	Username     string `json:"username"`
-	Password     string `json:"password"`
+	NIK          string   `json:"nik"`
+	Nama         string   `json:"nama"`
+	JenisKelamin string   `json:"jenis_kelamin"`
+	TanggalLahir string   `json:"tanggal_lahir"`
+	Alamat       string   `json:"alamat"`
+	NoTelp       string   `json:"no_telp"`
+	Roles        []string `json:"roles"` // Changed from Role string to Roles []string
+	NomorSIP     string   `json:"nomor_sip"`
+	Username     string   `json:"username"`
+	Password     string   `json:"password"`
 }
+
 
 
 type UpdateKaryawanRequest struct {
@@ -66,7 +67,7 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 		})
 	}
 
-	// Buat objek Karyawan, termasuk field jenis_kelamin dan sip
+	// Buat objek Karyawan
 	karyawan := models.Karyawan{
 		NIK:          req.NIK,
 		Nama:         req.Nama,
@@ -76,7 +77,7 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 		NoTelp:       req.NoTelp,
 		Username:     req.Username,
 		Password:     req.Password,
-		Sip:          req.NomorSIP, // Map nomor_sip to sip
+		Sip:          req.NomorSIP,
 	}
 
 	// Ambil klaim JWT dari context
@@ -99,8 +100,8 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 		})
 	}
 
-	// Panggil service untuk menambahkan karyawan
-	idKaryawan, err := kc.Service.AddKaryawan(karyawan, req.Role, idManagement, idManagement, idManagement)
+	// Panggil service untuk menambahkan karyawan dengan multiple roles
+	idKaryawan, err := kc.Service.AddKaryawan(karyawan, req.Roles, idManagement, idManagement, idManagement)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
