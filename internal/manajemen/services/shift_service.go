@@ -171,10 +171,10 @@ func (s *ShiftService) UpdateCustomShift(idShiftKaryawan int, newCustomMulai, ne
 		AND sk.tanggal = ? 
 		AND sk.id_shift_karyawan != ?
 		AND (
-			(STR_TO_TIME(?, '%H:%i:%s') <= STR_TO_TIME(sk.custom_jam_selesai, '%H:%i:%s') 
-				AND STR_TO_TIME(?, '%H:%i:%s') >= STR_TO_TIME(sk.custom_jam_mulai, '%H:%i:%s'))
-			OR (STR_TO_TIME(?, '%H:%i:%s') <= STR_TO_TIME(sk.custom_jam_selesai, '%H:%i:%s') 
-				AND STR_TO_TIME(?, '%H:%i:%s') >= STR_TO_TIME(sk.custom_jam_mulai, '%H:%i:%s'))
+			(CAST(? AS TIME) <= sk.custom_jam_selesai 
+				AND CAST(? AS TIME) >= sk.custom_jam_mulai)
+			OR (CAST(? AS TIME) <= sk.custom_jam_selesai 
+				AND CAST(? AS TIME) >= sk.custom_jam_mulai)
 		)
 	`
 	var overlapCount int
@@ -216,6 +216,8 @@ func (s *ShiftService) UpdateCustomShift(idShiftKaryawan int, newCustomMulai, ne
 
 	return nil
 }
+
+
 func (s *ShiftService) SoftDeleteShiftKaryawan(idShiftKaryawan int, idManagement int) error {
 	// Update deleted_by dari NULL menjadi idManagement untuk record yang belum dihapus
 	updateQuery := `
