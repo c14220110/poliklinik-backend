@@ -256,6 +256,8 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 	return karyawan.IDKaryawan, nil
 }
 
+
+// GetKaryawanListFiltered mengambil daftar karyawan dengan filter tertentu
 func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statusFilter string, idKaryawanFilter string, page int, limit int) ([]map[string]interface{}, error) {
 	// Base query dengan GROUP BY untuk mengelompokkan per karyawan dan menggabungkan role serta privilege
 	baseQuery := `
@@ -266,6 +268,7 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 			k.nama,
 			k.username,
 			k.nik,
+			k.jenis_kelamin,
 			k.tanggal_lahir,
 			k.alamat,
 			k.no_telp,
@@ -331,12 +334,12 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 		var idKaryawan int
 		var roles sql.NullString
 		var privileges sql.NullString
-		var nama, username, nik string
+		var nama, username, nik, jenisKelamin string
 		var tanggalLahir sql.NullTime
 		var alamat, noTelp string
 		var nomorSip sql.NullString
 
-		if err := rows.Scan(&idKaryawan, &roles, &privileges, &nama, &username, &nik, &tanggalLahir, &alamat, &noTelp, &nomorSip); err != nil {
+		if err := rows.Scan(&idKaryawan, &roles, &privileges, &nama, &username, &nik, &jenisKelamin, &tanggalLahir, &alamat, &noTelp, &nomorSip); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
 
@@ -347,6 +350,7 @@ func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statu
 			"nama":          nama,
 			"username":      username,
 			"nik":           nik,
+			"jenis_kelamin": jenisKelamin,
 			"tanggal_lahir": nil,
 			"alamat":        alamat,
 			"no_telp":       noTelp,
