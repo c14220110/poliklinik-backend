@@ -592,7 +592,7 @@ func (s *ShiftService) GetKaryawanTanpaShift(idShift int, idRole *int, tanggalSt
 // AssignShiftRequest adalah struktur untuk request assign shift
 type AssignShiftRequest struct {
 	IDKaryawan int      `json:"id_karyawan"`
-	NamaRole   []string `json:"nama_role"` // Ubah dari IDRole ke NamaRole sebagai array
+	NamaRole   []string `json:"nama_role"`
 	JamMulai   string   `json:"jam_mulai"`
 	JamAkhir   string   `json:"jam_akhir"`
 }
@@ -674,12 +674,22 @@ func (s *ShiftService) AssignShiftNew(idPoli, idShift, idManagement int, tanggal
 			"Dokter":       3,
 		}
 
+		// Track role yang sudah diproses untuk karyawan ini dalam transaksi
+		processedRoles := make(map[int]bool)
+
 		for _, roleName := range req.NamaRole {
 			idRole, ok := roleMap[roleName]
 			if !ok {
 				tx.Rollback()
 				return fmt.Errorf("nama_role %s untuk karyawan %d tidak valid", roleName, req.IDKaryawan)
 			}
+
+			// Cek apakah role sudah diproses untuk karyawan ini dalam transaksi
+			if processedRoles[idRole] {
+				tx.Rollback()
+				return fmt.Errorf("role %s untuk karyawan %d duplikat dalam request", roleName, req.IDKaryawan)
+			}
+			processedRoles[idRole] = true
 
 			// 6. Cek apakah karyawan memiliki role yang sesuai
 			var roleCount int
@@ -696,27 +706,27 @@ func (s *ShiftService) AssignShiftNew(idPoli, idShift, idManagement int, tanggal
 				return fmt.Errorf("karyawan dengan id %d tidak memiliki role %s", req.IDKaryawan, roleName)
 			}
 
-			// 7. Cek apakah karyawan sudah memiliki shift yang sama di poli pada tanggal ini
+			// 7. Cek apakah karyawan sudah memiliki shift dengan role yang sama
 			var existingCount int
 			err = tx.QueryRow(
-				"SELECT COUNT(*) FROM Shift_Karyawan WHERE id_karyawan = ? AND id_poli = ? AND id_shift = ? AND tanggal = ?",
-				req.IDKaryawan, idPoli, idShift, tanggalFormatted,
+				"SELECT COUNT(*) FROM Shift_Karyawan WHERE id_karyawan = ? AND id_poli = ? AND id_shift = ? AND tanggal = ? AND id_role = ?",
+				req.IDKaryawan, idPoli, idShift, tanggalFormatted, idRole,
 			).Scan(&existingCount)
 			if err != nil {
 				tx.Rollback()
-				return fmt.Errorf("gagal memeriksa shift yang ada untuk karyawan %d: %v", req.IDKaryawan, err)
+				return fmt.Errorf("gagal memeriksa shift yang ada untuk karyawan %d dengan role %s: %v", req.IDKaryawan, roleName, err)
 			}
 			if existingCount > 0 {
 				tx.Rollback()
-				return fmt.Errorf("karyawan %d sudah memiliki shift %d di poli %d pada tanggal %s", req.IDKaryawan, idShift, idPoli, tanggalStr)
+				return fmt.Errorf("karyawan %d sudah memiliki shift %d di poli %d pada tanggal %s dengan role %s", req.IDKaryawan, idShift, idPoli, tanggalStr, roleName)
 			}
 
 			// 8. Insert ke tabel Shift_Karyawan untuk setiap role
 			insertQuery := `
-				INSERT INTO Shift_Karyawan (id_poli, id_shift, id_karyawan, custom_jam_mulai, custom_jam_selesai, tanggal)
-				VALUES (?, ?, ?, ?, ?, ?)
+				INSERT INTO Shift_Karyawan (id_poli, id_shift, id_karyawan, id_role, custom_jam_mulai, custom_jam_selesai, tanggal)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
 			`
-			res, err := tx.Exec(insertQuery, idPoli, idShift, req.IDKaryawan, req.JamMulai, req.JamAkhir, tanggalFormatted)
+			res, err := tx.Exec(insertQuery, idPoli, idShift, req.IDKaryawan, idRole, req.JamMulai, req.JamAkhir, tanggalFormatted)
 			if err != nil {
 				tx.Rollback()
 				return fmt.Errorf("gagal memasukkan shift untuk karyawan %d dengan role %s: %v", req.IDKaryawan, roleName, err)
