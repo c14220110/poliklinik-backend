@@ -18,99 +18,102 @@ type ResepService struct{ DB *sql.DB }
 
 func NewResepService(db *sql.DB) *ResepService { return &ResepService{DB: db} }
 
-// CreateResep menyimpan resep obat & racikan, kemudian menautkannya
-// ke tabel Riwayat_Kunjungan.id_resep  (transaksi penuh)
+// CreateResep:
+//   • Memastikan id_kunjungan valid
+//   • Menghitung total harga dari setiap section (grandTotal)
+//   • Menulis E_Resep, Resep_Section, Komposisi   —  semuanya di dalam transaksi
+//   • Menautkan id_resep ke Riwayat_Kunjungan
 func (s *ResepService) CreateResep(req dmodels.ResepRequest) (int64, error) {
+    tx, err := s.DB.Begin()
+    if err != nil {
+        return 0, err
+    }
 
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return 0, err
-	}
+    // 0. Validasi id_kunjungan
+    var dummy int
+    if err := tx.QueryRow("SELECT 1 FROM Riwayat_Kunjungan WHERE id_kunjungan = ?", req.IDKunjungan).Scan(&dummy); err != nil {
+        tx.Rollback()
+        if err == sql.ErrNoRows {
+            return 0, ErrKunjunganNotFound
+        }
+        return 0, err
+    }
 
-	// Pastikan id_kunjungan valid
-	var exists int
-	if err := tx.QueryRow("SELECT 1 FROM Riwayat_Kunjungan WHERE id_kunjungan = ?", req.IDKunjungan).Scan(&exists); err != nil {
-		tx.Rollback()
-		if err == sql.ErrNoRows {
-			return 0, ErrKunjunganNotFound
-		}
-		return 0, err
-	}
+    // 1. Hitung grand total
+    var grandTotal float64
+    for _, sec := range req.Sections {
+        grandTotal += sec.HargaTotal
+    }
 
-	// 1. Insert ke E_Resep
-	resResep, err := tx.Exec(`
-		INSERT INTO E_Resep (id_kunjungan, id_karyawan, created_at, total_harga)
-		VALUES (?,?,?,?)`,
-		req.IDKunjungan, req.IDKaryawan, time.Now(), req.TotalHarga)
-	if err != nil {
-		tx.Rollback(); return 0, err
-	}
-	idResep, err := resResep.LastInsertId()
-	if err != nil { tx.Rollback(); return 0, err }
+    // 2. Insert ke E_Resep
+    resResep, err := tx.Exec(
+        `INSERT INTO E_Resep (id_kunjungan, id_karyawan, created_at, total_harga)
+         VALUES (?,?,?,?)`,
+        req.IDKunjungan, req.IDKaryawan, time.Now(), grandTotal,
+    )
+    if err != nil {
+        tx.Rollback(); return 0, err
+    }
+    idResep, err := resResep.LastInsertId()
+    if err != nil { tx.Rollback(); return 0, err }
 
-	// 2. Insert setiap section
-	for _, sec := range req.Sections {
+    // 3. Loop section
+    for _, sec := range req.Sections {
+        // section_type mapping
+        var secType int
+        switch sec.SectionType {
+        case "obat":
+            secType = 1
+        case "racikan":
+            secType = 2
+        default:
+            tx.Rollback(); return 0, errors.New("invalid section_type")
+        }
 
-		// konversi section_type => tinyint (1=obat,2=racikan)
-		var secType int
-		switch sec.SectionType {
-		case "obat":
-			secType = 1
-		case "racikan":
-			secType = 2
-		default:
-			tx.Rollback()
-			return 0, errors.New("invalid section_type")
-		}
+        resSec, err := tx.Exec(
+            `INSERT INTO Resep_Section
+               (id_resep, section_type, nama_racikan, jumlah, jenis_kemasan, instruksi, harga_total)
+             VALUES (?,?,?,?,?,?,?)`,
+            idResep,
+            secType,
+            sql.NullString{String: sec.NamaRacikan, Valid: secType == 2},
+            sec.Jumlah,
+            sql.NullString{String: sec.Kemasan, Valid: secType == 2},
+            sec.Instruksi,
+            sec.HargaTotal,
+        )
+        if err != nil { tx.Rollback(); return 0, err }
 
-		// Resep_Section
-		resSec, err := tx.Exec(`
-    INSERT INTO Resep_Section
-      (id_resep, section_type, nama_racikan, jumlah, jenis_kemasan, instruksi, harga_total)
-    VALUES (?,?,?,?,?,?,?)`,
-    idResep,
-    secType,
-    sql.NullString{String: sec.NamaRacikan, Valid: secType == 2},
-    sec.Jumlah,
-    sql.NullString{String: sec.Kemasan, Valid: secType == 2},
-    sec.Instruksi,
-    sec.HargaTotal,
-)
-		if err != nil { tx.Rollback(); return 0, err }
+        sectionID, err := resSec.LastInsertId()
+        if err != nil { tx.Rollback(); return 0, err }
 
-		sectionID, err := resSec.LastInsertId()
-		if err != nil { tx.Rollback(); return 0, err }
+        // 4. Komposisi
+        if secType == 1 {
+            // obat tunggal → dosis = jumlah
+            if sec.IDObat == nil {
+                tx.Rollback(); return 0, errors.New("id_obat required for section_type 'obat'")
+            }
+            if _, err := tx.Exec(`INSERT INTO Komposisi (id_section, id_obat, dosis) VALUES (?,?,?)`, sectionID, *sec.IDObat, sec.Jumlah); err != nil {
+                tx.Rollback(); return 0, err
+            }
+        } else {
+            for _, cmp := range sec.Komposisi {
+                if _, err := tx.Exec(`INSERT INTO Komposisi (id_section, id_obat, dosis) VALUES (?,?,?)`, sectionID, cmp.IDObat, cmp.Dosis); err != nil {
+                    tx.Rollback(); return 0, err
+                }
+            }
+        }
+    }
 
-		// 3. Komposisi
-		if secType == 1 {
-			// obat tunggal → satu baris komposisi dengan dosis = jumlah
-			_, err = tx.Exec(`
-				INSERT INTO Komposisi (id_section, id_obat, dosis)
-				VALUES (?,?,?)`,
-				sectionID, *sec.IDObat, sec.Jumlah)
-			if err != nil { tx.Rollback(); return 0, err }
-		} else { // racikan
-			for _, cmp := range sec.Komposisi {
-				_, err = tx.Exec(`
-					INSERT INTO Komposisi (id_section, id_obat, dosis)
-					VALUES (?,?,?)`,
-					sectionID, cmp.IDObat, cmp.Dosis)
-				if err != nil { tx.Rollback(); return 0, err }
-			}
-		}
-	}
+    // 5. Update Riwayat_Kunjungan dengan id_resep
+    if _, err := tx.Exec(`UPDATE Riwayat_Kunjungan SET id_resep = ? WHERE id_kunjungan = ?`, idResep, req.IDKunjungan); err != nil {
+        tx.Rollback(); return 0, err
+    }
 
-	// 4. Update Riwayat_Kunjungan.id_resep
-	if _, err := tx.Exec(
-		`UPDATE Riwayat_Kunjungan SET id_resep = ? WHERE id_kunjungan = ?`,
-		idResep, req.IDKunjungan); err != nil {
-		tx.Rollback(); return 0, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return idResep, nil
+    if err := tx.Commit(); err != nil {
+        return 0, err
+    }
+    return idResep, nil
 }
 
 
