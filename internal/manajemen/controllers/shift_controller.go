@@ -182,6 +182,7 @@ func (sc *ShiftController) UpdateCustomShiftHandler(c echo.Context) error {
 	})
 }
 
+
 func (sc *ShiftController) SoftDeleteShiftHandler(c echo.Context) error {
 	// Ambil id_shift_karyawan dari query parameter
 	idShiftKaryawanStr := c.QueryParam("id_shift_karyawan")

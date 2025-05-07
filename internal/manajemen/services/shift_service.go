@@ -104,45 +104,88 @@ func (s *ShiftService) AssignShift(idPoli, idKaryawan, idRole, idShift, idManage
 
 
 func (s *ShiftService) UpdateCustomShift(idShiftKaryawan int, newCustomMulai, newCustomSelesai string) error {
+	// Mulai transaksi
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("gagal memulai transaksi: %v", err)
+	}
+
 	// Parse waktu custom yang baru dengan format "15:04:05"
 	newMulai, err := time.Parse("15:04:05", newCustomMulai)
 	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf("format custom_jam_mulai tidak valid: %v", err)
 	}
 	newSelesai, err := time.Parse("15:04:05", newCustomSelesai)
 	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf("format custom_jam_selesai tidak valid: %v", err)
 	}
 
-	// Ambil default waktu shift dari tabel Shift berdasarkan id_shift dari Shift_Karyawan
-	var shiftJamMulai, shiftJamSelesai string
+	// Ambil data dari Shift_Karyawan dan Shift untuk validasi
+	var (
+		shiftJamMulai, shiftJamSelesai string
+		idPoli, idShift, idKaryawan    int
+		tanggal                        string
+	)
 	query := `
-		SELECT s.jam_mulai, s.jam_selesai 
+		SELECT s.jam_mulai, s.jam_selesai, sk.id_poli, sk.id_shift, sk.id_karyawan, sk.tanggal 
 		FROM Shift_Karyawan sk
 		JOIN Shift s ON sk.id_shift = s.id_shift
 		WHERE sk.id_shift_karyawan = ?
 	`
-	err = s.DB.QueryRow(query, idShiftKaryawan).Scan(&shiftJamMulai, &shiftJamSelesai)
+	err = tx.QueryRow(query, idShiftKaryawan).Scan(&shiftJamMulai, &shiftJamSelesai, &idPoli, &idShift, &idKaryawan, &tanggal)
 	if err != nil {
+		tx.Rollback()
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("record Shift_Karyawan dengan id %d tidak ditemukan", idShiftKaryawan)
 		}
-		return err
+		return fmt.Errorf("gagal mengambil data shift: %v", err)
 	}
 
 	// Parse default waktu shift
 	defaultMulai, err := time.Parse("15:04:05", shiftJamMulai)
 	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf("format default jam_mulai tidak valid: %v", err)
 	}
 	defaultSelesai, err := time.Parse("15:04:05", shiftJamSelesai)
 	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf("format default jam_selesai tidak valid: %v", err)
 	}
 
 	// Validasi: custom_jam_mulai tidak boleh sebelum default dan custom_jam_selesai tidak boleh melewati default
 	if newMulai.Before(defaultMulai) || newSelesai.After(defaultSelesai) {
+		tx.Rollback()
 		return fmt.Errorf("custom shift harus berada dalam rentang waktu %s - %s", shiftJamMulai, shiftJamSelesai)
+	}
+
+	// Validasi tumpang tindih dengan record lain untuk karyawan yang sama
+	overlapQuery := `
+		SELECT COUNT(*) 
+		FROM Shift_Karyawan sk
+		WHERE sk.id_karyawan = ? 
+		AND sk.id_poli = ? 
+		AND sk.id_shift = ? 
+		AND sk.tanggal = ? 
+		AND sk.id_shift_karyawan != ?
+		AND (
+			(STR_TO_TIME(?, '%H:%i:%s') <= STR_TO_TIME(sk.custom_jam_selesai, '%H:%i:%s') 
+				AND STR_TO_TIME(?, '%H:%i:%s') >= STR_TO_TIME(sk.custom_jam_mulai, '%H:%i:%s'))
+			OR (STR_TO_TIME(?, '%H:%i:%s') <= STR_TO_TIME(sk.custom_jam_selesai, '%H:%i:%s') 
+				AND STR_TO_TIME(?, '%H:%i:%s') >= STR_TO_TIME(sk.custom_jam_mulai, '%H:%i:%s'))
+		)
+	`
+	var overlapCount int
+	err = tx.QueryRow(overlapQuery, idKaryawan, idPoli, idShift, tanggal, idShiftKaryawan, newCustomMulai, newCustomMulai, newCustomSelesai, newCustomSelesai).Scan(&overlapCount)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("gagal memeriksa tumpang tindih waktu: %v", err)
+	}
+	if overlapCount > 0 {
+		tx.Rollback()
+		return fmt.Errorf("waktu custom bertabrakan dengan shift lain untuk karyawan %d pada tanggal %s", idKaryawan, tanggal)
 	}
 
 	// Update record Shift_Karyawan dengan waktu custom yang baru
@@ -151,20 +194,28 @@ func (s *ShiftService) UpdateCustomShift(idShiftKaryawan int, newCustomMulai, ne
 		SET custom_jam_mulai = ?, custom_jam_selesai = ?
 		WHERE id_shift_karyawan = ?
 	`
-	res, err := s.DB.Exec(updateQuery, newCustomMulai, newCustomSelesai, idShiftKaryawan)
+	res, err := tx.Exec(updateQuery, newCustomMulai, newCustomSelesai, idShiftKaryawan)
 	if err != nil {
-		return err
+		tx.Rollback()
+		return fmt.Errorf("gagal update shift: %v", err)
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return err
+		tx.Rollback()
+		return fmt.Errorf("gagal memeriksa jumlah record yang diupdate: %v", err)
 	}
 	if affected == 0 {
+		tx.Rollback()
 		return fmt.Errorf("tidak ada record yang diupdate")
 	}
+
+	// Commit transaksi
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("gagal commit transaksi: %v", err)
+	}
+
 	return nil
 }
-
 func (s *ShiftService) SoftDeleteShiftKaryawan(idShiftKaryawan int, idManagement int) error {
 	// Update deleted_by dari NULL menjadi idManagement untuk record yang belum dihapus
 	updateQuery := `
