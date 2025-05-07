@@ -125,16 +125,14 @@ func (s *ShiftService) UpdateCustomShift(idShiftKaryawan int, newCustomMulai, ne
 	// Ambil data dari Shift_Karyawan dan Shift untuk validasi
 	var (
 		shiftJamMulai, shiftJamSelesai string
-		idPoli, idShift, idKaryawan    int
-		tanggal                        string
 	)
 	query := `
-		SELECT s.jam_mulai, s.jam_selesai, sk.id_poli, sk.id_shift, sk.id_karyawan, sk.tanggal 
+		SELECT s.jam_mulai, s.jam_selesai 
 		FROM Shift_Karyawan sk
 		JOIN Shift s ON sk.id_shift = s.id_shift
 		WHERE sk.id_shift_karyawan = ?
 	`
-	err = tx.QueryRow(query, idShiftKaryawan).Scan(&shiftJamMulai, &shiftJamSelesai, &idPoli, &idShift, &idKaryawan, &tanggal)
+	err = tx.QueryRow(query, idShiftKaryawan).Scan(&shiftJamMulai, &shiftJamSelesai)
 	if err != nil {
 		tx.Rollback()
 		if err == sql.ErrNoRows {
@@ -159,33 +157,6 @@ func (s *ShiftService) UpdateCustomShift(idShiftKaryawan int, newCustomMulai, ne
 	if newMulai.Before(defaultMulai) || newSelesai.After(defaultSelesai) {
 		tx.Rollback()
 		return fmt.Errorf("custom shift harus berada dalam rentang waktu %s - %s", shiftJamMulai, shiftJamSelesai)
-	}
-
-	// Validasi tumpang tindih dengan record lain untuk karyawan yang sama
-	overlapQuery := `
-		SELECT COUNT(*) 
-		FROM Shift_Karyawan sk
-		WHERE sk.id_karyawan = ? 
-		AND sk.id_poli = ? 
-		AND sk.id_shift = ? 
-		AND sk.tanggal = ? 
-		AND sk.id_shift_karyawan != ?
-		AND (
-			(CAST(? AS TIME) <= sk.custom_jam_selesai 
-				AND CAST(? AS TIME) >= sk.custom_jam_mulai)
-			OR (CAST(? AS TIME) <= sk.custom_jam_selesai 
-				AND CAST(? AS TIME) >= sk.custom_jam_mulai)
-		)
-	`
-	var overlapCount int
-	err = tx.QueryRow(overlapQuery, idKaryawan, idPoli, idShift, tanggal, idShiftKaryawan, newCustomMulai, newCustomMulai, newCustomSelesai, newCustomSelesai).Scan(&overlapCount)
-	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("gagal memeriksa tumpang tindih waktu: %v", err)
-	}
-	if overlapCount > 0 {
-		tx.Rollback()
-		return fmt.Errorf("waktu custom bertabrakan dengan shift lain untuk karyawan %d pada tanggal %s", idKaryawan, tanggal)
 	}
 
 	// Update record Shift_Karyawan dengan waktu custom yang baru
