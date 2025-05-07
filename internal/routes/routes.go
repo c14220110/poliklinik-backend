@@ -46,6 +46,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 
 	// Dokter
 	dokterService := dokterServices.NewDokterService(db)
+	resepService := dokterServices.NewResepService(db)
 
 	// Inisialisasi controller
 	// Administrasi
@@ -67,6 +68,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	antrianController := screeningControllers.NewAntrianController(antrianService)
 	// Dokter
 	dokterController := dokterControllers.NewDokterController(dokterService)
+	resepController := dokterControllers.NewResepController(resepService)
 
 	// Grup API utama
 	api := e.Group("/api")
@@ -129,6 +131,8 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter.PUT("/masukkan", antrianController.MasukkanPasienKeDokterHandler, middlewares.JWTMiddleware())
 	dokter.PUT("/pulangkan-pasien", antrianController.PulangkanPasienHandler, middlewares.JWTMiddleware())
 	dokter.POST("/assessment", cmsController.SaveAssessmentHandler, middlewares.JWTMiddleware())
+	dokter.POST("/resep", resepController.CreateResepHandler, middlewares.JWTMiddleware())
+	dokter.GET("/obat", resepController.GetObatList, middlewares.JWTMiddleware())
 
 
 
