@@ -71,9 +71,10 @@ func (s *ResepService) CreateResep(req dmodels.ResepRequest) (int64, error) {
         }
 
         resSec, err := tx.Exec(
-            `INSERT INTO Resep_Section
-               (id_resep, section_type, nama_racikan, jumlah, jenis_kemasan, instruksi, harga_total)
-             VALUES (?,?,?,?,?,?,?)`,
+            `
+    INSERT INTO Resep_Section
+      (id_resep, section_type, nama_racikan, jumlah, jenis_kemasan, instruksi, harga_total)
+    VALUES (?,?,?,?,?,?,?)`,
             idResep,
             secType,
             sql.NullString{String: sec.NamaRacikan, Valid: secType == 2},
