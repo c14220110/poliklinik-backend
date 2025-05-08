@@ -325,7 +325,7 @@ func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(
 	_, err = tx.Exec(`
 		INSERT INTO Billing
 		  (id_kunjungan, id_antrian, id_karyawan,
-		   id_billing_assessment, tipe_pembayaran,
+		   id_assessment, tipe_pembayaran,
 		   total, id_status, created_at, updated_at)
 		VALUES (?, ?, NULL, NULL, NULL, NULL, 1, NOW(), NOW())`,
 		idKunjungan, idAntrian,
