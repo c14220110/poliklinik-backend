@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/c14220110/poliklinik-backend/internal/manajemen/models"
 )
 
 type ShiftService struct {
@@ -17,89 +19,96 @@ func NewShiftService(db *sql.DB) *ShiftService {
 }
 
 
-func (s *ShiftService) AssignShift(idPoli, idKaryawan, idRole, idShift, idManagement int, tanggalStr string) (int64, error) {
-	// 0. Cek apakah karyawan memiliki role sesuai parameter (dilakukan di luar transaksi).
-	var roleCount int
-	err := s.DB.QueryRow("SELECT COUNT(*) FROM Detail_Role_Karyawan WHERE id_karyawan = ? AND id_role = ?", idKaryawan, idRole).Scan(&roleCount)
-	if err != nil {
-		return 0, fmt.Errorf("failed to check role for karyawan: %v", err)
-	}
-	if roleCount == 0 {
-		return 0, fmt.Errorf("karyawan dengan id %d tidak memiliki role %d", idKaryawan, idRole)
-	}
+func (s *ShiftService) AssignShiftKaryawan(
+	idPoli, idShift int,
+	tanggal string,
+	idManagement int,
+	items []models.ShiftAssignItem,
+) ([]int64, error) {
 
-	// 1. Validasi format tanggal
-	_, err = time.Parse("2006-01-02", tanggalStr)
-	if err != nil {
-		return 0, fmt.Errorf("format tanggal tidak valid: %v", err)
-	}
-
-	// Mulai transaksi
 	tx, err := s.DB.Begin()
-	if err != nil {
-		return 0, err
+	if err != nil { return nil, err }
+
+	// pastikan id_shift ada
+	var dummy int
+	if err := tx.QueryRow("SELECT 1 FROM Shift WHERE id_shift = ?", idShift).Scan(&dummy); err != nil {
+		tx.Rollback()
+		if err == sql.ErrNoRows { return nil, fmt.Errorf("id_shift %d tidak ditemukan", idShift) }
+		return nil, err
 	}
 
-	// 2. Cek apakah karyawan sudah memiliki shift yang sama di poli pada tanggal ini
-	var existingCount int
-	err = tx.QueryRow(
-		"SELECT COUNT(*) FROM Shift_Karyawan WHERE id_karyawan = ? AND id_poli = ? AND id_shift = ? AND tanggal = ?",
-		idKaryawan, idPoli, idShift, tanggalStr,
-	).Scan(&existingCount)
-	if err != nil {
-		tx.Rollback()
-		return 0, fmt.Errorf("failed to check existing shift: %v", err)
-	}
-	if existingCount > 0 {
-		tx.Rollback()
-		return 0, fmt.Errorf("User dengan role %d sudah memiliki shift %d di poli %d pada tanggal %s", idRole, idShift, idPoli, tanggalStr)
-	}
+	var insertedIDs []int64
 
-	// 3. Ambil data Shift untuk mendapatkan jam_mulai dan jam_selesai default
-	var jamMulai, jamSelesai string
-	queryShift := "SELECT jam_mulai, jam_selesai FROM Shift WHERE id_shift = ?"
-	err = tx.QueryRow(queryShift, idShift).Scan(&jamMulai, &jamSelesai)
-	if err != nil {
-		tx.Rollback()
-		if err == sql.ErrNoRows {
-			return 0, fmt.Errorf("id_shift %d tidak ditemukan", idShift)
+	for _, it := range items {
+		// validasi jam
+		if _, err := time.Parse("15:04:05", it.JamMulai); err != nil {
+			tx.Rollback(); return nil, fmt.Errorf("jam_mulai '%s' tidak valid", it.JamMulai)
 		}
-		return 0, err
+		if _, err := time.Parse("15:04:05", it.JamAkhir); err != nil {
+			tx.Rollback(); return nil, fmt.Errorf("jam_akhir '%s' tidak valid", it.JamAkhir)
+		}
+
+		// loop setiap role
+		for _, roleName := range it.NamaRole {
+			var idRole int
+			if err := tx.QueryRow("SELECT id_role FROM Role WHERE nama_role = ?", roleName).
+				Scan(&idRole); err != nil {
+				tx.Rollback()
+				if err == sql.ErrNoRows {
+					return nil, fmt.Errorf("role '%s' tidak ditemukan", roleName)
+				}
+				return nil, err
+			}
+
+			// cek karyawan punya role tsb
+			var cnt int
+			if err := tx.QueryRow(
+				"SELECT COUNT(*) FROM Detail_Role_Karyawan WHERE id_karyawan=? AND id_role=?",
+				it.IDKaryawan, idRole).Scan(&cnt); err != nil {
+				tx.Rollback(); return nil, err
+			}
+			if cnt == 0 {
+				tx.Rollback()
+				return nil, fmt.Errorf("karyawan %d tidak memiliki role '%s'", it.IDKaryawan, roleName)
+			}
+
+			// cek duplikat shift
+			if err := tx.QueryRow(
+				`SELECT COUNT(*) FROM Shift_Karyawan
+				  WHERE id_karyawan=? AND id_poli=? AND id_shift=? AND id_role=? AND tanggal=?`,
+				it.IDKaryawan, idPoli, idShift, idRole, tanggal).Scan(&cnt); err != nil {
+				tx.Rollback(); return nil, err
+			}
+			if cnt > 0 {
+				tx.Rollback()
+				return nil, fmt.Errorf("karyawan %d dengan role '%s' sudah punya shift pada tanggal %s",
+					it.IDKaryawan, roleName, tanggal)
+			}
+
+			// insert Shift_Karyawan
+			res, err := tx.Exec(
+				`INSERT INTO Shift_Karyawan
+				   (id_poli,id_shift,id_karyawan,id_role,custom_jam_mulai,custom_jam_selesai,tanggal)
+				 VALUES (?,?,?,?,?,?,?)`,
+				idPoli, idShift, it.IDKaryawan, idRole, it.JamMulai, it.JamAkhir, tanggal)
+			if err != nil { tx.Rollback(); return nil, err }
+
+			idShiftKaryawan, _ := res.LastInsertId()
+			insertedIDs = append(insertedIDs, idShiftKaryawan)
+
+			// insert Management_Shift_Karyawan
+			if _, err := tx.Exec(
+				`INSERT INTO Management_Shift_Karyawan
+				   (id_management,id_shift_karyawan,created_by,updated_by,deleted_by)
+				 VALUES (?,?,?,?,0)`,
+				idManagement, idShiftKaryawan, idManagement, idManagement); err != nil {
+				tx.Rollback(); return nil, err
+			}
+		}
 	}
 
-	// 4. Insert ke tabel Shift_Karyawan
-	insertQuery := `
-		INSERT INTO Shift_Karyawan (id_poli, id_shift, id_karyawan, custom_jam_mulai, custom_jam_selesai, tanggal)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`
-	res, err := tx.Exec(insertQuery, idPoli, idShift, idKaryawan, jamMulai, jamSelesai, tanggalStr)
-	if err != nil {
-		tx.Rollback()
-		return 0, err
-	}
-	idShiftKaryawan, err := res.LastInsertId()
-	if err != nil {
-		tx.Rollback()
-		return 0, err
-	}
-
-	// 5. Insert ke tabel Management_Shift_Karyawan
-	insertManagementShiftQuery := `
-		INSERT INTO Management_Shift_Karyawan (id_management, id_shift_karyawan, created_by, updated_by, deleted_by)
-		VALUES (?, ?, ?, ?, ?)
-	`
-	_, err = tx.Exec(insertManagementShiftQuery, idManagement, idShiftKaryawan, idManagement, idManagement, 0)
-	if err != nil {
-		tx.Rollback()
-		return 0, err
-	}
-
-	// Commit transaksi
-	if err = tx.Commit(); err != nil {
-		return 0, err
-	}
-
-	return idShiftKaryawan, nil
+	if err := tx.Commit(); err != nil { return nil, err }
+	return insertedIDs, nil
 }
 
 
