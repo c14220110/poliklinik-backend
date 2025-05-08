@@ -48,7 +48,7 @@ type CMS struct {
 type CMSElement struct {
     SectionName    string `json:"section_name"`
     SubSectionName string `json:"sub_section_name"` // Kolom baru
-    IDEelements    int    `json:"id_elements"`
+    IDElements    int    `json:"id_elements"`
     IDCMS          int    `json:"id_cms"`
     ElementType    string `json:"element_type"`
     ElementLabel   string `json:"element_label"`
