@@ -187,11 +187,19 @@ func (cc *CMSController) UpdateCMSHandler(c echo.Context) error {
 	mgmt := models.ManagementCMS{IDManagement: uid, CreatedBy: uid, UpdatedBy: uid}
 
 	if err := cc.Service.UpdateCMSWithSections(req, mgmt); err != nil {
-		return c.JSON(http.StatusInternalServerError, echo.Map{
-			"status": http.StatusInternalServerError, "message": "Failed to update CMS: "+err.Error()})
-	}
-	return c.JSON(http.StatusOK, echo.Map{
-		"status": http.StatusOK, "message": "CMS updated successfully"})
+	return c.JSON(http.StatusInternalServerError, echo.Map{
+		"status":  http.StatusInternalServerError,
+		"message": "Failed to update CMS: " + err.Error(),
+		"data":    nil,                    // ← konsisten
+	})
+}
+
+return c.JSON(http.StatusOK, echo.Map{
+	"status":  http.StatusOK,
+	"message": "CMS updated successfully",
+	"data":    echo.Map{"id_cms": req.IDCMS},   // ← tambahkan data
+})
+
 }
 
 // PUT /api/management/cms/activate?id_cms={id}
