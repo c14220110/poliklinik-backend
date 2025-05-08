@@ -558,114 +558,128 @@ func (svc *CMSService) SaveAssessment(
 	input models.AssessmentInput,
 ) (int64, error) {
 
-	// ---------- 1. Validasi Antrian & CMS ----------
-	var idPasien, idPoli int
+	/* ---------- 1. Validasi Antrian ---------- */
+	var (
+		idPasien int
+		idPoli   int
+	)
 	if err := svc.DB.QueryRow(`
-		SELECT id_pasien,id_poli FROM Antrian WHERE id_antrian=?`,
+		SELECT id_pasien, id_poli
+		FROM Antrian
+		WHERE id_antrian = ?`,
 		idAntrian).Scan(&idPasien, &idPoli); err != nil {
 
 		if err == sql.ErrNoRows { return 0, ErrAntrianNotFound }
 		return 0, err
 	}
 
+	/* ---------- 2. Validasi CMS ---------- */
 	var cmsPoli int
-	if err := svc.DB.QueryRow(`
-		SELECT id_poli FROM CMS WHERE id_cms=?`,
+	if err := svc.DB.QueryRow(
+		`SELECT id_poli FROM CMS WHERE id_cms = ?`,
 		idCMS).Scan(&cmsPoli); err != nil {
 
 		if err == sql.ErrNoRows { return 0, ErrCMSNotFound }
 		return 0, err
 	}
-	// Opsional tetap: pakai poli dari CMS
+	// Pakai poli milik CMS agar konsisten
 	idPoli = cmsPoli
 
-	// ---------- 2. Ambil daftar elemen aktif ----------
+	/* ---------- 3. Ambil elemen aktif ---------- */
 	rows, err := svc.DB.Query(`
-    SELECT e.element_name, e.is_required
-    FROM CMS_Section s
-      JOIN CMS_Elements   e  ON e.id_section   = s.id_section
-                              AND e.deleted_at IS NULL
-      LEFT JOIN CMS_Subsection ss ON ss.id_subsection = e.id_subsection
-                                    AND (ss.deleted_at IS NULL OR e.id_subsection IS NULL)
-    WHERE s.id_cms = ?                -- ← gunakan kolom di CMS_Section
-      AND s.deleted_at IS NULL`,
-    idCMS)
-
+		SELECT e.id_cms_elements, e.element_name, e.is_required
+		FROM CMS_Section s
+		  JOIN CMS_Elements   e  ON e.id_section = s.id_section
+		                         AND e.deleted_at IS NULL
+		  LEFT JOIN CMS_Subsection ss ON ss.id_subsection = e.id_subsection
+		                               AND (ss.deleted_at IS NULL OR e.id_subsection IS NULL)
+		WHERE s.id_cms = ? AND s.deleted_at IS NULL`,
+		idCMS)
 	if err != nil { return 0, err }
 	defer rows.Close()
 
-	requiredSet := map[string]struct{}{}
-	allowedSet  := map[string]struct{}{}
-
+	type meta struct{ Name string; Required bool }
+	allowed := map[int]meta{} // key = id_cms_elements
 	for rows.Next() {
-		var name string
-		var req  int
-		if err := rows.Scan(&name, &req); err != nil { return 0, err }
-		allowedSet[name] = struct{}{}
-		if req != 0 { requiredSet[name] = struct{}{} }
+		var (
+			id  int
+			nm  string
+			req int
+		)
+		if err := rows.Scan(&id, &nm, &req); err != nil { return 0, err }
+		allowed[id] = meta{nm, req != 0}
 	}
-
-	if len(allowedSet) == 0 {
+	if len(allowed) == 0 {
 		return 0, fmt.Errorf("CMS has no active elements")
 	}
 
-	// ---------- 3. Index jawaban dari frontend ----------
-	values := map[string]interface{}{}
-	for _, ans := range input.Answers {
-		values[ans.Name] = ans.Value
+	/* ---------- 4. Index jawaban frontend ---------- */
+	answerByID := map[int]models.CMSAnswer{}
+	for _, a := range input.Answers {
+		answerByID[a.IDCmsElement] = a
 	}
 
-	// ---------- 4. Validasi kunci tidak dikenal ----------
-	var unknown []string
-	for name := range values {
-		if _, ok := allowedSet[name]; !ok {
-			unknown = append(unknown, name)
+	/* ---------- 5. Validasi unknown / missing ---------- */
+	var (
+		unknown []int
+		missing []int
+	)
+	for id := range answerByID {
+		if _, ok := allowed[id]; !ok {
+			unknown = append(unknown, id)
+		}
+	}
+	for id, m := range allowed {
+		if m.Required {
+			if ans, ok := answerByID[id]; !ok || isEmpty(ans.Value) {
+				missing = append(missing, id)
+			}
 		}
 	}
 	if len(unknown) > 0 {
-		return 0, fmt.Errorf("unknown field(s): %v", unknown)
-	}
-
-	// ---------- 5. Validasi nilai wajib terisi ----------
-	var missing []string
-	for name := range requiredSet {
-		v, ok := values[name]
-		if !ok || isEmpty(v) {
-			missing = append(missing, name)
-		}
+		return 0, fmt.Errorf("unknown id_cms_elements: %v", unknown)
 	}
 	if len(missing) > 0 {
-		return 0, fmt.Errorf("required field(s) empty: %v", missing)
+		return 0, fmt.Errorf("required id_cms_elements empty: %v", missing)
 	}
 
-	// ---------- 6. Ekstrak id_ruang & id_icd10 ----------
+	/* ---------- 6. Ekstrak mapping khusus ---------- */
 	var (
 		idRuang sql.NullInt64
 		idICD10 sql.NullString
 	)
-	if v, ok := values["ruang_poli"].(float64); ok { // numeric dari JSON
-		idRuang = sql.NullInt64{Int64: int64(v), Valid: true}
-	}
-	if v, ok := values["diagnosis_awal_medis"].(string); ok && v != "" {
-		idICD10 = sql.NullString{String: v, Valid: true}
+	for _, a := range input.Answers {
+		switch a.Name {
+		case "ruang_poli":
+			if v, ok := a.Value.(float64); ok {
+				idRuang = sql.NullInt64{Int64: int64(v), Valid: true}
+			}
+		case "diagnosis_awal_medis":
+			if v, ok := a.Value.(string); ok && v != "" {
+				idICD10 = sql.NullString{String: v, Valid: true}
+			}
+		}
 	}
 
-	// ---------- 7. Simpan ----------
+	/* ---------- 7. Marshal JSON ---------- */
 	raw, err := json.Marshal(input.Answers)
 	if err != nil { return 0, err }
 
-	// Cegah duplikasi (opsional): hapus assessment lama utk antrian‑CMS
+	/* ---------- 8. Hapus assessment lama (optional) ---------- */
 	if _, err := svc.DB.Exec(`
-		DELETE FROM Assessment WHERE id_antrian=? AND id_cms=?`, idAntrian, idCMS); err != nil {
+		DELETE FROM Assessment
+		WHERE id_pasien = ? AND id_cms = ?`,
+		idPasien, idCMS); err != nil {
 		return 0, err
 	}
 
+	/* ---------- 9. Insert ---------- */
 	res, err := svc.DB.Exec(`
 		INSERT INTO Assessment
-		  (id_antrian,id_pasien,id_karyawan,id_poli,id_ruang,
-		   id_cms,id_icd10,hasil_assessment,created_at)
-		VALUES (?,?,?,?,?,?,?,?,NOW())`,
-		idAntrian, idPasien, idKaryawan, idPoli, idRuang,
+		  (id_pasien, id_karyawan, id_poli, id_ruang,
+		   id_cms, id_icd10, hasil_assessment, created_at)
+		VALUES (?,?,?,?,?,?,?,NOW())`,
+		idPasien, idKaryawan, idPoli, idRuang,
 		idCMS, idICD10, raw)
 	if err != nil { return 0, err }
 
