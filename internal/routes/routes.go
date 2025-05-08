@@ -133,6 +133,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter.POST("/assessment", cmsController.SaveAssessmentHandler, middlewares.JWTMiddleware())
 	dokter.POST("/resep", resepController.CreateResepHandler, middlewares.JWTMiddleware())
 	dokter.GET("/obat", resepController.GetObatList, middlewares.JWTMiddleware())
+	dokter.POST("/billing-assessment", billingController.InputBillingAssessment, middlewares.JWTMiddleware())
 
 
 
