@@ -558,89 +558,75 @@ func (svc *CMSService) SaveAssessment(
 	input models.AssessmentInput,
 ) (int64, error) {
 
-	/* ---------- MULAI TRANSAKSI ---------- */
 	tx, err := svc.DB.Begin()
 	if err != nil { return 0, err }
-	rollback := func(e error) (int64, error) { tx.Rollback(); return 0, e }
+	defer func() { if err != nil { tx.Rollback() } }()
 
-	/* ---------- 1. Validasi Antrian ---------- */
+	/* ---------- 1. Ambil pasien & poli dari Antrian ---------- */
 	var idPasien, idPoli int
 	if err = tx.QueryRow(`
 		SELECT id_pasien, id_poli
 		FROM Antrian
-		WHERE id_antrian = ?`,
-		idAntrian).Scan(&idPasien, &idPoli); err != nil {
+		WHERE id_antrian = ?`, idAntrian).
+		Scan(&idPasien, &idPoli); err != nil {
 
-		if err == sql.ErrNoRows { return rollback(ErrAntrianNotFound) }
-		return rollback(err)
+		if err == sql.ErrNoRows { return 0, ErrAntrianNotFound }
+		return 0, err
 	}
 
 	/* ---------- 2. Validasi CMS ---------- */
 	var cmsPoli int
-	if err = tx.QueryRow(
-		`SELECT id_poli FROM CMS WHERE id_cms = ?`,
+	if err = tx.QueryRow(`
+		SELECT id_poli FROM CMS WHERE id_cms = ?`,
 		idCMS).Scan(&cmsPoli); err != nil {
 
-		if err == sql.ErrNoRows { return rollback(ErrCMSNotFound) }
-		return rollback(err)
+		if err == sql.ErrNoRows { return 0, ErrCMSNotFound }
+		return 0, err
 	}
-	idPoli = cmsPoli // pakai poli CMS
+	// pakai poli CMS untuk konsistensi
+	idPoli = cmsPoli
 
-	/* ---------- 3. Ambil elemen aktif ---------- */
+	/* ---------- 3. Elemen aktif & validasi answers ---------- */
 	rows, err := tx.Query(`
-		SELECT e.id_cms_elements, e.element_name, e.is_required
+		SELECT e.id_cms_elements, e.is_required
 		FROM CMS_Section s
 		  JOIN CMS_Elements e  ON e.id_section = s.id_section
-		                        AND e.deleted_at IS NULL
-		  LEFT JOIN CMS_Subsection ss ON ss.id_subsection = e.id_subsection
-		                                AND (ss.deleted_at IS NULL OR e.id_subsection IS NULL)
-		WHERE s.id_cms = ? AND s.deleted_at IS NULL`,
-		idCMS)
-	if err != nil { return rollback(err) }
+		                       AND e.deleted_at IS NULL
+		WHERE s.id_cms = ? AND s.deleted_at IS NULL`, idCMS)
+	if err != nil { return 0, err }
 	defer rows.Close()
 
-	type meta struct{ Name string; Required bool }
-	allowed := map[int]meta{}
+	required := map[int]struct{}{}
+	allowed   := map[int]struct{}{}
+
 	for rows.Next() {
 		var id, req int
-		var nm string
-		if err = rows.Scan(&id, &nm, &req); err != nil {
-			return rollback(err)
-		}
-		allowed[id] = meta{nm, req != 0}
+		if err = rows.Scan(&id, &req); err != nil { return 0, err }
+		allowed[id] = struct{}{}
+		if req != 0 { required[id] = struct{}{} }
 	}
 	if len(allowed) == 0 {
-		return rollback(fmt.Errorf("CMS has no active elements"))
+		return 0, fmt.Errorf("CMS has no active elements")
 	}
 
-	/* ---------- 4. Index jawaban ---------- */
-	answerByID := map[int]models.CMSAnswer{}
-	for _, a := range input.Answers {
-		answerByID[a.IDCmsElement] = a
-	}
+	ansByID := map[int]models.CMSAnswer{}
+	for _, a := range input.Answers { ansByID[a.IDCmsElement] = a }
 
-	/* ---------- 5. Validasi unknown / missing ---------- */
 	var unknown, missing []int
-	for id := range answerByID {
-		if _, ok := allowed[id]; !ok {
-			unknown = append(unknown, id)
-		}
+	for id := range ansByID {
+		if _, ok := allowed[id]; !ok { unknown = append(unknown, id) }
 	}
-	for id, m := range allowed {
-		if m.Required {
-			if ans, ok := answerByID[id]; !ok || isEmpty(ans.Value) {
-				missing = append(missing, id)
-			}
-		}
+	for id := range required {
+		if a, ok := ansByID[id]; !ok || isEmpty(a.Value) { missing = append(missing, id) }
 	}
 	if len(unknown) > 0 {
-		return rollback(fmt.Errorf("unknown id_cms_elements: %v", unknown))
+		return 0, fmt.Errorf("unknown id_cms_elements: %v", unknown)
 	}
 	if len(missing) > 0 {
-		return rollback(fmt.Errorf("required id_cms_elements empty: %v", missing))
+		return 0, fmt.Errorf("required id_cms_elements empty: %v", missing)
 	}
 
-	/* ---------- 6. Ekstrak mapping khusus ---------- */
+	/* ---------- 4. Ekstrak mapping khusus ---------- */
 	var (
 		idRuang sql.NullInt64
 		idICD10 sql.NullString
@@ -658,47 +644,83 @@ func (svc *CMSService) SaveAssessment(
 		}
 	}
 
-	/* ---------- 7. JSON answers ---------- */
+	/* ---------- 5. Serialize answers ---------- */
 	raw, err := json.Marshal(input.Answers)
-	if err != nil { return rollback(err) }
+	if err != nil { return 0, err }
 
-	/* ---------- 8. Hapus assessment lama pasien‑CMS ---------- */
+	/* ---------- 6. Hilangkan assessment lama (jika ada) ---------- */
 	if _, err = tx.Exec(`
-		DELETE FROM Assessment
-		WHERE id_pasien = ? AND id_cms = ?`,
-		idPasien, idCMS); err != nil {
-		return rollback(err)
-	}
+		DELETE FROM Assessment WHERE id_pasien=? AND id_cms=?`,
+		idPasien, idCMS); err != nil { return 0, err }
 
-	/* ---------- 9. INSERT ke Assessment ---------- */
+	/* ---------- 7. INSERT Assessment ---------- */
 	res, err := tx.Exec(`
 		INSERT INTO Assessment
 		  (id_pasien,id_karyawan,id_poli,id_ruang,
 		   id_cms,id_icd10,hasil_assessment,created_at)
-		VALUES (?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,NOW())`,
 		idPasien, idKaryawan, idPoli, idRuang,
-		idCMS, idICD10, raw, time.Now())
-	if err != nil { return rollback(err) }
-	idAss, _ := res.LastInsertId()
+		idCMS, idICD10, raw)
+	if err != nil { return 0, err }
 
-	/* ---------- 10. Update Riwayat_Kunjungan ---------- */
-	updateRK := `
+	idAssessment, _ := res.LastInsertId()
+
+	/* ---------- 8. Update Riwayat_Kunjungan ---------- */
+	// coba update baris yang sudah ada
+	up, err := tx.Exec(`
 		UPDATE Riwayat_Kunjungan
 		SET id_assessment = ?
-		WHERE id_antrian = ? AND id_assessment IS NULL`
-	if res, err = tx.Exec(updateRK, idAss, idAntrian); err != nil {
-		return rollback(err)
-	}
-	if aff, _ := res.RowsAffected(); aff == 0 {
-		return rollback(fmt.Errorf("failed to update Riwayat_Kunjungan with id_assessment"))
+		WHERE id_antrian = ? AND id_assessment IS NULL`,
+		idAssessment, idAntrian)
+	if err != nil { return 0, err }
+
+	affected, _ := up.RowsAffected()
+	var idKunjungan int64
+
+	if affected == 0 {
+		// baris RK belum ada → buat baru (butuh id_rm)
+		var idRM string
+		if err = tx.QueryRow(`
+			SELECT rm.id_rm
+			FROM Rekam_Medis rm
+			JOIN Pasien p ON p.id_pasien = ?
+			WHERE rm.id_pasien = p.id_pasien
+			LIMIT 1`, idPasien).Scan(&idRM); err != nil {
+			return 0, fmt.Errorf("patient has no rekam medis")
+		}
+
+		resRK, err2 := tx.Exec(`
+			INSERT INTO Riwayat_Kunjungan
+			  (id_rm,id_antrian,id_assessment,created_at)
+			VALUES (?,?,?,NOW())`,
+			idRM, idAntrian, idAssessment)
+		if err2 != nil { return 0, err2 }
+		idKunjungan, _ = resRK.LastInsertId()
+	} else {
+		// retrieve id_kunjungan yang barusan di‑update
+		if err = tx.QueryRow(`
+			SELECT id_kunjungan
+			FROM Riwayat_Kunjungan
+			WHERE id_antrian = ?`, idAntrian).Scan(&idKunjungan); err != nil {
+			return 0, err
+		}
 	}
 
-	/* ---------- 11. Commit ---------- */
-	if err = tx.Commit(); err != nil {
+	/* ---------- 9. INSERT Billing (status draft=1) ---------- */
+	if _, err = tx.Exec(`
+		INSERT INTO Billing
+		  (id_kunjungan,id_antrian,id_karyawan,
+		   id_assessment,id_status,created_at)
+		VALUES (?,?,?,?,1,NOW())`,
+		idKunjungan, idAntrian, idKaryawan, idAssessment); err != nil {
 		return 0, err
 	}
-	return idAss, nil
+
+	/* ---------- 10. Commit & return ---------- */
+	if err = tx.Commit(); err != nil { return 0, err }
+	return idAssessment, nil
 }
+
 
 
 /* ------- helper ------- */
