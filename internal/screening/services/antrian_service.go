@@ -338,33 +338,34 @@ func (s *AntrianService) GetTodayScreeningAntrianByPoli(idPoli int) ([]map[strin
 func (s *AntrianService) GetDetailAntrianByID(idAntrian int) (map[string]interface{}, error) {
 
 	query := `
-		SELECT
-			p.id_pasien,
-			p.nama,
-			p.jenis_kelamin,
-			p.tempat_lahir,
-			DATE_FORMAT(p.tanggal_lahir,'%Y-%m-%d')            AS tanggal_lahir,
-			p.nik,
-			p.no_telp,
-			p.alamat,
-			p.kota_tinggal,
-			p.kelurahan,
-			p.kecamatan,
-			IFNULL(ag.nama_agama,'')                          AS agama,
-			IFNULL(p.pekerjaan,'')                            AS pekerjaan,
-			IFNULL(p.status_perkawinan,0)                     AS status_perkawinan,
-			a.keluhan_utama,
-			a.nama_penanggung_jawab,
-			rm.id_rm,
-			a.nomor_antrian
-		FROM Antrian a
-		JOIN Pasien        p  ON a.id_pasien = p.id_pasien
-		JOIN Rekam_Medis   rm ON p.id_pasien = rm.id_pasien
-		LEFT JOIN Agama    ag ON p.id_agama  = ag.id_agama
-		WHERE a.id_antrian = ?
-		ORDER BY rm.created_at DESC
-		LIMIT 1
-	`
+	SELECT
+		p.id_pasien,
+		p.nama,
+		p.jenis_kelamin,
+		p.tempat_lahir,
+		DATE_FORMAT(p.tanggal_lahir,'%Y-%m-%d')        AS tanggal_lahir,
+		p.nik,
+		p.no_telp,
+		p.alamat,
+		p.kota_tinggal,
+		p.kelurahan,
+		p.kecamatan,
+		IFNULL(ag.nama,'')                             AS agama,      -- ← diubah
+		IFNULL(p.pekerjaan,'')                         AS pekerjaan,
+		IFNULL(p.status_perkawinan,0)                  AS status_perkawinan,
+		a.keluhan_utama,
+		a.nama_penanggung_jawab,
+		rm.id_rm,
+		a.nomor_antrian
+	FROM Antrian a
+	JOIN Pasien      p  ON a.id_pasien = p.id_pasien
+	JOIN Rekam_Medis rm ON p.id_pasien = rm.id_pasien
+	LEFT JOIN Agama  ag ON p.id_agama  = ag.id_agama
+	WHERE a.id_antrian = ?
+	ORDER BY rm.created_at DESC
+	LIMIT 1
+`
+
 
 	var (
 		idPasien, nomorAntrian     int
