@@ -191,67 +191,70 @@ var ErrCMSNotFound = fmt.Errorf("cms not found")
 
 
 
-// GetCMSDetailFull mengembalikan detail CMS beserta elemen lengkap
 func (svc *CMSService) GetCMSDetailFull(cmsID int) (models.CMSDetailResponse, error) {
-    var resp models.CMSDetailResponse
+	var resp models.CMSDetailResponse
 
-    // Ambil header CMS (boleh aktif / non-aktif)
-    err := svc.DB.QueryRow(`SELECT id_cms, title FROM CMS WHERE id_cms = ?`, cmsID).
-        Scan(&resp.IDCMS, &resp.Title)
-    if err != nil {
-        if err == sql.ErrNoRows {
-            return resp, ErrCMSNotFound
-        }
-        return resp, err
-    }
+	// 1) Header
+	if err := svc.DB.QueryRow(
+		`SELECT id_cms, title FROM CMS WHERE id_cms = ?`, cmsID,
+	).Scan(&resp.IDCMS, &resp.Title); err != nil {
+		if err == sql.ErrNoRows {
+			return resp, ErrCMSNotFound
+		}
+		return resp, err
+	}
 
-    // Join ke semua tabel pendukung
-    query := `
-      SELECT
-        e.id_cms_elements,
-        s.id_section,       s.title              AS section_title,
-        ss.id_subsection,   ss.title             AS subsection_title,
-        d.id_element,       el.type              AS element_type,
-        e.element_label,    e.element_name,
-        COALESCE(e.element_options,'') AS options,
-        COALESCE(e.element_hint,'')    AS hint,
-        e.is_required
-      FROM CMS_Section s
-      JOIN CMS_Subsection ss ON ss.id_section = s.id_section
-      JOIN CMS_Elements   e  ON e.id_section  = s.id_section
-                             AND e.id_subsection = ss.id_subsection
-      JOIN Detail_Element d  ON d.id_cms_elements = e.id_cms_elements
-      JOIN Elements       el ON el.id_element = d.id_element
-      WHERE s.id_cms = ?
-      ORDER BY s.id_section, ss.id_subsection, e.id_cms_elements
-    `
-    rows, err := svc.DB.Query(query, cmsID)
-    if err != nil {
-        return resp, err
-    }
-    defer rows.Close()
+	// 2) Detail elemen
+	query := `
+	  SELECT
+	    e.id_cms_elements,
+	    s.id_section,        s.title               AS section_title,
+	    ss.id_subsection,    ss.title              AS subsection_title,
+	    d.id_element,        el.type               AS element_type,
+	    e.element_label,     e.element_name,
+	    COALESCE(e.element_options,'') AS options,
+	    COALESCE(e.element_hint,'')    AS hint,
+	    e.is_required
+	  FROM CMS_Section s
+	    JOIN CMS_Elements   e  ON e.id_section   = s.id_section
+	                            AND e.deleted_at IS NULL
+	    LEFT JOIN CMS_Subsection ss ON ss.id_subsection = e.id_subsection
+	                                  AND (ss.deleted_at IS NULL)
+	    JOIN Detail_Element d  ON d.id_cms_elements = e.id_cms_elements
+	    JOIN Elements       el ON el.id_element     = d.id_element
+	  WHERE s.id_cms = ? AND s.deleted_at IS NULL
+	  ORDER BY s.id_section, ss.id_subsection, e.id_cms_elements
+	`
+	rows, err := svc.DB.Query(query, cmsID)
+	if err != nil { return resp, err }
+	defer rows.Close()
 
-    for rows.Next() {
-        var (
-            det   models.CMSElementDetail
-            req   int
-        )
-        if err := rows.Scan(
-            &det.IDCMSElement,
-            &det.IDSection, &det.SectionTitle,
-            &det.IDSubsection, &det.SubTitle,
-            &det.IDElement, &det.ElementType,
-            &det.Label, &det.Name,
-            &det.Options, &det.Hint,
-            &req,
-        ); err != nil {
-            return resp, err
-        }
-        det.Required = req != 0
-        resp.Elements = append(resp.Elements, det)
-    }
-    return resp, nil
+	for rows.Next() {
+		var det models.CMSElementDetail
+		var (
+			subID  sql.NullInt64
+			subTit sql.NullString
+			req    int
+		)
+		if err := rows.Scan(
+			&det.IDCMSElement,
+			&det.IDSection, &det.SectionTitle,
+			&subID, &subTit,
+			&det.IDElement, &det.ElementType,
+			&det.Label, &det.Name,
+			&det.Options, &det.Hint,
+			&req,
+		); err != nil {
+			return resp, err
+		}
+		if subID.Valid { det.IDSubsection = int(subID.Int64) }
+		det.SubTitle = subTit.String   // kosong bila NULL
+		det.Required = req != 0
+		resp.Elements = append(resp.Elements, det)
+	}
+	return resp, nil
 }
+
 
 
 // ErrNoCMSForPoli is returned when no CMS records exist under the given poliklinik ID
