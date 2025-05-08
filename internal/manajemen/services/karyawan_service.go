@@ -139,7 +139,6 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, roles []string
 }
 
 
-// Service Layer
 func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []string, idManagement int) (int64, error) {
 	// Mulai transaksi
 	tx, err := s.DB.Begin()
@@ -183,17 +182,29 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 		return 0, fmt.Errorf("NIK %s sudah digunakan", karyawan.NIK)
 	}
 
-	// 4. Hash password baru (jika diupdate)
+	// 4. Cek duplikasi SIP (selain record ini, jika disediakan)
+	if karyawan.Sip != "" {
+		count = 0
+		err = tx.QueryRow("SELECT COUNT(*) FROM Karyawan WHERE sip = ? AND id_karyawan <> ?", karyawan.Sip, karyawan.IDKaryawan).Scan(&count)
+		if err != nil {
+			return 0, fmt.Errorf("gagal memeriksa duplikasi SIP: %v", err)
+		}
+		if count > 0 {
+			return 0, fmt.Errorf("SIP %s sudah digunakan oleh karyawan lain", karyawan.Sip)
+		}
+	}
+
+	// 5. Hash password baru (jika diupdate)
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(karyawan.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return 0, fmt.Errorf("failed to hash password: %v", err)
 	}
 	karyawan.Password = string(hashedPassword)
 
-	// 5. Update record Karyawan, termasuk jenis_kelamin
+	// 6. Update record Karyawan, termasuk sip
 	updateKaryawan := `
 		UPDATE Karyawan 
-		SET nama = ?, username = ?, password = ?, nik = ?, tanggal_lahir = ?, alamat = ?, no_telp = ?, jenis_kelamin = ?
+		SET nama = ?, username = ?, password = ?, nik = ?, tanggal_lahir = ?, alamat = ?, no_telp = ?, jenis_kelamin = ?, sip = ?
 		WHERE id_karyawan = ?
 	`
 	_, err = tx.Exec(updateKaryawan,
@@ -204,14 +215,15 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 		karyawan.TanggalLahir,
 		karyawan.Alamat,
 		karyawan.NoTelp,
-		karyawan.JenisKelamin, // Added to update query
+		karyawan.JenisKelamin,
+		karyawan.Sip, // Added to update query
 		karyawan.IDKaryawan,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("gagal mengupdate karyawan: %v", err)
 	}
 
-	// 6. Update Management_Karyawan untuk mencatat siapa yang melakukan pembaruan
+	// 7. Update Management_Karyawan untuk mencatat siapa yang melakukan pembaruan
 	updateManagement := `
 		UPDATE Management_Karyawan 
 		SET updated_by = ?
@@ -222,13 +234,13 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 		return 0, fmt.Errorf("gagal mencatat di Management_Karyawan: %v", err)
 	}
 
-	// 7. Hapus semua role lama di Detail_Role_Karyawan
+	// 8. Hapus semua role lama di Detail_Role_Karyawan
 	_, err = tx.Exec("DELETE FROM Detail_Role_Karyawan WHERE id_karyawan = ?", karyawan.IDKaryawan)
 	if err != nil {
 		return 0, fmt.Errorf("gagal menghapus detail role lama: %v", err)
 	}
 
-	// 8. Validasi dan masukkan role baru
+	// 9. Validasi dan masukkan role baru
 	insertDetailRole := `
 		INSERT INTO Detail_Role_Karyawan (id_role, id_karyawan)
 		VALUES (?, ?)
@@ -255,7 +267,6 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 
 	return karyawan.IDKaryawan, nil
 }
-
 
 // mengembalikan (list, totalCount, error)
 func (s *ManagementService) GetKaryawanListFiltered(

@@ -25,18 +25,17 @@ type AddKaryawanRequest struct {
 	Password     string   `json:"password"`
 }
 
-
-
 type UpdateKaryawanRequest struct {
 	NIK          string   `json:"nik"`
 	Nama         string   `json:"nama"`
-	JenisKelamin string   `json:"jenis_kelamin"` // Added field
+	JenisKelamin string   `json:"jenis_kelamin"`
 	Username     string   `json:"username"`
 	Password     string   `json:"password"`
 	TanggalLahir string   `json:"tanggal_lahir"`
 	Alamat       string   `json:"alamat"`
 	NoTelp       string   `json:"no_telp"`
-	Roles        []string `json:"roles"` // Changed from Role string to Roles []string
+	Roles        []string `json:"roles"`
+	NomorSIP     string   `json:"nomor_sip"` // Added field
 }
 
 
@@ -213,12 +212,13 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 		IDKaryawan:   idKaryawan,
 		NIK:          req.NIK,
 		Nama:         req.Nama,
-		JenisKelamin: req.JenisKelamin, // Map the new field
+		JenisKelamin: req.JenisKelamin,
 		Username:     req.Username,
 		Password:     req.Password,
 		TanggalLahir: parsedDate,
 		Alamat:       req.Alamat,
 		NoTelp:       req.NoTelp,
+		Sip:          req.NomorSIP, // Map the new field
 	}
 
 	// Ambil klaim JWT dari context
