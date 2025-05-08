@@ -736,106 +736,121 @@ func (s *PendaftaranService) BatalkanAntrian(idAntrian int) error {
     return nil
 }
 
+// GetDetailAntrianByID mengambil detail antrian + info pasien & dokter.
 func (s *PendaftaranService) GetDetailAntrianByID(idAntrian int) (map[string]interface{}, error) {
-    // 1. Ambil data dasar antrian + pasien + rekam_medis + keluhan_utama
-    queryDetails := `
-        SELECT p.id_pasien, p.nama, p.jenis_kelamin, p.tempat_lahir,
-               DATE_FORMAT(p.tanggal_lahir, '%Y-%m-%d') AS tanggal_lahir,
-               p.nik, p.no_telp, p.alamat, p.kota_tinggal, p.kelurahan, p.kecamatan,
-               a.keluhan_utama,
-               rm.id_rm, a.nomor_antrian
-        FROM Antrian a
-        JOIN Pasien p ON a.id_pasien = p.id_pasien
-        JOIN Rekam_Medis rm ON p.id_pasien = rm.id_pasien
-        WHERE a.id_antrian = ?
-        ORDER BY rm.created_at DESC
-        LIMIT 1
-    `
-    var (
-        idPasien         int
-        nama, jk, tmpLhr string
-        tglLhrStr, nik   string
-        noTelp, alamat   string
-        kota, kelur, kec string
-        keluhanUtama     string
-        idRM             string
-        nomorAntrian     int
-    )
-    err := s.DB.QueryRow(queryDetails, idAntrian).Scan(
-        &idPasien, &nama, &jk, &tmpLhr,
-        &tglLhrStr, &nik, &noTelp,
-        &alamat, &kota, &kelur, &kec,
-        &keluhanUtama, &idRM, &nomorAntrian,
-    )
-    if err != nil {
-        return nil, fmt.Errorf("failed to get detail data: %v", err)
-    }
 
-    // 2. Hitung umur dalam hari
-    tglLahir, err := time.Parse("2006-01-02", tglLhrStr)
-    if err != nil {
-        return nil, fmt.Errorf("invalid tanggal lahir format: %v", err)
-    }
-    now := time.Now()
-    days := int(now.Sub(tglLahir).Hours() / 24)  // selisih dalam jam dibagi 24 → hari
+	query := `
+		SELECT
+			p.id_pasien,
+			p.nama,
+			p.jenis_kelamin,
+			p.tempat_lahir,
+			DATE_FORMAT(p.tanggal_lahir,'%Y-%m-%d')               AS tanggal_lahir,
+			p.nik,
+			p.no_telp,
+			p.alamat,
+			p.kota_tinggal,
+			p.kelurahan,
+			p.kecamatan,
+			IFNULL(ag.nama,'')                                     AS agama,
+			IFNULL(p.pekerjaan,'')                                 AS pekerjaan,
+			IFNULL(p.status_perkawinan,0)                          AS status_perkawinan,
+			a.keluhan_utama,
+			a.nama_penanggung_jawab,
+			rm.id_rm,
+			a.nomor_antrian
+		FROM Antrian a
+		JOIN Pasien        p  ON a.id_pasien = p.id_pasien
+		JOIN Rekam_Medis   rm ON p.id_pasien = rm.id_pasien
+		LEFT JOIN Agama    ag ON p.id_agama  = ag.id_agama
+		WHERE a.id_antrian = ?
+		ORDER BY rm.created_at DESC
+		LIMIT 1
+	`
 
+	// ---------- scan ----------
+	var (
+		idPasien, nomorAntrian        int
+		nama, jk, tmpLhr              string
+		tglLhrStr, nik, telp          string
+		alamat, kota, kel, kec        string
+		agama, pekerjaan              string
+		statusPK                      int          // 0/1
+		keluhan, penanggungJawab      string
+		idRM                          string
+	)
+	if err := s.DB.QueryRow(query, idAntrian).Scan(
+		&idPasien, &nama, &jk, &tmpLhr,
+		&tglLhrStr, &nik, &telp,
+		&alamat, &kota, &kel, &kec,
+		&agama, &pekerjaan, &statusPK,
+		&keluhan, &penanggungJawab,
+		&idRM, &nomorAntrian,
+	); err != nil {
+		return nil, fmt.Errorf("failed to get detail data: %v", err)
+	}
 
-   // 3. Cari assessment terbaru di riwayat_kunjungan
-    var idAssessment int64
-    err = s.DB.QueryRow(`
-        SELECT id_assessment
-        FROM Riwayat_Kunjungan
-        WHERE id_antrian = ? AND id_assessment IS NOT NULL
-        ORDER BY created_at DESC
-        LIMIT 1
-    `, idAntrian).Scan(&idAssessment)
+	// ---------- umur (dalam hari) ----------
+	tglLhr, _ := time.Parse("2006-01-02", tglLhrStr)
+	umurHari := int(time.Since(tglLhr).Hours() / 24)
 
-    // namaDokter akan dit-set nil jika belum ada assessment
-    var namaDokter interface{} = nil
-    if err == nil {
-        // 4. Ambil id_karyawan (dokter) dari Assessment
-        var idKaryawanDokter int
-        if err := s.DB.QueryRow(
-            "SELECT id_karyawan FROM Assessment WHERE id_assessment = ?",
-            idAssessment,
-        ).Scan(&idKaryawanDokter); err != nil {
-            return nil, fmt.Errorf("failed to get doctor id: %v", err)
-        }
-        // 5. Ambil nama dokter dari Karyawan
-        var nd string
-        if err := s.DB.QueryRow(
-            "SELECT nama FROM Karyawan WHERE id_karyawan = ?",
-            idKaryawanDokter,
-        ).Scan(&nd); err != nil {
-            return nil, fmt.Errorf("failed to get doctor name: %v", err)
-        }
-        namaDokter = nd
-    } else if err != sql.ErrNoRows {
-        return nil, fmt.Errorf("failed to get assessment record: %v", err)
-    }
+	// ---------- dokter terakhir ----------
+	var namaDokter interface{} = nil
+	var idAssessment int64
+	err := s.DB.QueryRow(
+		`SELECT id_assessment FROM Riwayat_Kunjungan
+		  WHERE id_antrian = ? AND id_assessment IS NOT NULL
+		  ORDER BY created_at DESC LIMIT 1`, idAntrian).Scan(&idAssessment)
 
-       // 6. Susun hasil akhir, ganti "umur" menjadi hari
-    result := map[string]interface{}{
-        "id_antrian":    idAntrian,
-        "nomor_antrian": nomorAntrian,
-        "id_pasien":     idPasien,
-        "nama_pasien":   nama,
-        "id_rm":         idRM,
-        "jenis_kelamin": jk,
-        "tempat_lahir":  tmpLhr,
-        "tanggal_lahir": tglLhrStr,
-        "nik":           nik,
-        "no_telp":       noTelp,
-        "alamat":        alamat,
-        "kota":          kota,
-        "kelurahan":     kelur,
-        "kecamatan":     kec,
-        "umur":          days,        // sekarang dalam hari
-        "keluhan_utama": keluhanUtama,
-        "nama_dokter":   namaDokter,
-    }
-    return result, nil
+	if err == nil { // ada assessment
+		var idDokter int
+		if err := s.DB.QueryRow(
+			`SELECT id_karyawan FROM Assessment WHERE id_assessment = ?`, idAssessment).
+			Scan(&idDokter); err != nil {
+			return nil, fmt.Errorf("failed to get doctor id: %v", err)
+		}
+		var nd string
+		if err := s.DB.QueryRow(
+			`SELECT nama FROM Karyawan WHERE id_karyawan = ?`, idDokter).
+			Scan(&nd); err != nil {
+			return nil, fmt.Errorf("failed to get doctor name: %v", err)
+		}
+		namaDokter = nd
+	} else if err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to get assessment record: %v", err)
+	}
+
+	statusPerkawinan := "Belum Menikah"
+	if statusPK == 1 {
+		statusPerkawinan = "Sudah Menikah"
+	}
+
+	// ---------- hasil ----------
+	return map[string]interface{}{
+		"id_antrian":        idAntrian,
+		"nomor_antrian":     nomorAntrian,
+		"id_pasien":         idPasien,
+		"nama_pasien":       nama,
+		"id_rm":             idRM,
+		"jenis_kelamin":     jk,
+		"tempat_lahir":      tmpLhr,
+		"tanggal_lahir":     tglLhrStr,
+		"umur":              umurHari,
+		"nik":               nik,
+		"no_telp":           telp,
+		"alamat":            alamat,
+		"kota":              kota,
+		"kelurahan":         kel,
+		"kecamatan":         kec,
+		"agama":             agama,
+		"pekerjaan":         pekerjaan,
+		"status_perkawinan": statusPerkawinan,
+		"keluhan_utama":     keluhan,
+		"penanggung_jawab":  penanggungJawab,
+		"nama_dokter":       namaDokter,
+	}, nil
 }
+
 
 
 type Agama struct {
