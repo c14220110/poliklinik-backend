@@ -121,46 +121,45 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 }
 
 func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
-	namaRole := c.QueryParam("nama_role")
-	status := c.QueryParam("status")
+	namaRole   := c.QueryParam("nama_role")
+	status     := c.QueryParam("status")
 	idKaryawan := c.QueryParam("id_karyawan")
 
-	// Pagination parameters
-	pageStr := c.QueryParam("page")
-	limitStr := c.QueryParam("limit")
-
-	// Default pagination values
-	page := 1
-	limit := 10
-	var err error
-	if pageStr != "" {
-		page, err = strconv.Atoi(pageStr)
-		if err != nil || page < 1 {
-			page = 1
-		}
+	// pagination
+	page, limit := 1, 10
+	if p := c.QueryParam("page"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 { page = v }
 	}
-	if limitStr != "" {
-		limit, err = strconv.Atoi(limitStr)
-		if err != nil || limit < 1 {
-			limit = 10
-		}
+	if l := c.QueryParam("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 { limit = v }
 	}
 
-	list, err := kc.Service.GetKaryawanListFiltered(namaRole, status, idKaryawan, page, limit)
+	list, total, err := kc.Service.GetKaryawanListFiltered(
+		namaRole, status, idKaryawan, page, limit,
+	)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+		return c.JSON(http.StatusInternalServerError, echo.Map{
 			"status":  http.StatusInternalServerError,
 			"message": "Failed to retrieve karyawan list: " + err.Error(),
 			"data":    nil,
 		})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
+	maxPage := (total + limit - 1) / limit // pembulatan ke atas
+
+	return c.JSON(http.StatusOK, echo.Map{
 		"status":  http.StatusOK,
 		"message": "Karyawan list retrieved successfully",
-		"data":    list,
+		"data": echo.Map{
+			"karyawan": list,
+			"total":    total,
+			"page":     page,
+			"limit":    limit,
+			"max_page": maxPage,
+		},
 	})
 }
+
 
 func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 	// Ambil id_karyawan dari query parameter

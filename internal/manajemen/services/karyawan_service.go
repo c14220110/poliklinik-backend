@@ -257,148 +257,123 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 }
 
 
-// GetKaryawanListFiltered mengambil daftar karyawan dengan filter tertentu
-func (s *ManagementService) GetKaryawanListFiltered(namaRoleFilter string, statusFilter string, idKaryawanFilter string, page int, limit int) ([]map[string]interface{}, error) {
-	// Base query dengan GROUP BY untuk mengelompokkan per karyawan dan menggabungkan role serta privilege
-	baseQuery := `
-		SELECT 
-			k.id_karyawan, 
-			GROUP_CONCAT(DISTINCT r.nama_role SEPARATOR ', ') AS roles,
-			GROUP_CONCAT(DISTINCT dp.id_privilege SEPARATOR ', ') AS privileges,
-			k.nama,
-			k.username,
-			k.nik,
-			k.jenis_kelamin,
-			k.tanggal_lahir,
-			k.alamat,
-			k.no_telp,
-			k.sip AS nomor_sip
+// mengembalikan (list, totalCount, error)
+func (s *ManagementService) GetKaryawanListFiltered(
+	namaRoleFilter, statusFilter, idKaryawanFilter string,
+	page, limit int,
+) ([]map[string]interface{}, int, error) {
+
+	// ---------- query utama (dengan DISTINCT roles & privileges) ----------
+	base := `
 		FROM Karyawan k
 		LEFT JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
-		LEFT JOIN Role r ON drk.id_role = r.id_role
+		LEFT JOIN Role r                ON drk.id_role     = r.id_role
 		LEFT JOIN Detail_Privilege_Karyawan dp ON k.id_karyawan = dp.id_karyawan
 	`
-	conditions := []string{}
-	params := []interface{}{}
+	conds := []string{}
+	args  := []interface{}{}
 
-	// Filter berdasarkan id_karyawan jika disediakan
 	if idKaryawanFilter != "" {
-		idKaryawanInt, err := strconv.Atoi(idKaryawanFilter)
-		if err != nil {
-			return nil, fmt.Errorf("invalid id_karyawan value: %v", err)
+		if id, err := strconv.Atoi(idKaryawanFilter); err == nil {
+			conds = append(conds, "k.id_karyawan = ?")
+			args  = append(args, id)
+		} else {
+			return nil, 0, fmt.Errorf("invalid id_karyawan")
 		}
-		conditions = append(conditions, "k.id_karyawan = ?")
-		params = append(params, idKaryawanInt)
 	}
-
-	// Filter berdasarkan nama_role jika disediakan
 	if namaRoleFilter != "" {
-		roleNames := strings.Split(namaRoleFilter, ",")
-		roleConditions := []string{}
-		for _, role := range roleNames {
-			roleConditions = append(roleConditions, "r.nama_role = ?")
-			params = append(params, strings.TrimSpace(role))
+		roleList := strings.Split(namaRoleFilter, ",")
+		roleCond := make([]string, 0, len(roleList))
+		for _, rname := range roleList {
+			roleCond = append(roleCond, "r.nama_role = ?")
+			args = append(args, strings.TrimSpace(rname))
 		}
-		conditions = append(conditions, "("+strings.Join(roleConditions, " OR ")+")")
+		conds = append(conds, "("+strings.Join(roleCond, " OR ")+")")
 	}
-
-	// Filter berdasarkan status
 	if statusFilter != "" {
-		statusLower := strings.ToLower(statusFilter)
-		if statusLower == "aktif" {
-			conditions = append(conditions, "k.deleted_at IS NULL")
-		} else if statusLower == "nonaktif" {
-			conditions = append(conditions, "k.deleted_at IS NOT NULL")
+		switch strings.ToLower(statusFilter) {
+		case "aktif":
+			conds = append(conds, "k.deleted_at IS NULL")
+		case "nonaktif":
+			conds = append(conds, "k.deleted_at IS NOT NULL")
 		}
 	}
 
-	query := baseQuery
-	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
-	}
-	query += " GROUP BY k.id_karyawan"
-	query += " ORDER BY k.id_karyawan"
-	// Tambahkan pagination
-	offset := (page - 1) * limit
-	query += " LIMIT ? OFFSET ?"
-	params = append(params, limit, offset)
+	where := ""
+	if len(conds) > 0 { where = "WHERE " + strings.Join(conds, " AND ") }
 
-	rows, err := s.DB.Query(query, params...)
+	// ---------- total count (tanpa LIMIT) ----------
+	countQuery := "SELECT COUNT(DISTINCT k.id_karyawan) " + base + " " + where
+	var total int
+	if err := s.DB.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count query error: %v", err)
+	}
+
+	// ---------- data query dengan pagination ----------
+	selectCols := `
+		SELECT 
+			k.id_karyawan,
+			GROUP_CONCAT(DISTINCT r.nama_role        SEPARATOR ', ') AS roles,
+			GROUP_CONCAT(DISTINCT dp.id_privilege    SEPARATOR ', ') AS privileges,
+			k.nama, k.username, k.nik, k.jenis_kelamin,
+			k.tanggal_lahir, k.alamat, k.no_telp, k.sip
+	`
+	dataQuery := selectCols + base + " " + where +
+		" GROUP BY k.id_karyawan ORDER BY k.id_karyawan LIMIT ? OFFSET ?"
+	fullArgs := append(args, limit, (page-1)*limit)
+
+	rows, err := s.DB.Query(dataQuery, fullArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("query error: %v", err)
+		return nil, 0, fmt.Errorf("data query error: %v", err)
 	}
 	defer rows.Close()
 
+	// ---------- scan ----------
 	var list []map[string]interface{}
 	for rows.Next() {
-		var idKaryawan int
-		var roles sql.NullString
-		var privileges sql.NullString
-		var nama, username, nik, jenisKelamin string
-		var tanggalLahir sql.NullTime
-		var alamat, noTelp string
-		var nomorSip sql.NullString
-
-		if err := rows.Scan(&idKaryawan, &roles, &privileges, &nama, &username, &nik, &jenisKelamin, &tanggalLahir, &alamat, &noTelp, &nomorSip); err != nil {
-			return nil, fmt.Errorf("scan error: %v", err)
+		var (
+			id                int
+			roleStr, privStr  sql.NullString
+			nama, user, nik, jk string
+			tgl               sql.NullTime
+			alamat, telp      string
+			sip               sql.NullString
+		)
+		if err := rows.Scan(&id, &roleStr, &privStr, &nama, &user, &nik, &jk,
+			&tgl, &alamat, &telp, &sip); err != nil {
+			return nil, 0, fmt.Errorf("scan error: %v", err)
 		}
 
-		record := map[string]interface{}{
-			"id_karyawan":   idKaryawan,
-			"roles":         nil,
-			"privileges":    nil,
+		rec := map[string]interface{}{
+			"id_karyawan":   id,
+			"roles":         []string{},
+			"privileges":    []int{},
 			"nama":          nama,
-			"username":      username,
+			"username":      user,
 			"nik":           nik,
-			"jenis_kelamin": jenisKelamin,
-			"tanggal_lahir": nil,
+			"jenis_kelamin": jk,
 			"alamat":        alamat,
-			"no_telp":       noTelp,
-			"nomor_sip":     nil,
+			"no_telp":       telp,
 		}
-		if roles.Valid {
-			roleList := strings.Split(roles.String, ", ")
-			// Filter out duplicates manually if DISTINCT fails (just to be safe)
-			roleMap := make(map[string]bool)
-			var uniqueRoles []string
-			for _, role := range roleList {
-				if role != "" && !roleMap[role] {
-					roleMap[role] = true
-					uniqueRoles = append(uniqueRoles, role)
-				}
+		if roleStr.Valid && roleStr.String != "" {
+			rec["roles"] = strings.Split(roleStr.String, ", ")
+		}
+		if privStr.Valid && privStr.String != "" {
+			var privs []int
+			for _, p := range strings.Split(privStr.String, ", ") {
+				if v, err := strconv.Atoi(p); err == nil { privs = append(privs, v) }
 			}
-			if len(uniqueRoles) > 0 {
-				record["roles"] = uniqueRoles
-			}
+			rec["privileges"] = privs
 		}
-		if privileges.Valid {
-			// Konversi string privileges ke array integer
-			privStr := strings.Split(privileges.String, ", ")
-			privMap := make(map[int]bool)
-			var privInt []int
-			for _, p := range privStr {
-				if p != "" { // Pastikan tidak ada string kosong
-					pInt, err := strconv.Atoi(p)
-					if err == nil && !privMap[pInt] {
-						privMap[pInt] = true
-						privInt = append(privInt, pInt)
-					}
-				}
-			}
-			if len(privInt) > 0 {
-				record["privileges"] = privInt
-			}
-		}
-		if tanggalLahir.Valid {
-			record["tanggal_lahir"] = tanggalLahir.Time.Format("2006-01-02")
-		}
-		if nomorSip.Valid {
-			record["nomor_sip"] = nomorSip.String
-		}
-		list = append(list, record)
+		if tgl.Valid { rec["tanggal_lahir"] = tgl.Time.Format("2006-01-02") }
+		if sip.Valid { rec["nomor_sip"] = sip.String }
+
+		list = append(list, rec)
 	}
-	return list, nil
+
+	return list, total, nil
 }
+
 
 func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy int) error {
 	// 1. Update kolom deleted_at di tabel Karyawan
