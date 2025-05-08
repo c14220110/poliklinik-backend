@@ -24,45 +24,87 @@ func NewCMSService(db *sql.DB) *CMSService {
 type errInvalidElementID struct{ ID int }
 func (e errInvalidElementID) Error() string { return fmt.Sprintf("invalid element ID: %d", e.ID) }
 
-// CreateCMSWithSections inserts a new CMS, soft-deletes any active CMS for the same poli,
-// and populates sections, subsections, elements, Detail_Element, and Management_CMS.
+// CreateCMSWithSections membuat record CMS baru, men‑soft‑delete CMS aktif di poli yg sama,
+// lalu menyimpan section, OPTIONAL subsection, elements (tanpa dummy), Detail_Element, dan Management_CMS.
 func (svc *CMSService) CreateCMSWithSections(
 	req models.CreateCMSRequest,
 	mgmt models.ManagementCMS,
 ) (int64, error) {
-	// begin transaction
+
 	tx, err := svc.DB.Begin()
 	if err != nil {
 		return 0, err
 	}
 	now := time.Now()
 
-	// 1) Soft-delete existing CMS for this poli
+	// 1) Soft‑delete CMS lama di poli yg sama
 	if _, err := tx.Exec(
 		`UPDATE CMS SET deleted_at = ? WHERE id_poli = ? AND deleted_at IS NULL`,
-		now, req.IDPoli,
-	); err != nil {
+		now, req.IDPoli); err != nil {
 		tx.Rollback()
 		return 0, err
 	}
 
-	// 2) Insert new CMS record
+	// 2) Insert header CMS baru
 	res, err := tx.Exec(
-		`INSERT INTO CMS (id_poli, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-		req.IDPoli, req.Title, now, now,
-	)
-	if err != nil {
-		tx.Rollback()
-		return 0, err
-	}
-	idCMS, err := res.LastInsertId()
-	if err != nil {
-		tx.Rollback()
-		return 0, err
+		`INSERT INTO CMS (id_poli, title, created_at, updated_at) VALUES (?,?,?,?)`,
+		req.IDPoli, req.Title, now, now)
+	if err != nil { tx.Rollback(); return 0, err }
+	idCMS, _ := res.LastInsertId()
+
+	// 3) Validasi id_element
+	if err := svc.validateElementIDs(tx, req); err != nil {
+		tx.Rollback(); return 0, err
 	}
 
-	// 3) Validate element IDs against master Elements table
-	elementIDs := make(map[int]struct{})
+	// 4) Insert Section + (optional) Subsection + Elements
+	for _, sec := range req.Sections {
+
+		rSec, err := tx.Exec(`INSERT INTO CMS_Section (id_cms, title) VALUES (?,?)`,
+			idCMS, sec.Title)
+		if err != nil { tx.Rollback(); return 0, err }
+		idSection, _ := rSec.LastInsertId()
+
+		if len(sec.Subsections) > 0 {
+			// ada subseksi normal
+			for _, sub := range sec.Subsections {
+				rSub, err := tx.Exec(`INSERT INTO CMS_Subsection (id_section, title) VALUES (?,?)`,
+					idSection, sub.Title)
+				if err != nil { tx.Rollback(); return 0, err }
+				idSub, _ := rSub.LastInsertId()
+
+				if err := insertElements(tx, idSection, &idSub, sub.Elements); err != nil {
+					tx.Rollback(); return 0, err
+				}
+			}
+		} else if len(sec.Elements) > 0 {
+			// elemen langsung di level section (id_subsection = NULL)
+			if err := insertElements(tx, idSection, nil, sec.Elements); err != nil {
+				tx.Rollback(); return 0, err
+			}
+		}
+	}
+
+	// 5) Audit trail ke Management_CMS
+	if _, err := tx.Exec(`
+		INSERT INTO Management_CMS (id_management,id_cms,created_by,updated_by)
+		VALUES (?,?,?,?)`,
+		mgmt.IDManagement, idCMS, mgmt.CreatedBy, mgmt.UpdatedBy); err != nil {
+		tx.Rollback(); return 0, err
+	}
+
+	// commit
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return idCMS, nil
+}
+
+// -------------------- helper private --------------------
+
+// memvalidasi seluruh id_element yang dikirim user
+func (svc *CMSService) validateElementIDs(tx *sql.Tx, req models.CreateCMSRequest) error {
+	elementIDs := map[int]struct{}{}
 	for _, sec := range req.Sections {
 		for _, el := range sec.Elements {
 			elementIDs[el.IDElement] = struct{}{}
@@ -73,94 +115,74 @@ func (svc *CMSService) CreateCMSWithSections(
 			}
 		}
 	}
-	if len(elementIDs) > 0 {
-		placeholders := make([]string, 0, len(elementIDs))
-		args := make([]interface{}, 0, len(elementIDs))
-		for id := range elementIDs {
-			placeholders = append(placeholders, "?")
-			args = append(args, id)
-		}
-		query := fmt.Sprintf("SELECT id_element FROM Elements WHERE id_element IN (%s)", strings.Join(placeholders, ","))
-		exRows, err := svc.DB.Query(query, args...)
-		if err != nil {
-			tx.Rollback()
-			return 0, err
-		}
-		defer exRows.Close()
-
-		existing := make(map[int]struct{})
-		for exRows.Next() {
-			var id int
-			exRows.Scan(&id)
-			existing[id] = struct{}{}
-		}
-		for id := range elementIDs {
-			if _, ok := existing[id]; !ok {
-				tx.Rollback()
-				return 0, errInvalidElementID{ID: id}
-			}
-		}
+	if len(elementIDs) == 0 {
+		return nil
 	}
 
-	// 4) Insert sections, subsections, elements, and Detail_Element
-	for _, sec := range req.Sections {
-		// section
-		rS, err := tx.Exec(`INSERT INTO CMS_Section (id_cms, title) VALUES (?, ?)`, idCMS, sec.Title)
-		if err != nil { tx.Rollback(); return 0, err }
-		idSection, _ := rS.LastInsertId()
+	placeholders := make([]string, 0, len(elementIDs))
+	args := make([]interface{}, 0, len(elementIDs))
+	for id := range elementIDs {
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	query := fmt.Sprintf(
+		`SELECT id_element FROM Elements WHERE id_element IN (%s)`,
+		strings.Join(placeholders, ","))
+	rows, err := tx.Query(query, args...)
+	if err != nil { return err }
+	defer rows.Close()
 
-		subs := sec.Subsections
-		if len(subs) == 0 && len(sec.Elements) > 0 {
-			subs = []models.SubsectionRequest{{Title: "", Elements: sec.Elements}}
-		}
-		for _, sub := range subs {
-			rSub, err := tx.Exec(`INSERT INTO CMS_Subsection (id_section, title) VALUES (?, ?)`, idSection, sub.Title)
-			if err != nil { tx.Rollback(); return 0, err }
-			idSub, _ := rSub.LastInsertId()
-
-			for _, el := range sub.Elements {
-				// prepare element_options
-				var opts interface{}
-				if len(el.ElementOptions) == 0 || string(el.ElementOptions) == "null" {
-					opts = nil
-				} else {
-					opts = json.RawMessage(el.ElementOptions)
-				}
-
-				// insert CMS_Elements
-				rE, err := tx.Exec(
-					`INSERT INTO CMS_Elements
-					 (id_section, id_subsection, element_label, element_name, element_options, element_hint, is_required)
-					 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-					idSection, idSub,
-					el.ElementLabel, el.ElementName,
-					opts, el.ElementHint, el.IsRequired,
-				)
-				if err != nil { tx.Rollback(); return 0, err }
-				idCE, _ := rE.LastInsertId()
-
-				// link to master element
-				if _, err := tx.Exec(`INSERT INTO Detail_Element (id_element, id_cms_elements) VALUES (?, ?)`, el.IDElement, idCE); err != nil {
-					tx.Rollback(); return 0, err
-				}
-			}
+	existence := map[int]struct{}{}
+	for rows.Next() {
+		var id int
+		rows.Scan(&id)
+		existence[id] = struct{}{}
+	}
+	for id := range elementIDs {
+		if _, ok := existence[id]; !ok {
+			return errInvalidElementID{ID: id}
 		}
 	}
+	return nil
+}
 
-	// 5) Insert Management_CMS
-	if _, err := tx.Exec(
-		`INSERT INTO Management_CMS (id_management, id_cms, created_by, updated_by) VALUES (?, ?, ?, ?)`,
-		mgmt.IDManagement, idCMS, mgmt.CreatedBy, mgmt.UpdatedBy,
-	); err != nil {
-		tx.Rollback()
-		return 0, err
-	}
+// insertElements menyisipkan array elemen ke CMS_Elements + Detail_Element.
+// idSub=nil ➜ kolom id_subsection disimpan NULL.
+func insertElements(
+	tx *sql.Tx,
+	idSection int64,
+	idSub *int64,
+	elements []models.ElementRequest,
+) error {
 
-	// commit
-	if err := tx.Commit(); err != nil {
-		return 0, err
+	for _, el := range elements {
+
+		// siapkan element_options (nullable)
+		var opts interface{}
+		if len(el.ElementOptions) != 0 && string(el.ElementOptions) != "null" {
+			opts = json.RawMessage(el.ElementOptions)
+		}
+
+		// subID = NULL jika tidak ada subsection
+		var subID interface{} = nil
+		if idSub != nil { subID = *idSub }
+
+		rE, err := tx.Exec(`
+			INSERT INTO CMS_Elements
+			  (id_section, id_subsection, element_label, element_name,
+			   element_options, element_hint, is_required)
+			VALUES (?,?,?,?,?,?,?)`,
+			idSection, subID,
+			el.ElementLabel, el.ElementName,
+			opts, el.ElementHint, el.IsRequired)
+		if err != nil { return err }
+
+		idCE, _ := rE.LastInsertId()
+		if _, err := tx.Exec(`
+			INSERT INTO Detail_Element (id_element, id_cms_elements) VALUES (?,?)`,
+			el.IDElement, idCE); err != nil { return err }
 	}
-	return idCMS, nil
+	return nil
 }
 
 
