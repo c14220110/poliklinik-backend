@@ -120,21 +120,24 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 }
 
 func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
-	namaRole   := c.QueryParam("nama_role")
-	status     := c.QueryParam("status")
-	idKaryawan := c.QueryParam("id_karyawan")
+	namaRole   := c.QueryParam("nama_role")   // filter multiple ‑ comma separated
+	idKaryawan := c.QueryParam("id_karyawan") // optional exact id
 
 	// pagination
 	page, limit := 1, 10
 	if p := c.QueryParam("page"); p != "" {
-		if v, err := strconv.Atoi(p); err == nil && v > 0 { page = v }
+		if v, err := strconv.Atoi(p); err == nil && v > 0 {
+			page = v
+		}
 	}
 	if l := c.QueryParam("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 { limit = v }
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = v
+		}
 	}
 
 	list, total, err := kc.Service.GetKaryawanListFiltered(
-		namaRole, status, idKaryawan, page, limit,
+		namaRole, idKaryawan, page, limit,
 	)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, echo.Map{
@@ -144,7 +147,7 @@ func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
 		})
 	}
 
-	maxPage := (total + limit - 1) / limit // pembulatan ke atas
+	maxPage := (total + limit - 1) / limit // ceil
 
 	return c.JSON(http.StatusOK, echo.Map{
 		"status":  http.StatusOK,
@@ -158,6 +161,7 @@ func (kc *KaryawanController) GetKaryawanListHandler(c echo.Context) error {
 		},
 	})
 }
+
 
 
 func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {

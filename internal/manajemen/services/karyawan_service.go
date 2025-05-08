@@ -268,22 +268,24 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 	return karyawan.IDKaryawan, nil
 }
 
-// mengembalikan (list, totalCount, error)
+// hanya mengembalikan karyawan AKTIF (deleted_at IS NULL)
 func (s *ManagementService) GetKaryawanListFiltered(
-	namaRoleFilter, statusFilter, idKaryawanFilter string,
+	namaRoleFilter, idKaryawanFilter string,
 	page, limit int,
 ) ([]map[string]interface{}, int, error) {
 
-	// ---------- query utama (dengan DISTINCT roles & privileges) ----------
+	// --- FROM & JOIN ---
 	base := `
 		FROM Karyawan k
-		LEFT JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
-		LEFT JOIN Role r                ON drk.id_role     = r.id_role
-		LEFT JOIN Detail_Privilege_Karyawan dp ON k.id_karyawan = dp.id_karyawan
+		LEFT JOIN Detail_Role_Karyawan      drk ON k.id_karyawan = drk.id_karyawan
+		LEFT JOIN Role                      r   ON drk.id_role   = r.id_role
+		LEFT JOIN Detail_Privilege_Karyawan dp  ON k.id_karyawan = dp.id_karyawan
 	`
-	conds := []string{}
+
+	conds := []string{"k.deleted_at IS NULL"}           // <‑‑ aktif saja
 	args  := []interface{}{}
 
+	// filter id_karyawan exact
 	if idKaryawanFilter != "" {
 		if id, err := strconv.Atoi(idKaryawanFilter); err == nil {
 			conds = append(conds, "k.id_karyawan = ?")
@@ -292,54 +294,48 @@ func (s *ManagementService) GetKaryawanListFiltered(
 			return nil, 0, fmt.Errorf("invalid id_karyawan")
 		}
 	}
+
+	// filter nama_role (OR di dalam, AND dengan filter lain)
 	if namaRoleFilter != "" {
 		roleList := strings.Split(namaRoleFilter, ",")
-		roleCond := make([]string, 0, len(roleList))
+		var ors []string
 		for _, rname := range roleList {
-			roleCond = append(roleCond, "r.nama_role = ?")
+			ors = append(ors, "r.nama_role = ?")
 			args = append(args, strings.TrimSpace(rname))
 		}
-		conds = append(conds, "("+strings.Join(roleCond, " OR ")+")")
-	}
-	if statusFilter != "" {
-		switch strings.ToLower(statusFilter) {
-		case "aktif":
-			conds = append(conds, "k.deleted_at IS NULL")
-		case "nonaktif":
-			conds = append(conds, "k.deleted_at IS NOT NULL")
-		}
+		conds = append(conds, "("+strings.Join(ors, " OR ")+")")
 	}
 
-	where := ""
-	if len(conds) > 0 { where = "WHERE " + strings.Join(conds, " AND ") }
+	// WHERE‑clause
+	where := "WHERE " + strings.Join(conds, " AND ")
 
-	// ---------- total count (tanpa LIMIT) ----------
-	countQuery := "SELECT COUNT(DISTINCT k.id_karyawan) " + base + " " + where
+	// ---------- total ----------
+	cntSQL := "SELECT COUNT(DISTINCT k.id_karyawan) " + base + where
 	var total int
-	if err := s.DB.QueryRow(countQuery, args...).Scan(&total); err != nil {
+	if err := s.DB.QueryRow(cntSQL, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count query error: %v", err)
 	}
 
-	// ---------- data query dengan pagination ----------
+	// ---------- data ----------
 	selectCols := `
 		SELECT 
 			k.id_karyawan,
-			GROUP_CONCAT(DISTINCT r.nama_role        SEPARATOR ', ') AS roles,
-			GROUP_CONCAT(DISTINCT dp.id_privilege    SEPARATOR ', ') AS privileges,
+			GROUP_CONCAT(DISTINCT r.nama_role     SEPARATOR ', ') AS roles,
+			GROUP_CONCAT(DISTINCT dp.id_privilege SEPARATOR ', ') AS privileges,
 			k.nama, k.username, k.nik, k.jenis_kelamin,
 			k.tanggal_lahir, k.alamat, k.no_telp, k.sip
 	`
-	dataQuery := selectCols + base + " " + where +
+	dataSQL := selectCols + base + where +
 		" GROUP BY k.id_karyawan ORDER BY k.id_karyawan LIMIT ? OFFSET ?"
+
 	fullArgs := append(args, limit, (page-1)*limit)
 
-	rows, err := s.DB.Query(dataQuery, fullArgs...)
+	rows, err := s.DB.Query(dataSQL, fullArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("data query error: %v", err)
 	}
 	defer rows.Close()
 
-	// ---------- scan ----------
 	var list []map[string]interface{}
 	for rows.Next() {
 		var (
@@ -370,20 +366,24 @@ func (s *ManagementService) GetKaryawanListFiltered(
 			rec["roles"] = strings.Split(roleStr.String, ", ")
 		}
 		if privStr.Valid && privStr.String != "" {
-			var privs []int
 			for _, p := range strings.Split(privStr.String, ", ") {
-				if v, err := strconv.Atoi(p); err == nil { privs = append(privs, v) }
+				if v, err := strconv.Atoi(p); err == nil {
+					rec["privileges"] = append(rec["privileges"].([]int), v)
+				}
 			}
-			rec["privileges"] = privs
 		}
-		if tgl.Valid { rec["tanggal_lahir"] = tgl.Time.Format("2006-01-02") }
-		if sip.Valid { rec["nomor_sip"] = sip.String }
-
+		if tgl.Valid {
+			rec["tanggal_lahir"] = tgl.Time.Format("2006-01-02")
+		}
+		if sip.Valid {
+			rec["nomor_sip"] = sip.String
+		}
 		list = append(list, rec)
 	}
 
 	return list, total, nil
 }
+
 
 
 func (s *ManagementService) SoftDeleteKaryawan(idKaryawan int, deletedBy int) error {
