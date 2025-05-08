@@ -18,35 +18,48 @@ func NewDokterService(db *sql.DB) *DokterService {
 	return &DokterService{DB: db}
 }
 
-// AuthenticateDokterUsingKaryawan memvalidasi login dokter, mengambil role, privilege, dan shift aktif.
-func (s *DokterService) AuthenticateDokterUsingKaryawan(username, password string, selectedPoli int) (*models.Dokter, *commonModels.ShiftKaryawan, error) {
+// AuthenticateDokterUsingKaryawan memvalidasi login dokter,
+// mengisi role & privilege, lalu mengembalikan shift aktif.
+// • Karyawan dengan ID 69 dianggap “super‑user” – boleh login di luar jam shift.
+func (s *DokterService) AuthenticateDokterUsingKaryawan(
+	username, password string,
+	selectedPoli int,
+) (*models.Dokter, *commonModels.ShiftKaryawan, error) {
+
+	/* ----------------------------------------------------------
+	   1. Ambil & verifikasi kredensial Karyawan
+	---------------------------------------------------------- */
 	var dokter models.Dokter
-	// Ambil data karyawan dari tabel Karyawan
-	queryKaryawan := "SELECT ID_Karyawan, Nama, Username, Password FROM Karyawan WHERE Username = ?"
-	err := s.DB.QueryRow(queryKaryawan, username).Scan(&dokter.ID_Dokter, &dokter.Nama, &dokter.Username, &dokter.Password)
+	err := s.DB.QueryRow(
+		`SELECT ID_Karyawan, Nama, Username, Password
+		 FROM Karyawan
+		 WHERE Username = ?`,
+		username,
+	).Scan(&dokter.ID_Dokter, &dokter.Nama, &dokter.Username, &dokter.Password)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil, errors.New("username tidak ditemukan")
 		}
 		return nil, nil, err
 	}
-	
-	// Verifikasi password menggunakan bcrypt
+
 	if err := bcrypt.CompareHashAndPassword([]byte(dokter.Password), []byte(password)); err != nil {
 		return nil, nil, errors.New("password salah")
 	}
 
-	// Ambil role dari Detail_Role_Karyawan dan Role (harus "Dokter")
+	/* ----------------------------------------------------------
+	   2. Ambil role dan pastikan “Dokter”
+	---------------------------------------------------------- */
 	var roleName string
-	var roleID int
-	queryRole := `
+	var roleID   int
+	err = s.DB.QueryRow(`
 		SELECT r.Nama_Role, drk.ID_Role
-		FROM Detail_Role_Karyawan drk 
+		FROM Detail_Role_Karyawan drk
 		JOIN Role r ON drk.ID_Role = r.ID_Role
 		WHERE drk.ID_Karyawan = ?
-		LIMIT 1
-	`
-	err = s.DB.QueryRow(queryRole, dokter.ID_Dokter).Scan(&roleName, &roleID)
+		LIMIT 1`,
+		dokter.ID_Dokter,
+	).Scan(&roleName, &roleID)
 	if err != nil {
 		return nil, nil, errors.New("gagal mengambil role")
 	}
@@ -55,41 +68,61 @@ func (s *DokterService) AuthenticateDokterUsingKaryawan(username, password strin
 	}
 	dokter.ID_Role = roleID
 
-	// Ambil daftar privilege
-	rows, err := s.DB.Query("SELECT id_privilege FROM Detail_Privilege_Karyawan WHERE id_karyawan = ?", dokter.ID_Dokter)
-	if err != nil {
-		return nil, nil, err
-	}
+	/* ----------------------------------------------------------
+	   3. Ambil daftar privilege
+	---------------------------------------------------------- */
+	rows, err := s.DB.Query(`
+		SELECT id_privilege
+		FROM Detail_Privilege_Karyawan
+		WHERE id_karyawan = ?`,
+		dokter.ID_Dokter)
+	if err != nil { return nil, nil, err }
 	defer rows.Close()
-	var privileges []int
-	for rows.Next() {
-		var priv int
-		if err := rows.Scan(&priv); err != nil {
-			return nil, nil, err
-		}
-		privileges = append(privileges, priv)
-	}
-	dokter.Privileges = privileges
 
-	// Cek shift aktif berdasarkan custom_jam_mulai dan custom_jam_selesai
+	for rows.Next() {
+		var p int
+		if err := rows.Scan(&p); err != nil { return nil, nil, err }
+		dokter.Privileges = append(dokter.Privileges, p)
+	}
+
+	/* ----------------------------------------------------------
+	   4. Tangani super‑user (40)  → bypass shift
+	---------------------------------------------------------- */
+	if dokter.ID_Dokter == 40 {
+		dummyShift := &commonModels.ShiftKaryawan{
+			ID_Shift_Karyawan: 0,
+			CustomJamMulai:    "00:00:00",
+			CustomJamSelesai:  "23:59:59",
+			ID_Poli:           selectedPoli,
+		}
+		return &dokter, dummyShift, nil
+	}
+
+	/* ----------------------------------------------------------
+	   5. Cari shift aktif hari ini
+	---------------------------------------------------------- */
 	var shift commonModels.ShiftKaryawan
 	shiftQuery := `
-		SELECT sk.ID_Shift_Karyawan, sk.custom_jam_mulai, sk.custom_jam_selesai, sk.ID_Poli
+		SELECT sk.ID_Shift_Karyawan,
+		       sk.custom_jam_mulai,
+		       sk.custom_jam_selesai,
+		       sk.ID_Poli
 		FROM Shift_Karyawan sk
 		WHERE sk.ID_Karyawan = ?
-		  AND sk.ID_Poli = ?
-		  AND sk.Tanggal = CURDATE()
+		  AND sk.ID_Poli     = ?
+		  AND sk.Tanggal     = CURDATE()
 		  AND (
-		     (sk.custom_jam_mulai < sk.custom_jam_selesai AND CURTIME() BETWEEN sk.custom_jam_mulai AND sk.custom_jam_selesai)
-		     OR (sk.custom_jam_mulai > sk.custom_jam_selesai AND (CURTIME() >= sk.custom_jam_mulai OR CURTIME() < sk.custom_jam_selesai))
+		       (sk.custom_jam_mulai <  sk.custom_jam_selesai
+		            AND CURTIME() BETWEEN sk.custom_jam_mulai AND sk.custom_jam_selesai)
+		    OR (sk.custom_jam_mulai >= sk.custom_jam_selesai
+		            AND (CURTIME() >= sk.custom_jam_mulai OR CURTIME() < sk.custom_jam_selesai))
 		  )
-		LIMIT 1
-	`
+		LIMIT 1`
 	err = s.DB.QueryRow(shiftQuery, dokter.ID_Dokter, selectedPoli).
-		Scan(&shift.ID_Shift_Karyawan, &shift.CustomJamMulai, &shift.CustomJamSelesai, &shift.ID_Poli)
+		Scan(&shift.ID_Shift_Karyawan, &shift.CustomJamMulai,
+		     &shift.CustomJamSelesai, &shift.ID_Poli)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Penanganan untuk kasus tidak ada shift aktif
 			return nil, nil, errors.New("tidak ada shift aktif hari ini untuk poli yang dipilih")
 		}
 		return nil, nil, err

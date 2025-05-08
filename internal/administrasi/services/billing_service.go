@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/c14220110/poliklinik-backend/internal/administrasi/models"
 )
 
 type BillingService struct {
@@ -95,4 +97,74 @@ func (s *BillingService) GetBillingData(idPoliFilter, statusFilter string) ([]ma
 		results = append(results, record)
 	}
 	return results, nil
+}
+
+func (svc *BillingService) SaveBillingAssessment(
+	idAntrian int,
+	idAssessment int,
+	idKaryawanJWT int,
+	in models.InputBillingRequest,
+) error {
+
+	tx, err := svc.DB.Begin()
+	if err != nil { return err }
+	defer func() { if err != nil { tx.Rollback() } }()
+
+	// ---- 1. assessment & antrian cocok ----
+	var idPasienFromAss, idPasienFromAntrian int
+	if err = tx.QueryRow(
+		`SELECT id_pasien FROM Assessment WHERE id_assessment = ?`,
+		idAssessment).Scan(&idPasienFromAss); err != nil {
+		if err == sql.ErrNoRows { return fmt.Errorf("assessment not found") }
+		return err
+	}
+	if err = tx.QueryRow(
+		`SELECT id_pasien FROM Antrian WHERE id_antrian = ?`,
+		idAntrian).Scan(&idPasienFromAntrian); err != nil {
+		return err
+	}
+	if idPasienFromAss != idPasienFromAntrian {
+		return fmt.Errorf("assessment does not belong to given antrian")
+	}
+
+	// ---- 2. prepare statement ----
+	stmtSel, err := tx.Prepare(`SELECT display FROM ICD9_CM WHERE id_icd9_cm = ?`)
+	if err != nil { return err }
+	defer stmtSel.Close()
+
+	stmtIns, err := tx.Prepare(`
+		INSERT INTO Billing_Assessment
+		  (id_assessment, id_karyawan, id_icd9_cm, nama_tindakan,
+		   jumlah, harga_tindakan, created_at)
+		VALUES (?,?,?,?,?,?,?)`)
+	if err != nil { return err }
+	defer stmtIns.Close()
+
+	// id_karyawan (PIC) — jika body diisi 0, fallback ke JWT
+	picID := in.NamaPICTindakan
+	if picID == 0 {
+		picID = idKaryawanJWT
+	}
+
+	// ---- 3. loop tindakan ----
+	for _, td := range in.Tindakan {
+		var display string
+		if err = stmtSel.QueryRow(td.Tindakan).Scan(&display); err != nil {
+			return fmt.Errorf("icd9_cm %s not found", td.Tindakan)
+		}
+
+		if _, err = stmtIns.Exec(
+			idAssessment,
+			picID,
+			td.Tindakan,
+			display,
+			td.Jumlah,
+			td.Harga,
+			time.Now(),
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
