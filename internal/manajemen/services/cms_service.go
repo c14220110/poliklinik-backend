@@ -581,13 +581,16 @@ func (svc *CMSService) SaveAssessment(
 
 	// ---------- 2. Ambil daftar elemen aktif ----------
 	rows, err := svc.DB.Query(`
-		SELECT element_name, is_required
-		FROM CMS_Elements e
-		  JOIN CMS_Section s ON s.id_section = e.id_section AND s.deleted_at IS NULL
-		  LEFT JOIN CMS_Subsection ss ON ss.id_subsection = e.id_subsection
-		                                AND (ss.deleted_at IS NULL OR e.id_subsection IS NULL)
-		WHERE e.id_cms = ? AND e.deleted_at IS NULL`,
-		idCMS)
+    SELECT e.element_name, e.is_required
+    FROM CMS_Section s
+      JOIN CMS_Elements   e  ON e.id_section   = s.id_section
+                              AND e.deleted_at IS NULL
+      LEFT JOIN CMS_Subsection ss ON ss.id_subsection = e.id_subsection
+                                    AND (ss.deleted_at IS NULL OR e.id_subsection IS NULL)
+    WHERE s.id_cms = ?                -- ← gunakan kolom di CMS_Section
+      AND s.deleted_at IS NULL`,
+    idCMS)
+
 	if err != nil { return 0, err }
 	defer rows.Close()
 
