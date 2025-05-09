@@ -115,7 +115,7 @@ func (svc *BillingService) SaveBillingAssessment(
 		}
 	}()
 
-	// ---- 1. Check if assessment & antrian match ----
+	// 1. Memeriksa kecocokan assessment dan antrian
 	var idPasienFromAss, idPasienFromAntrian int
 	if err = tx.QueryRow(
 		`SELECT id_pasien FROM Assessment WHERE id_assessment = ?`,
@@ -134,7 +134,7 @@ func (svc *BillingService) SaveBillingAssessment(
 		return fmt.Errorf("assessment does not belong to given antrian")
 	}
 
-	// ---- 2. Prepare statements ----
+	// 2. Menyiapkan prepared statements
 	stmtSel, err := tx.Prepare(`SELECT display, harga FROM ICD9_CM WHERE id_icd9_cm = ?`)
 	if err != nil {
 		return err
@@ -144,20 +144,20 @@ func (svc *BillingService) SaveBillingAssessment(
 	stmtIns, err := tx.Prepare(`
 		INSERT INTO Billing_Assessment
 		  (id_assessment, id_karyawan, id_icd9_cm, nama_tindakan,
-		   jumlah, harga_tindakan, created_at)
+		   jumlah, total_harga_tindakan, created_at)
 		VALUES (?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
 	defer stmtIns.Close()
 
-	// id_karyawan (PIC) — jika body diisi 0, fallback ke JWT
+	// Menentukan id_karyawan (PIC) — jika body diisi 0, gunakan id dari JWT
 	picID := in.NamaPICTindakan
 	if picID == 0 {
 		picID = idKaryawanJWT
 	}
 
-	// ---- 3. Loop through tindakan ----
+	// 3. Memproses setiap tindakan
 	for _, td := range in.Tindakan {
 		var display string
 		var harga float64
@@ -165,13 +165,16 @@ func (svc *BillingService) SaveBillingAssessment(
 			return fmt.Errorf("icd9_cm %s not found", td.Tindakan)
 		}
 
+		// Menghitung total_harga_tindakan
+		totalHarga := float64(td.Jumlah) * harga
+
 		if _, err = stmtIns.Exec(
 			idAssessment,
 			picID,
 			td.Tindakan,
 			display,
 			td.Jumlah,
-			harga,
+			totalHarga,
 			time.Now(),
 		); err != nil {
 			return err
