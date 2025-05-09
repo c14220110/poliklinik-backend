@@ -105,17 +105,24 @@ func (svc *BillingService) SaveBillingAssessment(
 	idKaryawanJWT int,
 	in models.InputBillingRequest,
 ) error {
-
 	tx, err := svc.DB.Begin()
-	if err != nil { return err }
-	defer func() { if err != nil { tx.Rollback() } }()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
 
-	// ---- 1. assessment & antrian cocok ----
+	// ---- 1. Check if assessment & antrian match ----
 	var idPasienFromAss, idPasienFromAntrian int
 	if err = tx.QueryRow(
 		`SELECT id_pasien FROM Assessment WHERE id_assessment = ?`,
 		idAssessment).Scan(&idPasienFromAss); err != nil {
-		if err == sql.ErrNoRows { return fmt.Errorf("assessment not found") }
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("assessment not found")
+		}
 		return err
 	}
 	if err = tx.QueryRow(
@@ -127,9 +134,11 @@ func (svc *BillingService) SaveBillingAssessment(
 		return fmt.Errorf("assessment does not belong to given antrian")
 	}
 
-	// ---- 2. prepare statement ----
-	stmtSel, err := tx.Prepare(`SELECT display FROM ICD9_CM WHERE id_icd9_cm = ?`)
-	if err != nil { return err }
+	// ---- 2. Prepare statements ----
+	stmtSel, err := tx.Prepare(`SELECT display, harga FROM ICD9_CM WHERE id_icd9_cm = ?`)
+	if err != nil {
+		return err
+	}
 	defer stmtSel.Close()
 
 	stmtIns, err := tx.Prepare(`
@@ -137,19 +146,22 @@ func (svc *BillingService) SaveBillingAssessment(
 		  (id_assessment, id_karyawan, id_icd9_cm, nama_tindakan,
 		   jumlah, harga_tindakan, created_at)
 		VALUES (?,?,?,?,?,?,?)`)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer stmtIns.Close()
 
-	// id_karyawan (PIC) — jika body diisi 0, fallback ke JWT
+	// id_karyawan (PIC) — jika body diisi 0, fallback ke JWT
 	picID := in.NamaPICTindakan
 	if picID == 0 {
 		picID = idKaryawanJWT
 	}
 
-	// ---- 3. loop tindakan ----
+	// ---- 3. Loop through tindakan ----
 	for _, td := range in.Tindakan {
 		var display string
-		if err = stmtSel.QueryRow(td.Tindakan).Scan(&display); err != nil {
+		var harga float64
+		if err = stmtSel.QueryRow(td.Tindakan).Scan(&display, &harga); err != nil {
 			return fmt.Errorf("icd9_cm %s not found", td.Tindakan)
 		}
 
@@ -159,7 +171,7 @@ func (svc *BillingService) SaveBillingAssessment(
 			td.Tindakan,
 			display,
 			td.Jumlah,
-			td.Harga,
+			harga,
 			time.Now(),
 		); err != nil {
 			return err
