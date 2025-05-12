@@ -404,7 +404,7 @@ func (s *ShiftService) GetKaryawanTanpaShift(idShift int, idRole *int, tanggalSt
             switch trimmedRole {
             case "Administrasi":
                 hasAdminSuster = true
-                otherRoles = append(otherRoles, "Admin")
+                otherRoles = append(otherRoles, "Administrasi")
             case "Suster":
                 hasAdminSuster = true
                 otherRoles = append(otherRoles, "Suster")
