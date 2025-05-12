@@ -774,7 +774,7 @@ func (s *ShiftService) AssignShiftNew(idPoli, idShift, idManagement int, tanggal
 				INSERT INTO Management_Shift_Karyawan (id_management, id_shift_karyawan, created_by, updated_by, deleted_by)
 				VALUES (?, ?, ?, ?, ?)
 			`
-			_, err = tx.Exec(insertManagementShiftQuery, idManagement, idShiftKaryawan, idManagement, idManagement, 0)
+			_, err = tx.Exec(insertManagementShiftQuery, idManagement, idShiftKaryawan, idManagement, idManagement, nil)
 			if err != nil {
 				tx.Rollback()
 				return fmt.Errorf("gagal memasukkan management shift untuk karyawan %d dengan role %s: %v", req.IDKaryawan, roleName, err)
