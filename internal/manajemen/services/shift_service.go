@@ -185,59 +185,62 @@ func (s *ShiftService) GetListKaryawanFiltered(
 	// Parse id_poli dan id_shift (wajib)
 	idPoli, err := strconv.Atoi(idPoliFilter)
 	if err != nil {
-		return nil, fmt.Errorf("invalid id_poli value: %v", err)
+			return nil, fmt.Errorf("invalid id_poli value: %v", err)
 	}
 	idShift, err := strconv.Atoi(idShiftFilter)
 	if err != nil {
-		return nil, fmt.Errorf("invalid id_shift value: %v", err)
+			return nil, fmt.Errorf("invalid id_shift value: %v", err)
 	}
 
 	// Parse tanggal: jika kosong, gunakan hari ini; jika ada, format DD/MM/YYYY
 	var tanggal string
 	if strings.TrimSpace(tanggalFilter) == "" {
-		tanggal = time.Now().Format("2006-01-02")
+			tanggal = time.Now().Format("2006-01-02")
 	} else {
-		parsed, err := time.Parse("02/01/2006", tanggalFilter)
-		if err != nil {
-			return nil, fmt.Errorf("invalid tanggal format, harus DD/MM/YYYY: %v", err)
-		}
-		tanggal = parsed.Format("2006-01-02")
+			parsed, err := time.Parse("02/01/2006", tanggalFilter)
+			if err != nil {
+					return nil, fmt.Errorf("invalid tanggal format, harus DD/MM/YYYY: %v", err)
+			}
+			tanggal = parsed.Format("2006-01-02")
 	}
 
-	// Query untuk mengambil data karyawan beserta role dari Shift_Karyawan
+	// Query SQL dengan filter soft delete
 	query := `
-		SELECT
-			k.id_karyawan,
-			k.nama,
-			k.nik,
-			k.username,
-			k.no_telp,
-			k.alamat,
-			k.jenis_kelamin,
-			sk.custom_jam_mulai,
-			sk.custom_jam_selesai,
-			sk.id_shift_karyawan,
-			r.nama_role AS role
-		FROM Karyawan k
-		JOIN Shift_Karyawan sk
-			ON k.id_karyawan = sk.id_karyawan
-			AND sk.id_poli = ?
-			AND sk.id_shift = ?
-			AND sk.tanggal = ?
-		JOIN Role r
-			ON sk.id_role = r.id_role
-		WHERE k.deleted_at IS NULL
+			SELECT
+					k.id_karyawan,
+					k.nama,
+					k.nik,
+					k.username,
+					k.no_telp,
+					k.alamat,
+					k.jenis_kelamin,
+					sk.custom_jam_mulai,
+					sk.custom_jam_selesai,
+					sk.id_shift_karyawan,
+					r.nama_role AS role
+			FROM Karyawan k
+			JOIN Shift_Karyawan sk
+					ON k.id_karyawan = sk.id_karyawan
+					AND sk.id_poli = ?
+					AND sk.id_shift = ?
+					AND sk.tanggal = ?
+			JOIN Role r
+					ON sk.id_role = r.id_role
+			JOIN Management_Shift_Karyawan msk
+					ON sk.id_shift_karyawan = msk.id_shift_karyawan
+			WHERE k.deleted_at IS NULL
+					AND msk.deleted_by IS NULL
 	`
 	args := []interface{}{idPoli, idShift, tanggal}
 
 	// Tambahkan filter id_role jika disediakan
 	if strings.TrimSpace(idRoleFilter) != "" {
-		idRole, err := strconv.Atoi(idRoleFilter)
-		if err != nil {
-			return nil, fmt.Errorf("invalid id_role value: %v", err)
-		}
-		query += " AND sk.id_role = ?"
-		args = append(args, idRole)
+			idRole, err := strconv.Atoi(idRoleFilter)
+			if err != nil {
+					return nil, fmt.Errorf("invalid id_role value: %v", err)
+			}
+			query += " AND sk.id_role = ?"
+			args = append(args, idRole)
 	}
 
 	query += " ORDER BY k.id_karyawan, sk.id_shift_karyawan"
@@ -245,51 +248,51 @@ func (s *ShiftService) GetListKaryawanFiltered(
 	// Eksekusi query
 	rows, err := s.DB.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query error: %v", err)
+			return nil, fmt.Errorf("query error: %v", err)
 	}
 	defer rows.Close()
 
 	// Simpan hasil
 	var results []map[string]interface{}
 	for rows.Next() {
-		var temp struct {
-			idKaryawan       int
-			nama             string
-			nik              string
-			username         string
-			noTelp           string
-			alamat           string
-			jenisKelamin     string
-			customJamMulai   string
-			customJamSelesai string
-			idShiftKaryawan  int
-			role             string
-		}
-		if err := rows.Scan(
-			&temp.idKaryawan, &temp.nama, &temp.nik, &temp.username, &temp.noTelp,
-			&temp.alamat, &temp.jenisKelamin, &temp.customJamMulai,
-			&temp.customJamSelesai, &temp.idShiftKaryawan, &temp.role,
-		); err != nil {
-			return nil, fmt.Errorf("scan error: %v", err)
-		}
-		record := map[string]interface{}{
-			"id_karyawan":        temp.idKaryawan,
-			"nama":               temp.nama,
-			"NIK":                temp.nik,
-			"username":           temp.username,
-			"roles":              temp.role, // Hanya satu role dari Shift_Karyawan
-			"no_telp":            temp.noTelp,
-			"alamat":             temp.alamat,
-			"jenis_kelamin":      temp.jenisKelamin,
-			"custom_jam_mulai":   temp.customJamMulai,
-			"custom_jam_selesai": temp.customJamSelesai,
-			"id_shift_karyawan":  temp.idShiftKaryawan,
-		}
-		results = append(results, record)
+			var temp struct {
+					idKaryawan       int
+					nama             string
+					nik              string
+					username         string
+					noTelp           string
+					alamat           string
+					jenisKelamin     string
+					customJamMulai   string
+					customJamSelesai string
+					idShiftKaryawan  int
+					role             string
+			}
+			if err := rows.Scan(
+					&temp.idKaryawan, &temp.nama, &temp.nik, &temp.username, &temp.noTelp,
+					&temp.alamat, &temp.jenisKelamin, &temp.customJamMulai,
+					&temp.customJamSelesai, &temp.idShiftKaryawan, &temp.role,
+			); err != nil {
+					return nil, fmt.Errorf("scan error: %v", err)
+			}
+			record := map[string]interface{}{
+					"id_karyawan":        temp.idKaryawan,
+					"nama":               temp.nama,
+					"NIK":                temp.nik,
+					"username":           temp.username,
+					"roles":              temp.role,
+					"no_telp":            temp.noTelp,
+					"alamat":             temp.alamat,
+					"jenis_kelamin":      temp.jenisKelamin,
+					"custom_jam_mulai":   temp.customJamMulai,
+					"custom_jam_selesai": temp.customJamSelesai,
+					"id_shift_karyawan":  temp.idShiftKaryawan,
+			}
+			results = append(results, record)
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows error: %v", err)
+			return nil, fmt.Errorf("rows error: %v", err)
 	}
 
 	return results, nil
