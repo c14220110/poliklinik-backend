@@ -105,7 +105,6 @@ func (rc *ResepController) GetObatList(c echo.Context) error {
 	})
 }
 
-// GetRiwayatKunjunganHandler mengembalikan seluruh record riwayat kunjungan untuk pasien berdasarkan query parameter id_pasien.
 func (rc *ResepController) GetRiwayatKunjunganHandler(c echo.Context) error {
 	idPasienParam := c.QueryParam("id_pasien")
 	if idPasienParam == "" {
@@ -125,18 +124,18 @@ func (rc *ResepController) GetRiwayatKunjunganHandler(c echo.Context) error {
 			})
 	}
 
-	riwayatKunjungan, err := rc.Service.GetRiwayatKunjunganByPasien(idPasien)
+	riwayat, err := rc.Service.GetRiwayatKunjunganByPasien(idPasien)
 	if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 					"status":  http.StatusInternalServerError,
-					"message": "Failed to retrieve riwayat kunjungan records: " + err.Error(),
+					"message": "Failed to retrieve riwayat kunjungan: " + err.Error(),
 					"data":    nil,
 			})
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 			"status":  http.StatusOK,
-			"message": "Riwayat kunjungan records retrieved successfully",
-			"data":    riwayatKunjungan,
+			"message": "Riwayat kunjungan retrieved successfully",
+			"data":    riwayat,
 	})
 }
