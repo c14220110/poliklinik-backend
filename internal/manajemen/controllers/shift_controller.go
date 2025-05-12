@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/common/middlewares"
-	"github.com/c14220110/poliklinik-backend/internal/manajemen/models"
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/services"
 	"github.com/c14220110/poliklinik-backend/pkg/utils"
 	"github.com/labstack/echo/v4"
@@ -27,63 +26,6 @@ func NewShiftController(service *services.ShiftService /*, db *sql.DB */) *Shift
 	}
 }
 
-
-
-
-// POST /api/management/shift/assign?id_poli=..&id_shift=..&tanggal=YYYY-MM-DD
-func (sc *ShiftController) AssignShiftHandler(c echo.Context) error {
-	// --- query param ---
-	idPoli, _  := strconv.Atoi(c.QueryParam("id_poli"))
-	idShift, _ := strconv.Atoi(c.QueryParam("id_shift"))
-	tanggal    := c.QueryParam("tanggal") // "YYYY-MM-DD"
-
-	if idPoli == 0 || idShift == 0 || tanggal == "" {
-		return c.JSON(http.StatusBadRequest, echo.Map{
-			"status": http.StatusBadRequest,
-			"message": "id_poli, id_shift, dan tanggal wajib di-query",
-			"data": nil,
-		})
-	}
-	if _, err := time.Parse("2006-01-02", tanggal); err != nil {
-		return c.JSON(http.StatusBadRequest, echo.Map{
-			"status":  http.StatusBadRequest,
-			"message": "format tanggal harus YYYY-MM-DD",
-			"data":    nil,
-		})
-	}
-
-	// --- body array ---
-	var items []models.ShiftAssignItem
-	if err := c.Bind(&items); err != nil || len(items) == 0 {
-		return c.JSON(http.StatusBadRequest, echo.Map{
-			"status":  http.StatusBadRequest,
-			"message": "payload harus array minimal 1 item",
-			"data":    nil,
-		})
-	}
-
-	// --- id_management dari JWT ---
-	claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
-	if !ok { return c.JSON(http.StatusUnauthorized, echo.Map{
-			"status": http.StatusUnauthorized, "message": "invalid token", "data": nil}) }
-	idMgmt, _ := strconv.Atoi(claims.IDKaryawan)
-
-	// --- panggil service ---
-	ids, err := sc.Service.AssignShiftKaryawan(idPoli, idShift, tanggal, idMgmt, items)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, echo.Map{
-			"status":  http.StatusInternalServerError,
-			"message": "failed to assign shift: " + err.Error(),
-			"data":    nil,
-		})
-	}
-
-	return c.JSON(http.StatusOK, echo.Map{
-		"status":  http.StatusOK,
-		"message": "shift berhasil ditambahkan",
-		"data":    echo.Map{"ids": ids},
-	})
-}
 
 // UpdateCustomShiftHandler menerima query parameter id_shift_karyawan dan request body berisi
 // custom_jam_mulai dan custom_jam_selesai. Handler akan melakukan validasi agar waktu custom berada dalam rentang shift.

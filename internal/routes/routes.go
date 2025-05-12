@@ -172,7 +172,6 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.POST("/privilege", privilegeController.CreatePrivilegeHandler, middlewares.JWTMiddleware())
 
 	// Manajemen Shift & CMS
-	management.POST("/shift/assign", shiftController.AssignShiftHandler, middlewares.JWTMiddleware())
 	management.PUT("/shift/updateCustom", shiftController.UpdateCustomShiftHandler, middlewares.JWTMiddleware())
 	management.PUT("/shift/soft-delete", shiftController.SoftDeleteShiftHandler, middlewares.JWTMiddleware())
 	management.GET("/shift", shiftController.GetShiftPoliList, middlewares.JWTMiddleware())
@@ -187,6 +186,6 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.GET("/shift/karyawan", shiftController.GetKaryawanListHandler, middlewares.JWTMiddleware())
 	management.GET("/shift/karyawan-tanpa-shift", shiftController.GetKaryawanTanpaShiftHandler, middlewares.JWTMiddleware())
 	
-	management.POST("/shift/assign-new", shiftController.AssignShiftHandlerNew, middlewares.JWTMiddleware())
+	management.POST("/shift/assign", shiftController.AssignShiftHandlerNew, middlewares.JWTMiddleware())
 
 }
