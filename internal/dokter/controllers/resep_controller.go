@@ -104,3 +104,39 @@ func (rc *ResepController) GetObatList(c echo.Context) error {
 		"data":    list,
 	})
 }
+
+// GetRiwayatKunjunganHandler mengembalikan seluruh record riwayat kunjungan untuk pasien berdasarkan query parameter id_pasien.
+func (rc *ResepController) GetRiwayatKunjunganHandler(c echo.Context) error {
+	idPasienParam := c.QueryParam("id_pasien")
+	if idPasienParam == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+					"status":  http.StatusBadRequest,
+					"message": "id_pasien parameter is required",
+					"data":    nil,
+			})
+	}
+
+	idPasien, err := strconv.Atoi(idPasienParam)
+	if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+					"status":  http.StatusBadRequest,
+					"message": "id_pasien must be a number",
+					"data":    nil,
+			})
+	}
+
+	riwayatKunjungan, err := rc.Service.GetRiwayatKunjunganByPasien(idPasien)
+	if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+					"status":  http.StatusInternalServerError,
+					"message": "Failed to retrieve riwayat kunjungan records: " + err.Error(),
+					"data":    nil,
+			})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+			"status":  http.StatusOK,
+			"message": "Riwayat kunjungan records retrieved successfully",
+			"data":    riwayatKunjungan,
+	})
+}

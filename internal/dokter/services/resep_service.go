@@ -176,3 +176,95 @@ func (s *ResepService) GetObatList(q string, limit, page int) ([]map[string]inte
 	}
 	return list, nil
 }
+
+func (s *ResepService) GetRiwayatKunjunganByPasien(idPasien int) ([]map[string]interface{}, error) {
+    query := `
+        SELECT 
+            rk.id_kunjungan,
+            rk.created_at AS tanggal,
+            p.nama_poli AS tujuan_poli,
+            a.nomor_antrian,
+            a.keluhan_utama,
+            icd10.display AS hasil_diagnosa,
+            rk.id_resep,
+            rk.id_assessment
+        FROM Riwayat_Kunjungan rk
+        JOIN Rekam_Medis rm ON rk.id_rm = rm.id_rm
+        JOIN Pasien pas ON rm.id_pasien = pas.id_pasien
+        LEFT JOIN Kunjungan_Poli kp ON rk.id_kunjungan = kp.id_kunjungan
+        LEFT JOIN Poliklinik p ON kp.id_poli = p.id_poli
+        LEFT JOIN Antrian a ON rk.id_antrian = a.id_antrian
+        LEFT JOIN Assessment ass ON rk.id_assessment = ass.id_assessment
+        LEFT JOIN ICD10 icd10 ON ass.id_icd10 = icd10.id_icd10
+        WHERE pas.id_pasien = ?
+        ORDER BY rk.created_at DESC
+    `
+    rows, err := s.DB.Query(query, idPasien)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    var riwayatKunjungan []map[string]interface{}
+    for rows.Next() {
+        var kunjungan struct {
+            ID_Kunjungan   int
+            Tanggal        string
+            Tujuan_Poli    string
+            Nomor_Antrian  int
+            Keluhan_Utama  string
+            Hasil_Diagnosa string
+            ID_Resep       int
+            ID_Assessment  int
+        }
+        err := rows.Scan(
+            &kunjungan.ID_Kunjungan,
+            &kunjungan.Tanggal,
+            &kunjungan.Tujuan_Poli,
+            &kunjungan.Nomor_Antrian,
+            &kunjungan.Keluhan_Utama,
+            &kunjungan.Hasil_Diagnosa,
+            &kunjungan.ID_Resep,
+            &kunjungan.ID_Assessment,
+        )
+        if err != nil {
+            return nil, err
+        }
+
+        // Ambil tindakan untuk assessment ini
+        tindakanQuery := `
+            SELECT icd9.display
+            FROM Billing_Assessment ba
+            JOIN ICD9_CM icd9 ON ba.id_icd9_cm = icd9.id_icd9_cm
+            WHERE ba.id_assessment = ?
+        `
+        tindakanRows, err := s.DB.Query(tindakanQuery, kunjungan.ID_Assessment)
+        if err != nil {
+            return nil, err
+        }
+        defer tindakanRows.Close()
+
+        var tindakan []string
+        for tindakanRows.Next() {
+            var display string
+            if err := tindakanRows.Scan(&display); err != nil {
+                return nil, err
+            }
+            tindakan = append(tindakan, display)
+        }
+
+        record := map[string]interface{}{
+            "id_kunjungan":    kunjungan.ID_Kunjungan,
+            "tanggal":         kunjungan.Tanggal,
+            "tujuan_poli":     kunjungan.Tujuan_Poli,
+            "nomor_antrian":   kunjungan.Nomor_Antrian,
+            "keluhan_utama":   kunjungan.Keluhan_Utama,
+            "hasil_diagnosa":  kunjungan.Hasil_Diagnosa,
+            "tindakan":        tindakan,
+            "id_resep":        kunjungan.ID_Resep,
+            "id_assessment":   kunjungan.ID_Assessment,
+        }
+        riwayatKunjungan = append(riwayatKunjungan, record)
+    }
+    return riwayatKunjungan, nil
+}

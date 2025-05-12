@@ -128,6 +128,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter.GET("/antrian/terlama", antrianController.GetAntrianTerlamaHandler, middlewares.JWTMiddleware())
 	dokter.POST("/input-screening", screeningController.InputScreening, middlewares.JWTMiddleware())
 	dokter.GET("/screening", screeningController.GetScreeningByPasienHandler, middlewares.JWTMiddleware())
+	dokter.GET("/kunjungan", resepController.GetRiwayatKunjunganHandler, middlewares.JWTMiddleware())
 	dokter.PUT("/masukkan", antrianController.MasukkanPasienKeDokterHandler, middlewares.JWTMiddleware())
 	dokter.PUT("/pulangkan-pasien", antrianController.PulangkanPasienHandler, middlewares.JWTMiddleware())
 	dokter.POST("/assessment", cmsController.SaveAssessmentHandler, middlewares.JWTMiddleware())
