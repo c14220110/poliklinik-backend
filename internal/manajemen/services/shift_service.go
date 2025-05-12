@@ -204,7 +204,7 @@ func (s *ShiftService) GetListKaryawanFiltered(
 		tanggal = parsed.Format("2006-01-02")
 	}
 
-	// Gunakan query utama dengan GROUP_CONCAT untuk semua role
+	// Gunakan query utama dengan GROUP_CONCAT untuk semua role, hanya tampilkan karyawan yang deleted_at = null
 	query := `
 		SELECT
 			k.id_karyawan,
@@ -228,6 +228,7 @@ func (s *ShiftService) GetListKaryawanFiltered(
 			ON k.id_karyawan = drk.id_karyawan
 		LEFT JOIN Role r
 			ON drk.id_role = r.id_role
+		WHERE k.deleted_at IS NULL
 		GROUP BY
 			k.id_karyawan, k.nama, k.nik, k.username,
 			k.no_telp, k.alamat, k.jenis_kelamin,
