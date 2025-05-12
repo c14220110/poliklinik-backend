@@ -97,13 +97,14 @@ func (s *ShiftService) AssignShiftKaryawan(
 			insertedIDs = append(insertedIDs, idShiftKaryawan)
 
 			// insert Management_Shift_Karyawan
-			if _, err := tx.Exec(
-				`INSERT INTO Management_Shift_Karyawan
-				   (id_management,id_shift_karyawan,created_by,updated_by,deleted_by)
-				 VALUES (?,?,?,?,0)`,
-				idManagement, idShiftKaryawan, idManagement, idManagement); err != nil {
-				tx.Rollback(); return nil, err
-			}
+if _, err := tx.Exec(
+	`INSERT INTO Management_Shift_Karyawan
+		 (id_management, id_shift_karyawan, created_by, updated_by, deleted_by)
+	 VALUES (?,?,?,?,?)`,
+	idManagement, idShiftKaryawan, idManagement, idManagement, nil); err != nil {
+	tx.Rollback(); return nil, err
+}
+
 		}
 	}
 
