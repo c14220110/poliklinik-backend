@@ -204,7 +204,7 @@ func (s *ShiftService) GetListKaryawanFiltered(
 		tanggal = parsed.Format("2006-01-02")
 	}
 
-	// Gunakan query utama dengan GROUP_CONCAT untuk semua role, hanya tampilkan karyawan yang deleted_at = null
+	// Query untuk mengambil data karyawan beserta role dari Shift_Karyawan
 	query := `
 		SELECT
 			k.id_karyawan,
@@ -217,24 +217,16 @@ func (s *ShiftService) GetListKaryawanFiltered(
 			sk.custom_jam_mulai,
 			sk.custom_jam_selesai,
 			sk.id_shift_karyawan,
-			GROUP_CONCAT(DISTINCT r.nama_role SEPARATOR ', ') AS roles
+			r.nama_role AS role
 		FROM Karyawan k
 		JOIN Shift_Karyawan sk
 			ON k.id_karyawan = sk.id_karyawan
 			AND sk.id_poli = ?
 			AND sk.id_shift = ?
 			AND sk.tanggal = ?
-		LEFT JOIN Detail_Role_Karyawan drk
-			ON k.id_karyawan = drk.id_karyawan
-		LEFT JOIN Role r
-			ON drk.id_role = r.id_role
+		JOIN Role r
+			ON sk.id_role = r.id_role
 		WHERE k.deleted_at IS NULL
-		GROUP BY
-			k.id_karyawan, k.nama, k.nik, k.username,
-			k.no_telp, k.alamat, k.jenis_kelamin,
-			sk.custom_jam_mulai, sk.custom_jam_selesai,
-			sk.id_shift_karyawan
-		ORDER BY k.id_karyawan
 	`
 	args := []interface{}{idPoli, idShift, tanggal}
 
@@ -244,20 +236,11 @@ func (s *ShiftService) GetListKaryawanFiltered(
 		if err != nil {
 			return nil, fmt.Errorf("invalid id_role value: %v", err)
 		}
-		var roleName string
-		switch idRole {
-		case 1:
-			roleName = "Administrasi"
-		case 2:
-			roleName = "Suster"
-		case 3:
-			roleName = "Dokter"
-		default:
-			return nil, fmt.Errorf("id_role %d tidak valid", idRole)
-		}
-		query += " HAVING GROUP_CONCAT(DISTINCT r.nama_role SEPARATOR ', ') LIKE ?"
-		args = append(args, fmt.Sprintf("%%%s%%", roleName))
+		query += " AND sk.id_role = ?"
+		args = append(args, idRole)
 	}
+
+	query += " ORDER BY k.id_karyawan, sk.id_shift_karyawan"
 
 	// Eksekusi query
 	rows, err := s.DB.Query(query, args...)
@@ -266,20 +249,8 @@ func (s *ShiftService) GetListKaryawanFiltered(
 	}
 	defer rows.Close()
 
-	// Simpan hasil sementara
-	var tempResults []struct {
-		idKaryawan       int
-		nama             string
-		nik              string
-		username         string
-		noTelp           string
-		alamat           string
-		jenisKelamin     string
-		customJamMulai   string
-		customJamSelesai string
-		idShiftKaryawan  int
-		rolesStr         string
-	}
+	// Simpan hasil
+	var results []map[string]interface{}
 	for rows.Next() {
 		var temp struct {
 			idKaryawan       int
@@ -292,95 +263,37 @@ func (s *ShiftService) GetListKaryawanFiltered(
 			customJamMulai   string
 			customJamSelesai string
 			idShiftKaryawan  int
-			rolesStr         sql.NullString
+			role             string
 		}
 		if err := rows.Scan(
 			&temp.idKaryawan, &temp.nama, &temp.nik, &temp.username, &temp.noTelp,
 			&temp.alamat, &temp.jenisKelamin, &temp.customJamMulai,
-			&temp.customJamSelesai, &temp.idShiftKaryawan, &temp.rolesStr,
+			&temp.customJamSelesai, &temp.idShiftKaryawan, &temp.role,
 		); err != nil {
 			return nil, fmt.Errorf("scan error: %v", err)
 		}
-		var rolesStr string
-		if temp.rolesStr.Valid {
-			rolesStr = temp.rolesStr.String
+		record := map[string]interface{}{
+			"id_karyawan":        temp.idKaryawan,
+			"nama":               temp.nama,
+			"NIK":                temp.nik,
+			"username":           temp.username,
+			"roles":              temp.role, // Hanya satu role dari Shift_Karyawan
+			"no_telp":            temp.noTelp,
+			"alamat":             temp.alamat,
+			"jenis_kelamin":      temp.jenisKelamin,
+			"custom_jam_mulai":   temp.customJamMulai,
+			"custom_jam_selesai": temp.customJamSelesai,
+			"id_shift_karyawan":  temp.idShiftKaryawan,
 		}
-		tempResults = append(tempResults, struct {
-			idKaryawan       int
-			nama             string
-			nik              string
-			username         string
-			noTelp           string
-			alamat           string
-			jenisKelamin     string
-			customJamMulai   string
-			customJamSelesai string
-			idShiftKaryawan  int
-			rolesStr         string
-		}{temp.idKaryawan, temp.nama, temp.nik, temp.username, temp.noTelp, temp.alamat, temp.jenisKelamin, temp.customJamMulai, temp.customJamSelesai, temp.idShiftKaryawan, rolesStr})
+		results = append(results, record)
 	}
 
-	// Proses pengelompokan role
-	var results []map[string]interface{}
-	for _, tr := range tempResults {
-		roles := strings.Split(tr.rolesStr, ", ")
-		hasAdminSuster := false
-		hasDokter := false
-		var otherRoles []string
-
-		for _, role := range roles {
-			trimmedRole := strings.TrimSpace(role)
-			switch trimmedRole {
-			case "Administrasi":
-				hasAdminSuster = true
-				otherRoles = append(otherRoles, "Admin")
-			case "Suster":
-				hasAdminSuster = true
-				otherRoles = append(otherRoles, "Suster")
-			case "Dokter":
-				hasDokter = true
-			}
-		}
-
-		// Gabungkan Admin dan Suster jika ada
-		if hasAdminSuster && len(otherRoles) > 0 {
-			record := map[string]interface{}{
-				"id_karyawan":        tr.idKaryawan,
-				"nama":               tr.nama,
-				"NIK":                tr.nik,
-				"username":           tr.username,
-				"roles":              strings.Join(otherRoles, ", "),
-				"no_telp":            tr.noTelp,
-				"alamat":             tr.alamat,
-				"jenis_kelamin":      tr.jenisKelamin,
-				"custom_jam_mulai":   tr.customJamMulai,
-				"custom_jam_selesai": tr.customJamSelesai,
-				"id_shift_karyawan":  tr.idShiftKaryawan,
-			}
-			results = append(results, record)
-		}
-		// Tambahkan record terpisah untuk Dokter jika ada
-		if hasDokter {
-			record := map[string]interface{}{
-				"id_karyawan":        tr.idKaryawan,
-				"nama":               tr.nama,
-				"NIK":                tr.nik,
-				"username":           tr.username,
-				"roles":              "Dokter",
-				"no_telp":            tr.noTelp,
-				"alamat":             tr.alamat,
-				"jenis_kelamin":      tr.jenisKelamin,
-				"custom_jam_mulai":   tr.customJamMulai,
-				"custom_jam_selesai": tr.customJamSelesai,
-				"id_shift_karyawan":  tr.idShiftKaryawan,
-			}
-			results = append(results, record)
-		}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %v", err)
 	}
 
 	return results, nil
 }
-
 
 func (s *ShiftService) GetKaryawanTanpaShift(idShift int, idRole *int, tanggalStr string, idPoli int) ([]map[string]interface{}, error) {
     // 1. Tentukan tanggal
