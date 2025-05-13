@@ -680,44 +680,44 @@ func (s *PendaftaranService) GetAllStatusAntrian() ([]map[string]interface{}, er
 	return list, nil
 }
 
-func (s *PendaftaranService) BatalkanAntrian(idAntrian int) error {
-    // 1. Update status antrian (contoh: update ke status batal, misalnya 3)
-    updateAntrianQuery := "UPDATE Antrian SET id_status = ? WHERE id_antrian = ?"
-    result, err := s.DB.Exec(updateAntrianQuery, 7, idAntrian)
-    if err != nil {
-        return fmt.Errorf("gagal membatalkan antrian: %v", err)
-    }
-    rowsAffected, err := result.RowsAffected()
-    if err != nil {
-        return fmt.Errorf("gagal memeriksa update antrian: %v", err)
-    }
-    if rowsAffected == 0 {
-        return fmt.Errorf("antrian dengan id %d tidak ditemukan", idAntrian)
-    }
+func (s *PendaftaranService) BatalkanAntrian(idAntrian int) (idKunjungan int, err error) {
+	// 1. Update status antrian to cancelled (id_status = 7)
+	updateAntrianQuery := "UPDATE Antrian SET id_status = ? WHERE id_antrian = ?"
+	result, err := s.DB.Exec(updateAntrianQuery, 7, idAntrian)
+	if err != nil {
+			return 0, fmt.Errorf("gagal membatalkan antrian: %v", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+			return 0, fmt.Errorf("gagal memeriksa update antrian: %v", err)
+	}
+	if rowsAffected == 0 {
+			return 0, fmt.Errorf("antrian dengan id %d tidak ditemukan", idAntrian)
+	}
 
-    // 2. Update id_status billing menjadi 4 untuk antrian ini.
-    // Query ini mengupdate tabel Billing dengan join ke Riwayat_Kunjungan berdasarkan id_kunjungan.
-    updateBillingQuery := `
-        UPDATE Billing b
-        JOIN Riwayat_Kunjungan rk ON b.id_kunjungan = rk.id_kunjungan
-        SET b.id_status = 4
-        WHERE rk.id_antrian = ?
-    `
-    result, err = s.DB.Exec(updateBillingQuery, idAntrian)
-    if err != nil {
-        return fmt.Errorf("gagal mengupdate status billing: %v", err)
-    }
-    // Opsional: periksa apakah ada baris yang terupdate
-    rowsAffected, err = result.RowsAffected()
-    if err != nil {
-        return fmt.Errorf("gagal memeriksa update status billing: %v", err)
-    }
-    if rowsAffected == 0 {
-        // Jika tidak ada baris yang diupdate, Anda bisa menganggapnya sebagai kondisi valid atau error,
-        // tergantung pada kebutuhan aplikasi.
-    }
+	// 2. Retrieve id_kunjungan from Riwayat_Kunjungan
+	err = s.DB.QueryRow("SELECT id_kunjungan FROM Riwayat_Kunjungan WHERE id_antrian = ?", idAntrian).Scan(&idKunjungan)
+	if err != nil {
+			if err == sql.ErrNoRows {
+					return 0, fmt.Errorf("kunjungan untuk antrian %d tidak ditemukan", idAntrian)
+			}
+			return 0, fmt.Errorf("gagal mengambil id_kunjungan: %v", err)
+	}
 
-    return nil
+	// 3. Update billing status to cancelled (id_status = 4)
+	updateBillingQuery := `
+			UPDATE Billing b
+			JOIN Riwayat_Kunjungan rk ON b.id_kunjungan = rk.id_kunjungan
+			SET b.id_status = 4
+			WHERE rk.id_antrian = ?
+	`
+	_, err = s.DB.Exec(updateBillingQuery, idAntrian)
+	if err != nil {
+			return 0, fmt.Errorf("gagal mengupdate status billing: %v", err)
+	}
+	// Note: Not checking rowsAffected here; it’s acceptable if no billing exists yet
+
+	return idKunjungan, nil
 }
 
 // GetDetailAntrianByID mengambil detail antrian + info pasien & dokter.
