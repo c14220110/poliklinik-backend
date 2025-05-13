@@ -708,7 +708,7 @@ func (s *PendaftaranService) BatalkanAntrian(idAntrian int) (idKunjungan int, er
 	updateBillingQuery := `
 			UPDATE Billing b
 			JOIN Riwayat_Kunjungan rk ON b.id_kunjungan = rk.id_kunjungan
-			SET b.id_status = 4
+			SET b.id_status = 3
 			WHERE rk.id_antrian = ?
 	`
 	_, err = s.DB.Exec(updateBillingQuery, idAntrian)
