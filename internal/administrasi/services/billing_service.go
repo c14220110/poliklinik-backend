@@ -22,12 +22,20 @@ func NewBillingService(db *sql.DB) *BillingService {
 // GetBillingData mengambil data billing dengan join ke Pasien, Rekam_Medis, dan Poliklinik.
 // Filter:
 //   - idPoliFilter: jika tidak kosong, filter berdasarkan poliklinik
-//   - statusFilter: jika tidak kosong, filter berdasarkan Billing.id_status (1=Belum, 2=Diproses, 3=Selesai, 4=Dibatalkan)
+//   - statusFilter: jika tidak kosong, filter berdasarkan Billing.id_status (1=Belum, 2=Selesai, 3=Dibatalkan)
 // Jika salah satu kosong, ambil semua.
 func (s *BillingService) GetBillingData(idPoliFilter, statusFilter string) ([]map[string]interface{}, error) {
-	// Query dengan join ke tabel terkait, termasuk Status_Billing dan Riwayat_Kunjungan untuk mengambil id_kunjungan dan tanggal_pembayaran.
+	// Tentukan apakah statusFilter adalah "2" (Selesai)
+	includeTanggalPembayaran := statusFilter == "2"
+
+	// Query dasar
 	query := `
-			SELECT p.id_pasien, p.nama, rm.id_rm, pl.nama_poli, sb.status, rk.id_kunjungan, b.updated_at AS tanggal_pembayaran
+			SELECT p.id_pasien, p.nama, rm.id_rm, pl.nama_poli, sb.status, rk.id_kunjungan
+	`
+	if includeTanggalPembayaran {
+			query += ", b.updated_at AS tanggal_pembayaran"
+	}
+	query += `
 			FROM Billing b
 			JOIN Status_Billing sb ON b.id_status = sb.id_status
 			JOIN Riwayat_Kunjungan rk ON b.id_kunjungan = rk.id_kunjungan
@@ -36,6 +44,7 @@ func (s *BillingService) GetBillingData(idPoliFilter, statusFilter string) ([]ma
 			JOIN Kunjungan_Poli kp ON rk.id_kunjungan = kp.id_kunjungan
 			JOIN Poliklinik pl ON kp.id_poli = pl.id_poli
 	`
+
 	conditions := []string{}
 	args := []interface{}{}
 
@@ -85,18 +94,32 @@ func (s *BillingService) GetBillingData(idPoliFilter, statusFilter string) ([]ma
 			var statusStr string
 			var idKunjungan int
 			var tanggalPembayaran time.Time
-			if err := rows.Scan(&idPasien, &nama, &idRM, &namaPoli, &statusStr, &idKunjungan, &tanggalPembayaran); err != nil {
+			var scanArgs []interface{}
+
+			// Tentukan argumen untuk Scan berdasarkan apakah tanggal_pembayaran disertakan
+			scanArgs = append(scanArgs, &idPasien, &nama, &idRM, &namaPoli, &statusStr, &idKunjungan)
+			if includeTanggalPembayaran {
+					scanArgs = append(scanArgs, &tanggalPembayaran)
+			}
+
+			if err := rows.Scan(scanArgs...); err != nil {
 					return nil, fmt.Errorf("scan error: %v", err)
 			}
+
 			record := map[string]interface{}{
-					"id_pasien":          idPasien,
-					"nama_pasien":        nama,
-					"id_rm":              idRM,
-					"nama_poli":          namaPoli,
-					"status":             statusStr,
-					"id_kunjungan":       idKunjungan,
-					"tanggal_pembayaran": tanggalPembayaran,
+					"id_pasien":    idPasien,
+					"nama_pasien":  nama,
+					"id_rm":        idRM,
+					"nama_poli":    namaPoli,
+					"status":       statusStr,
+					"id_kunjungan": idKunjungan,
 			}
+
+			// Tambahkan tanggal_pembayaran jika statusFilter adalah "2"
+			if includeTanggalPembayaran {
+					record["tanggal_pembayaran"] = tanggalPembayaran
+			}
+
 			results = append(results, record)
 	}
 	return results, nil
