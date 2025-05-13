@@ -23,7 +23,7 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 	idPoli, operatorID int,
 	keluhanUtama, namaPenanggungJawab string,
 ) (patientID int64, idAntrian int64, nomorAntrian int64, idRM string, idStatus int,
-	namaPoli string, err error) {
+	namaPoli string, idKunjungan int64, err error) {
 
 	// ---------- MULAI TRANSAKSI ----------
 	tx, err := s.DB.Begin()
@@ -92,7 +92,6 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 		err = fmt.Errorf("insert Riwayat_Kunjungan: %v", err)
 		return
 	}
-	var idKunjungan int64
 	if idKunjungan, err = res.LastInsertId(); err != nil {
 		err = fmt.Errorf("lastInsertId Riwayat_Kunjungan: %v", err)
 		return
@@ -176,14 +175,13 @@ func (s *PendaftaranService) RegisterPasienWithKunjungan(
 
 
 
-// UpdatePasienAndRegisterKunjungan update pasien & buat antrian baru tanpa id_billing di RK
 // UpdatePasienAndRegisterKunjungan updates pasien & creates a new antrian without id_billing in RK
 func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(
 	p models.Pasien,
 	idPoli int,
 	keluhanUtama string,
 	namaPenanggungJawab string,
-) (idPasien, idAntrian, nomorAntrian int64, idRM string, idStatus int, namaPoli string, err error) {
+) (idPasien int64, idAntrian int64, nomorAntrian int64, idRM string, idStatus int, namaPoli string, idKunjungan int64, err error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return
@@ -209,7 +207,7 @@ func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(
 		idPoli, today,
 	).Scan(&lastAntrianPasien)
 	if err == nil && lastAntrianPasien == idPasien {
-		err = fmt.Errorf("duplicateili entry: pasien dengan NIK %s baru saja mengambil antrian", p.NIK)
+		err = fmt.Errorf("duplicate entry: pasien dengan NIK %s baru saja mengambil antrian", p.NIK)
 		return
 	} else if err != nil && err != sql.ErrNoRows {
 		err = fmt.Errorf("failed to check antrian duplicate: %v", err)
@@ -248,7 +246,6 @@ func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(
 	}
 
 	// 4. Insert Riwayat_Kunjungan
-	var idKunjungan int64
 	res, err := tx.Exec(`
 		INSERT INTO Riwayat_Kunjungan (id_rm, catatan)
 		VALUES (?, ?)`,
@@ -363,7 +360,6 @@ func (s *PendaftaranService) UpdatePasienAndRegisterKunjungan(
 	err = tx.Commit()
 	return
 }
-
 
 
 func (s *PendaftaranService) GetAllPasienDataFiltered(namaFilter string, page, limit int) ([]map[string]interface{}, error) {

@@ -479,7 +479,7 @@ func (s *BillingService) BayarTagihan(idBilling int, tipePembayaran string) (map
 
 	// Kirim broadcast WebSocket
 	payload := map[string]interface{}{
-		"type": "antrian_update",
+		"type": "billing_update",
 		"data": map[string]interface{}{
 			"id_kunjungan": wsIdKunjungan,
 			"id_pasien":    wsIdPasien,

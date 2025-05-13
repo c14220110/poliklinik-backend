@@ -110,52 +110,70 @@ func (pc *PasienController) RegisterPasien(c echo.Context) error {
 		StatusPerkawinan: statusPerkawinan,
 		Pekerjaan:        req.Pekerjaan,
 	}
-	// Panggil service
-	patientID, idAntrian, nomorAntrian, idRM, idStatus, namaPoli, err :=
-		pc.Service.RegisterPasienWithKunjungan(p, req.IDPoli, operatorID, req.KeluhanUtama, req.PenanggungJawab)
-	if err != nil {
-		if err.Error() == "NIK sudah terdaftar" {
-			return c.JSON(http.StatusConflict, map[string]interface{}{
-				"status":  http.StatusConflict,
-				"message": "NIK sudah terdaftar",
-				"data":    nil,
-			})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-			"status":  http.StatusInternalServerError,
-			"message": "Gagal mendaftarkan pasien: " + err.Error(),
-			"data":    nil,
-		})
-	}
-	// Siapkan payload WS
-	inner := map[string]interface{}{
-		"id_antrian":     idAntrian,
-		"id_pasien":      patientID,
-		"id_poli":        req.IDPoli,
-		"id_rm":          idRM,
-		"id_status":      idStatus,
-		"nama":           req.Nama,
-		"nama_poli":      namaPoli,
-		"nomor_antrian":  nomorAntrian,
-		"priority_order": nomorAntrian,
-		"status":         "Menunggu",
-	}
-	wrapper := map[string]interface{}{
-		"type": "antrian_update",
-		"data": inner,
-	}
-	msg, _ := json.Marshal(wrapper)
-	ws.HubInstance.Broadcast <- msg
-	// Response API
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"status":  http.StatusOK,
-		"message": "Pasien berhasil didaftarkan",
-		"data": map[string]interface{}{
-			"id_pasien":     patientID,
-			"id_antrian":    idAntrian,
-			"nomor_antrian": nomorAntrian,
-		},
-	})
+// Panggil service
+patientID, idAntrian, nomorAntrian, idRM, idStatus, namaPoli, idKunjungan, err :=
+    pc.Service.RegisterPasienWithKunjungan(p, req.IDPoli, operatorID, req.KeluhanUtama, req.PenanggungJawab)
+if err != nil {
+    if err.Error() == "NIK sudah terdaftar" {
+        return c.JSON(http.StatusConflict, map[string]interface{}{
+            "status":  http.StatusConflict,
+            "message": "NIK sudah terdaftar",
+            "data":    nil,
+        })
+    }
+    return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+        "status":  http.StatusInternalServerError,
+        "message": "Gagal mendaftarkan pasien: " + err.Error(),
+        "data":    nil,
+    })
+}
+
+// Siapkan payload WS untuk antrian_update
+inner := map[string]interface{}{
+    "id_antrian":     idAntrian,
+    "id_pasien":      patientID,
+    "id_poli":        req.IDPoli,
+    "id_rm":          idRM,
+    "id_status":      idStatus,
+    "nama":           req.Nama,
+    "nama_poli":      namaPoli,
+    "nomor_antrian":  nomorAntrian,
+    "priority_order": nomorAntrian,
+    "status":         "Menunggu",
+}
+wrapper := map[string]interface{}{
+    "type": "antrian_update",
+    "data": inner,
+}
+msg, _ := json.Marshal(wrapper)
+ws.HubInstance.Broadcast <- msg
+
+// Siapkan payload WS untuk billing_update
+billingInner := map[string]interface{}{
+    "id_kunjungan": idKunjungan,
+    "id_pasien":    patientID,
+    "nama_pasien":  req.Nama,
+    "nomor_rm":     idRM,
+    "poli_tujuan":  namaPoli,
+    "status":       "Belum",
+}
+billingWrapper := map[string]interface{}{
+    "type": "billing_update",
+    "data": billingInner,
+}
+billingMsg, _ := json.Marshal(billingWrapper)
+ws.HubInstance.Broadcast <- billingMsg
+
+// Response API
+return c.JSON(http.StatusOK, map[string]interface{}{
+    "status":  http.StatusOK,
+    "message": "Pasien berhasil didaftarkan",
+    "data": map[string]interface{}{
+        "id_pasien":     patientID,
+        "id_antrian":    idAntrian,
+        "nomor_antrian": nomorAntrian,
+    },
+})
 }
 
 func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
@@ -235,47 +253,63 @@ func (pc *PasienController) UpdateKunjungan(c echo.Context) error {
 		Pekerjaan:        req.Pekerjaan,
 	}
 
-	// Panggil service dengan penanggung_jawab
-	idPasien, idAntrian, nomorAntrian, idRM, idStatus, namaPoli, err :=
-		pc.Service.UpdatePasienAndRegisterKunjungan(p, req.IDPoli, req.KeluhanUtama, req.PenanggungJawab)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-			"status":  http.StatusInternalServerError,
-			"message": "Failed to register kunjungan: " + err.Error(),
-			"data":    nil,
-		})
-	}
+// Panggil service dengan penanggung_jawab
+idPasien, idAntrian, nomorAntrian, idRM, idStatus, namaPoli, idKunjungan, err :=
+    pc.Service.UpdatePasienAndRegisterKunjungan(p, req.IDPoli, req.KeluhanUtama, req.PenanggungJawab)
+if err != nil {
+    return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+        "status":  http.StatusInternalServerError,
+        "message": "Failed to register kunjungan: " + err.Error(),
+        "data":    nil,
+    })
+}
 
-	// Broadcast WebSocket
-	inner := map[string]interface{}{
-		"id_antrian":     idAntrian,
-		"id_pasien":      idPasien,
-		"id_poli":        req.IDPoli,
-		"id_rm":          idRM,
-		"id_status":      idStatus,
-		"nama":           req.Nama,
-		"nama_poli":      namaPoli,
-		"nomor_antrian":  nomorAntrian,
-		"priority_order": nomorAntrian,
-		"status":         "Menunggu",
-	}
-	wrapper := map[string]interface{}{
-		"type": "antrian_update",
-		"data": inner,
-	}
-	msg, _ := json.Marshal(wrapper)
-	ws.HubInstance.Broadcast <- msg
+// Broadcast WebSocket untuk antrian_update
+inner := map[string]interface{}{
+    "id_antrian":     idAntrian,
+    "id_pasien":      idPasien,
+    "id_poli":        req.IDPoli,
+    "id_rm":          idRM,
+    "id_status":      idStatus,
+    "nama":           req.Nama,
+    "nama_poli":      namaPoli,
+    "nomor_antrian":  nomorAntrian,
+    "priority_order": nomorAntrian,
+    "status":         "Menunggu",
+}
+wrapper := map[string]interface{}{
+    "type": "antrian_update",
+    "data": inner,
+}
+msg, _ := json.Marshal(wrapper)
+ws.HubInstance.Broadcast <- msg
 
-	// Response
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"status":  http.StatusOK,
-		"message": "Kunjungan registered successfully",
-		"data": map[string]interface{}{
-			"id_pasien":     idPasien,
-			"id_antrian":    idAntrian,
-			"nomor_antrian": nomorAntrian,
-		},
-	})
+// Broadcast WebSocket untuk billing_update
+billingInner := map[string]interface{}{
+    "id_kunjungan": idKunjungan,
+    "id_pasien":    idPasien,
+    "nama_pasien":  req.Nama,
+    "nomor_rm":     idRM,
+    "poli_tujuan":  namaPoli,
+    "status":       "Belum",
+}
+billingWrapper := map[string]interface{}{
+    "type": "billing_update",
+    "data": billingInner,
+}
+billingMsg, _ := json.Marshal(billingWrapper)
+ws.HubInstance.Broadcast <- billingMsg
+
+// Response
+return c.JSON(http.StatusOK, map[string]interface{}{
+    "status":  http.StatusOK,
+    "message": "Kunjungan registered successfully",
+    "data": map[string]interface{}{
+        "id_pasien":     idPasien,
+        "id_antrian":    idAntrian,
+        "nomor_antrian": nomorAntrian,
+    },
+})
 }
 
 func (pc *PasienController) GetAllPasienData(c echo.Context) error {
