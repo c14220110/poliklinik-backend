@@ -352,3 +352,47 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 var (
 	ErrKunjunganNotFound = errors.New("kunjungan not found")
 )
+
+// GetRiwayatPembayaranHariIni mengambil riwayat pembayaran hari ini dengan status "Selesai" (id_status=3)
+func (s *BillingService) GetRiwayatPembayaranHariIni() ([]map[string]interface{}, error) {
+	query := `
+			SELECT 
+					b.id_billing, 
+					b.id_kunjungan, 
+					b.updated_at AS tanggal_pembayaran, 
+					p.nama_poli AS poli_tujuan
+			FROM 
+					Billing b
+			JOIN 
+					Kunjungan_Poli kp ON b.id_kunjungan = kp.id_kunjungan
+			JOIN 
+					Poliklinik p ON kp.id_poli = p.id_poli
+			WHERE 
+					b.id_status = 3 
+					AND DATE(b.created_at) = CURDATE()
+	`
+	rows, err := s.DB.Query(query)
+	if err != nil {
+			return nil, fmt.Errorf("query error: %v", err)
+	}
+	defer rows.Close()
+
+	var results []map[string]interface{}
+	for rows.Next() {
+			var idBilling int
+			var idKunjungan int
+			var tanggalPembayaran time.Time
+			var poliTujuan string
+			if err := rows.Scan(&idBilling, &idKunjungan, &tanggalPembayaran, &poliTujuan); err != nil {
+					return nil, fmt.Errorf("scan error: %v", err)
+			}
+			record := map[string]interface{}{
+					"id_billing":        idBilling,
+					"id_kunjungan":      idKunjungan,
+					"tanggal_pembayaran": tanggalPembayaran,
+					"poli_tujuan":       poliTujuan,
+			}
+			results = append(results, record)
+	}
+	return results, nil
+}

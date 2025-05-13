@@ -145,3 +145,20 @@ func (bc *BillingController) GetDetailBillingHandler(c echo.Context) error {
 var (
 	ErrKunjunganNotFound = errors.New("kunjungan not found")
 )
+
+// GetRiwayatPembayaranHariIni adalah handler untuk mengambil riwayat pembayaran hari ini
+func (bc *BillingController) GetRiwayatPembayaranHariIni(c echo.Context) error {
+	list, err := bc.Service.GetRiwayatPembayaranHariIni()
+	if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+					"status":  http.StatusInternalServerError,
+					"message": "Failed to retrieve riwayat pembayaran: " + err.Error(),
+					"data":    nil,
+			})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+			"status":  http.StatusOK,
+			"message": "Riwayat pembayaran retrieved successfully",
+			"data":    list,
+	})
+}
