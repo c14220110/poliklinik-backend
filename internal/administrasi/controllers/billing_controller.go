@@ -145,3 +145,55 @@ func (bc *BillingController) GetDetailBillingHandler(c echo.Context) error {
 var (
 	ErrKunjunganNotFound = errors.New("kunjungan not found")
 )
+
+func (bc *BillingController) BayarTagihan(c echo.Context) error {
+	idBillingStr := c.QueryParam("id_billing")
+	if idBillingStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_billing is required",
+			"data":    nil,
+		})
+	}
+	idBilling, err := strconv.Atoi(idBillingStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Invalid id_billing",
+			"data":    nil,
+		})
+	}
+
+	var req struct {
+		TipePembayaran string `json:"tipe_pembayaran"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Invalid request payload: " + err.Error(),
+			"data":    nil,
+		})
+	}
+	if req.TipePembayaran == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "tipe_pembayaran is required",
+			"data":    nil,
+		})
+	}
+
+	result, err := bc.Service.BayarTagihan(idBilling, req.TipePembayaran)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Gagal membayar tagihan: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Tagihan berhasil dibayar",
+		"data":    result,
+	})
+}
