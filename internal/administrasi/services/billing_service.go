@@ -353,20 +353,25 @@ var (
 	ErrKunjunganNotFound = errors.New("kunjungan not found")
 )
 
-// GetRiwayatPembayaranHariIni mengambil riwayat pembayaran hari ini dengan status "Selesai" (id_status=3)
+
 func (s *BillingService) GetRiwayatPembayaranHariIni() ([]map[string]interface{}, error) {
 	query := `
 			SELECT 
 					b.id_billing, 
 					b.id_kunjungan, 
 					b.updated_at AS tanggal_pembayaran, 
-					p.nama_poli AS poli_tujuan
+					p.nama_poli AS poli_tujuan,
+					pas.nama AS nama_pasien
 			FROM 
 					Billing b
 			JOIN 
 					Kunjungan_Poli kp ON b.id_kunjungan = kp.id_kunjungan
 			JOIN 
 					Poliklinik p ON kp.id_poli = p.id_poli
+			JOIN 
+					Antrian a ON b.id_antrian = a.id_antrian
+			JOIN 
+					Pasien pas ON a.id_pasien = pas.id_pasien
 			WHERE 
 					b.id_status = 3 
 					AND DATE(b.created_at) = CURDATE()
@@ -383,7 +388,8 @@ func (s *BillingService) GetRiwayatPembayaranHariIni() ([]map[string]interface{}
 			var idKunjungan int
 			var tanggalPembayaran time.Time
 			var poliTujuan string
-			if err := rows.Scan(&idBilling, &idKunjungan, &tanggalPembayaran, &poliTujuan); err != nil {
+			var namaPasien string
+			if err := rows.Scan(&idBilling, &idKunjungan, &tanggalPembayaran, &poliTujuan, &namaPasien); err != nil {
 					return nil, fmt.Errorf("scan error: %v", err)
 			}
 			record := map[string]interface{}{
@@ -391,6 +397,7 @@ func (s *BillingService) GetRiwayatPembayaranHariIni() ([]map[string]interface{}
 					"id_kunjungan":      idKunjungan,
 					"tanggal_pembayaran": tanggalPembayaran,
 					"poli_tujuan":       poliTujuan,
+					"nama_pasien":       namaPasien,
 			}
 			results = append(results, record)
 	}
