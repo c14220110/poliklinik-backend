@@ -454,39 +454,36 @@ func (s *BillingService) BayarTagihan(idBilling int, tipePembayaran string) (map
 		return nil, fmt.Errorf("gagal memperbarui billing: %v", err)
 	}
 
-	// Ambil data untuk WebSocket
-	var namaPasien, nomorRM, namaPoli string
-	err = tx.QueryRow(`
-		SELECT P.nama, RK.id_rm, Pol.nama_poli
-		FROM Billing B
-		JOIN Antrian A ON B.id_antrian = A.id_antrian
-		JOIN Pasien P ON A.id_pasien = P.id_pasien
-		JOIN Riwayat_Kunjungan RK ON B.id_kunjungan = RK.id_kunjungan
-		JOIN Kunjungan_Poli KP ON RK.id_kunjungan = KP.id_kunjungan
-		JOIN Poliklinik Pol ON KP.id_poli = Pol.id_poli
-		WHERE B.id_billing = ?`, idBilling).Scan(&namaPasien, &nomorRM, &namaPoli)
-	if err != nil {
-		return nil, fmt.Errorf("gagal mengambil data untuk WebSocket: %v", err)
-	}
+// Ambil data untuk WebSocket
+var wsIdKunjungan, wsIdPasien int64
+var wsNamaPasien, wsNomorRM, wsNamaPoli string
+err = tx.QueryRow(`
+    SELECT B.id_kunjungan, A.id_pasien, P.nama, RK.id_rm, Pol.nama_poli
+    FROM Billing B
+    JOIN Antrian A ON B.id_antrian = A.id_antrian
+    JOIN Pasien P ON A.id_pasien = P.id_pasien
+    JOIN Riwayat_Kunjungan RK ON B.id_kunjungan = RK.id_kunjungan
+    JOIN Kunjungan_Poli KP ON RK.id_kunjungan = KP.id_kunjungan
+    JOIN Poliklinik Pol ON KP.id_poli = Pol.id_poli
+    WHERE B.id_billing = ?`, idBilling).Scan(&wsIdKunjungan, &wsIdPasien, &wsNamaPasien, &wsNomorRM, &wsNamaPoli)
+if err != nil {
+    return nil, fmt.Errorf("gagal mengambil data untuk WebSocket: %v", err)
+}
 
-	// Commit transaksi
-	err = tx.Commit()
-	if err != nil {
-		return nil, fmt.Errorf("gagal commit transaksi: %v", err)
-	}
-
-	// Kirim broadcast WebSocket
-	payload := map[string]interface{}{
-		"type": "antrian_update",
-		"data": map[string]interface{}{
-			"nama_pasien": namaPasien,
-			"nomor_rm":    nomorRM,
-			"poli_tujuan": namaPoli,
-			"status":      "Selesai",
-		},
-	}
-	msg, _ := json.Marshal(payload)
-	ws.HubInstance.Broadcast <- msg
+// Kirim broadcast WebSocket
+payload := map[string]interface{}{
+    "type": "antrian_update",
+    "data": map[string]interface{}{
+        "id_kunjungan": wsIdKunjungan,
+        "id_pasien":    wsIdPasien,
+        "nama_pasien":  wsNamaPasien,
+        "nomor_rm":     wsNomorRM,
+        "poli_tujuan":  wsNamaPoli,
+        "status":       "Selesai",
+    },
+}
+msg, _ := json.Marshal(payload)
+ws.HubInstance.Broadcast <- msg
 
 	// Siapkan response
 	result := map[string]interface{}{
