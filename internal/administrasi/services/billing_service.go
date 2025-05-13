@@ -238,22 +238,23 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 
 	// Query untuk daftar obat
 	obatQuery := `
-			SELECT 
-					rs.section_type,
-					COALESCE(o.nama, '') AS nama_obat,
-					rs.jumlah,
-					COALESCE(o.satuan, '') AS satuan,
-					COALESCE(o.harga_satuan, 0) AS harga_satuan,
-					rs.harga_total,
-					rs.instruksi,
-					COALESCE(rs.nama_racikan, '') AS nama_racikan,
-					COALESCE(rs-/api/v1/apidocs/COALESCE(rs.jenis_kemasan, '') AS kemasan,
-					rs.id_section
-			FROM Resep_Section rs
-			JOIN E_Resep er ON rs.id_resep = er.id_resep
-			LEFT JOIN Obat o ON rs.section_type = 1 AND rs.id_obat = o.id_obat
-			WHERE er.id_kunjungan = ?
-	`
+    SELECT 
+        rs.section_type,
+        COALESCE(o.nama, '') AS nama_obat,
+        rs.jumlah,
+        COALESCE(o.satuan, '') AS satuan,
+        COALESCE(o.harga_satuan, 0) AS harga_satuan,
+        rs.harga_total,
+        rs.instruksi,
+        COALESCE(rs.nama_racikan, '') AS nama_racikan,
+        COALESCE(rs.jenis_kemasan, '') AS kemasan,
+        rs.id_section
+    FROM Resep_Section rs
+    JOIN E_Resep er ON rs.id_resep = er.id_resep
+    LEFT JOIN Komposisi k ON rs.id_section = k.id_section AND rs.section_type = 1
+    LEFT JOIN Obat o ON k.id_obat = o.id_obat
+    WHERE er.id_kunjungan = ?
+`
 	rows, err := svc.DB.Query(obatQuery, idKunjungan)
 	if err != nil {
 			return nil, err
