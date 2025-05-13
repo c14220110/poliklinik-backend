@@ -222,7 +222,7 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 			return nil, err
 	}
 
-	// Query untuk data utama
+	// Query untuk data utama dengan id_status dan updated_at
 	query := `
 			SELECT 
 					p.nama AS nama_pasien,
@@ -231,7 +231,9 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 					COALESCE(k.nama, '') AS nama_dokter,
 					COALESCE(td.harga, 0) AS biaya_dokter,
 					COALESCE(ka.nama, '') AS karyawan_yang_ditugaskan,
-					COALESCE(kb.nama, '') AS nama_administrasi
+					COALESCE(kb.nama, '') AS nama_administrasi,
+					b.id_status,
+					b.updated_at
 			FROM Riwayat_Kunjungan rk
 			JOIN Antrian a ON rk.id_antrian = a.id_antrian
 			JOIN Poliklinik pol ON a.id_poli = pol.id_poli
@@ -247,6 +249,8 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 	`
 	row := svc.DB.QueryRow(query, idKunjungan)
 	var detail models.DetailBilling
+	var idStatus sql.NullInt64
+	var updatedAt sql.NullTime
 	err = row.Scan(
 			&detail.NamaPasien,
 			&detail.IDRM,
@@ -255,6 +259,8 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 			&detail.BiayaDokter,
 			&detail.KaryawanYangDitugaskan,
 			&detail.NamaAdministrasi,
+			&idStatus,
+			&updatedAt,
 	)
 	if err == sql.ErrNoRows {
 			return nil, ErrKunjunganNotFound
@@ -263,25 +269,31 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 			return nil, err
 	}
 
-	// Query untuk daftar obat
+	// Set WaktuDibayar jika id_status = 2
+	if idStatus.Valid && idStatus.Int64 == 2 && updatedAt.Valid {
+			waktuDibayarStr := updatedAt.Time.Format("2006-01-02 15:04:05")
+			detail.WaktuDibayar = &waktuDibayarStr
+	}
+
+	// Query untuk daftar obat (unchanged)
 	obatQuery := `
-    SELECT 
-        rs.section_type,
-        COALESCE(o.nama, '') AS nama_obat,
-        rs.jumlah,
-        COALESCE(o.satuan, '') AS satuan,
-        COALESCE(o.harga_satuan, 0) AS harga_satuan,
-        rs.harga_total,
-        rs.instruksi,
-        COALESCE(rs.nama_racikan, '') AS nama_racikan,
-        COALESCE(rs.jenis_kemasan, '') AS kemasan,
-        rs.id_section
-    FROM Resep_Section rs
-    JOIN E_Resep er ON rs.id_resep = er.id_resep
-    LEFT JOIN Komposisi k ON rs.id_section = k.id_section AND rs.section_type = 1
-    LEFT JOIN Obat o ON k.id_obat = o.id_obat
-    WHERE er.id_kunjungan = ?
-`
+			SELECT 
+					rs.section_type,
+					COALESCE(o.nama, '') AS nama_obat,
+					rs.jumlah,
+					COALESCE(o.satuan, '') AS satuan,
+					COALESCE(o.harga_satuan, 0) AS harga_satuan,
+					rs.harga_total,
+					rs.instruksi,
+					COALESCE(rs.nama_racikan, '') AS nama_racikan,
+					COALESCE(rs.jenis_kemasan, '') AS kemasan,
+					rs.id_section
+			FROM Resep_Section rs
+			JOIN E_Resep er ON rs.id_resep = er.id_resep
+			LEFT JOIN Komposisi k ON rs.id_section = k.id_section AND rs.section_type = 1
+			LEFT JOIN Obat o ON k.id_obat = o.id_obat
+			WHERE er.id_kunjungan = ?
+	`
 	rows, err := svc.DB.Query(obatQuery, idKunjungan)
 	if err != nil {
 			return nil, err
@@ -312,7 +324,6 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 					obat.Keterangan = "obat resep"
 			} else if sectionType == 2 {
 					obat.Keterangan = "obat racikan"
-					// Query komposisi untuk obat racikan
 					komposisiQuery := `
 							SELECT 
 									o.nama, 
@@ -341,7 +352,7 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 			detail.Obat = append(detail.Obat, obat)
 	}
 
-	// Query untuk daftar tindakan
+	// Query untuk daftar tindakan (unchanged)
 	tindakanQuery := `
 			SELECT 
 					ba.nama_tindakan, 

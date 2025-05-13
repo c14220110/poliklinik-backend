@@ -22,6 +22,7 @@ type DetailBilling struct {
 	NamaAdministrasi       string           `json:"nama_administrasi"`
 	Obat                   []ObatDetail     `json:"obat"`
 	Tindakan               []TindakanDetail `json:"tindakan"`
+	WaktuDibayar           *string          `json:"waktu_dibayar,omitempty"`
 }
 
 type ObatDetail struct {
