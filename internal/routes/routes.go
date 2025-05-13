@@ -105,7 +105,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 
 	billing := administrasi.Group("/billing")
 	billing.GET("", billingController.ListBilling, middlewares.JWTMiddleware())
-	billing.GET("detail", billingController.GetDetailBillingHandler, middlewares.JWTMiddleware())
+	billing.GET("/detail", billingController.GetDetailBillingHandler, middlewares.JWTMiddleware())
 
 
 	// 2. Screening / Suster (Aplikasi Screening)
