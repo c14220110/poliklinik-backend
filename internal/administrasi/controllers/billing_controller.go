@@ -98,3 +98,38 @@ func (bc *BillingController) InputBillingAssessment(c echo.Context) error {
 		"data":    nil,
 	})
 }
+
+func (bc *BillingController) GetDetailBillingHandler(c echo.Context) error {
+	idKunjunganParam := c.QueryParam("id_kunjungan")
+	if idKunjunganParam == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+					"status":  http.StatusBadRequest,
+					"message": "id_kunjungan parameter is required",
+					"data":    nil,
+			})
+	}
+
+	idKunjungan, err := strconv.Atoi(idKunjunganParam)
+	if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+					"status":  http.StatusBadRequest,
+					"message": "id_kunjungan must be a number",
+					"data":    nil,
+			})
+	}
+
+	detail, err := bc.Service.GetDetailBilling(idKunjungan)
+	if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+					"status":  http.StatusInternalServerError,
+					"message": "Failed to retrieve detail billing: " + err.Error(),
+					"data":    nil,
+			})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+			"status":  http.StatusOK,
+			"message": "Detail billing retrieved successfully",
+			"data":    detail,
+	})
+}

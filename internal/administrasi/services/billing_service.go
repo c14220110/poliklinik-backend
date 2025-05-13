@@ -183,3 +183,142 @@ func (svc *BillingService) SaveBillingAssessment(
 
 	return tx.Commit()
 }
+
+func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBilling, error) {
+	// Query untuk data utama
+	query := `
+			SELECT 
+					p.nama AS nama_pasien,
+					rk.id_rm,
+					pol.nama_poli,
+					k.nama AS nama_dokter,
+					td.harga AS biaya_dokter,
+					ka.nama AS karyawan_yang_ditugaskan,
+					kb.nama AS nama_administrasi
+			FROM Riwayat_Kunjungan rk
+			JOIN Antrian a ON rk.id_antrian = a.id_antrian
+			JOIN Poliklinik pol ON a.id_poli = pol.id_poli
+			JOIN Assessment ass ON rk.id_assessment = ass.id_assessment
+			JOIN Karyawan k ON ass.id_karyawan = k.id_karyawan
+			JOIN Tarif_Dokter td ON k.id_karyawan = td.id_karyawan
+			JOIN Billing b ON rk.id_kunjungan = b.id_kunjungan
+			JOIN Billing_Assessment ba ON b.id_billing = ba.id_billing_assessment
+			JOIN Karyawan ka ON ba.id_karyawan = ka.id_karyawan
+			JOIN Karyawan kb ON b.id_karyawan = kb.id_karyawan
+			WHERE rk.id_kunjungan = ?
+	`
+	row := svc.DB.QueryRow(query, idKunjungan)
+	var detail models.DetailBilling
+	err := row.Scan(
+			&detail.NamaPasien,
+			&detail.IDRM,
+			&detail.NamaPoli,
+			&detail.NamaDokter,
+			&detail.BiayaDokter,
+			&detail.KaryawanYangDitugaskan,
+			&detail.NamaAdministrasi,
+	)
+	if err != nil {
+			return nil, err
+	}
+
+	// Query untuk daftar obat
+	obatQuery := `
+			SELECT 
+					rs.section_type,
+					o.nama AS nama_obat,
+					rs.jumlah,
+					o.satuan,
+					o.harga_satuan,
+					rs.harga_total,
+					rs.instruksi,
+					rs.nama_racikan,
+					rs.jenis_kemasan,
+					rs.id_section
+			FROM Resep_Section rs
+			JOIN E_Resep er ON rs.id_resep = er.id_resep
+			LEFT JOIN Obat o ON rs.id_obat = o.id_obat
+			WHERE er.id_kunjungan = ?
+	`
+	rows, err := svc.DB.Query(obatQuery, idKunjungan)
+	if err != nil {
+			return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+			var obat models.ObatDetail
+			var sectionType int
+			var idSection int
+			err := rows.Scan(
+					&sectionType,
+					&obat.NamaObat,
+					&obat.Jumlah,
+					&obat.Satuan,
+					&obat.HargaSatuan,
+					&obat.HargaTotal,
+					&obat.Instruksi,
+					&obat.NamaRacikan,
+					&obat.Kemasan,
+					&idSection,
+			)
+			if err != nil {
+					return nil, err
+			}
+			if sectionType == 1 {
+					obat.Keterangan = "obat resep"
+			} else if sectionType == 2 {
+					obat.Keterangan = "obat racikan"
+					// Query komposisi untuk obat racikan
+					komposisiQuery := `
+							SELECT o.nama, k.dosis, o.satuan, o.harga_satuan
+							FROM Komposisi k
+							JOIN Obat o ON k.id_obat = o.id_obat
+							WHERE k.id_section = ?
+					`
+					komRows, err := svc.DB.Query(komposisiQuery, idSection)
+					if err != nil {
+							return nil, err
+					}
+					defer komRows.Close()
+					for komRows.Next() {
+							var kom models.KomposisiDetail
+							err := komRows.Scan(&kom.NamaObat, &kom.Dosis, &kom.Satuan, &kom.HargaSatuan)
+							if err != nil {
+									return nil, err
+							}
+							obat.Komposisi = append(obat.Komposisi, kom)
+					}
+			}
+			detail.Obat = append(detail.Obat, obat)
+	}
+
+	// Query untuk daftar tindakan
+	tindakanQuery := `
+			SELECT ba.nama_tindakan, ba.jumlah, icd.harga AS harga_tindakan, ba.total_harga_tindakan
+			FROM Billing_Assessment ba
+			JOIN ICD9_CM icd ON ba.id_icd9_cm = icd.id_icd9_cm
+			WHERE ba.id_assessment = (SELECT id_assessment FROM Riwayat_Kunjungan WHERE id_kunjungan = ?)
+	`
+	rows, err = svc.DB.Query(tindakanQuery, idKunjungan)
+	if err != nil {
+			return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+			var tindakan models.TindakanDetail
+			err := rows.Scan(
+					&tindakan.NamaTindakan,
+					&tindakan.Jumlah,
+					&tindakan.HargaTindakan,
+					&tindakan.TotalHargaTindakan,
+			)
+			if err != nil {
+					return nil, err
+			}
+			detail.Tindakan = append(detail.Tindakan, tindakan)
+	}
+
+	return &detail, nil
+}
