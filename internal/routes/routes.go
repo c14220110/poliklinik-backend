@@ -106,7 +106,6 @@ func Init(e *echo.Echo, db *sql.DB) {
 	billing := administrasi.Group("/billing")
 	billing.GET("", billingController.ListBilling, middlewares.JWTMiddleware())
 	billing.GET("/detail", billingController.GetDetailBillingHandler, middlewares.JWTMiddleware())
-	billing.GET("/riwayat", billingController.GetRiwayatPembayaranHariIni, middlewares.JWTMiddleware())
 
 
 
