@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -120,6 +121,13 @@ func (bc *BillingController) GetDetailBillingHandler(c echo.Context) error {
 
 	detail, err := bc.Service.GetDetailBilling(idKunjungan)
 	if err != nil {
+			if err == ErrKunjunganNotFound {
+					return c.JSON(http.StatusNotFound, map[string]interface{}{
+							"status":  http.StatusNotFound,
+							"message": "Kunjungan tidak ditemukan",
+							"data":    nil,
+					})
+			}
 			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 					"status":  http.StatusInternalServerError,
 					"message": "Failed to retrieve detail billing: " + err.Error(),
@@ -133,3 +141,7 @@ func (bc *BillingController) GetDetailBillingHandler(c echo.Context) error {
 			"data":    detail,
 	})
 }
+
+var (
+	ErrKunjunganNotFound = errors.New("kunjungan not found")
+)

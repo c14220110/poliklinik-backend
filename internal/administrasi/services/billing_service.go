@@ -2,6 +2,7 @@ package services
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -183,33 +184,43 @@ func (svc *BillingService) SaveBillingAssessment(
 
 	return tx.Commit()
 }
-
 func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBilling, error) {
+	// Validasi id_kunjungan
+	var dummy int
+	err := svc.DB.QueryRow("SELECT 1 FROM Riwayat_Kunjungan WHERE id_kunjungan = ?", idKunjungan).Scan(&dummy)
+	if err == sql.ErrNoRows {
+			return nil, ErrKunjunganNotFound
+	}
+	if err != nil {
+			return nil, err
+	}
+
 	// Query untuk data utama
 	query := `
 			SELECT 
 					p.nama AS nama_pasien,
 					rk.id_rm,
 					pol.nama_poli,
-					k.nama AS nama_dokter,
-					td.harga AS biaya_dokter,
-					ka.nama AS karyawan_yang_ditugaskan,
-					kb.nama AS nama_administrasi
+					COALESCE(k.nama, '') AS nama_dokter,
+					COALESCE(td.harga, 0) AS biaya_dokter,
+					COALESCE(ka.nama, '') AS karyawan_yang_ditugaskan,
+					COALESCE(kb.nama, '') AS nama_administrasi
 			FROM Riwayat_Kunjungan rk
 			JOIN Antrian a ON rk.id_antrian = a.id_antrian
 			JOIN Poliklinik pol ON a.id_poli = pol.id_poli
-			JOIN Assessment ass ON rk.id_assessment = ass.id_assessment
-			JOIN Karyawan k ON ass.id_karyawan = k.id_karyawan
-			JOIN Tarif_Dokter td ON k.id_karyawan = td.id_karyawan
-			JOIN Billing b ON rk.id_kunjungan = b.id_kunjungan
-			JOIN Billing_Assessment ba ON b.id_billing = ba.id_billing_assessment
-			JOIN Karyawan ka ON ba.id_karyawan = ka.id_karyawan
-			JOIN Karyawan kb ON b.id_karyawan = kb.id_karyawan
+			JOIN Pasien p ON a.id_pasien = p.id_pasien
+			LEFT JOIN Assessment ass ON rk.id_assessment = ass.id_assessment
+			LEFT JOIN Karyawan k ON ass.id_karyawan = k.id_karyawan
+			LEFT JOIN Tarif_Dokter td ON k.id_karyawan = td.id_karyawan
+			LEFT JOIN Billing b ON rk.id_kunjungan = b.id_kunjungan
+			LEFT JOIN Billing_Assessment ba ON b.id_assessment = ba.id_assessment
+			LEFT JOIN Karyawan ka ON ba.id_karyawan = ka.id_karyawan
+			LEFT JOIN Karyawan kb ON b.id_karyawan = kb.id_karyawan
 			WHERE rk.id_kunjungan = ?
 	`
 	row := svc.DB.QueryRow(query, idKunjungan)
 	var detail models.DetailBilling
-	err := row.Scan(
+	err = row.Scan(
 			&detail.NamaPasien,
 			&detail.IDRM,
 			&detail.NamaPoli,
@@ -218,6 +229,9 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 			&detail.KaryawanYangDitugaskan,
 			&detail.NamaAdministrasi,
 	)
+	if err == sql.ErrNoRows {
+			return nil, ErrKunjunganNotFound
+	}
 	if err != nil {
 			return nil, err
 	}
@@ -226,18 +240,18 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 	obatQuery := `
 			SELECT 
 					rs.section_type,
-					o.nama AS nama_obat,
+					COALESCE(o.nama, '') AS nama_obat,
 					rs.jumlah,
-					o.satuan,
-					o.harga_satuan,
+					COALESCE(o.satuan, '') AS satuan,
+					COALESCE(o.harga_satuan, 0) AS harga_satuan,
 					rs.harga_total,
 					rs.instruksi,
-					rs.nama_racikan,
-					rs.jenis_kemasan,
+					COALESCE(rs.nama_racikan, '') AS nama_racikan,
+					COALESCE(rs-/api/v1/apidocs/COALESCE(rs.jenis_kemasan, '') AS kemasan,
 					rs.id_section
 			FROM Resep_Section rs
 			JOIN E_Resep er ON rs.id_resep = er.id_resep
-			LEFT JOIN Obat o ON rs.id_obat = o.id_obat
+			LEFT JOIN Obat o ON rs.section_type = 1 AND rs.id_obat = o.id_obat
 			WHERE er.id_kunjungan = ?
 	`
 	rows, err := svc.DB.Query(obatQuery, idKunjungan)
@@ -246,6 +260,7 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 	}
 	defer rows.Close()
 
+	detail.Obat = []models.ObatDetail{}
 	for rows.Next() {
 			var obat models.ObatDetail
 			var sectionType int
@@ -271,7 +286,11 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 					obat.Keterangan = "obat racikan"
 					// Query komposisi untuk obat racikan
 					komposisiQuery := `
-							SELECT o.nama, k.dosis, o.satuan, o.harga_satuan
+							SELECT 
+									o.nama, 
+									k.dosis, 
+									o.satuan, 
+									o.harga_satuan
 							FROM Komposisi k
 							JOIN Obat o ON k.id_obat = o.id_obat
 							WHERE k.id_section = ?
@@ -281,6 +300,7 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 							return nil, err
 					}
 					defer komRows.Close()
+					obat.Komposisi = []models.KomposisiDetail{}
 					for komRows.Next() {
 							var kom models.KomposisiDetail
 							err := komRows.Scan(&kom.NamaObat, &kom.Dosis, &kom.Satuan, &kom.HargaSatuan)
@@ -295,7 +315,11 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 
 	// Query untuk daftar tindakan
 	tindakanQuery := `
-			SELECT ba.nama_tindakan, ba.jumlah, icd.harga AS harga_tindakan, ba.total_harga_tindakan
+			SELECT 
+					ba.nama_tindakan, 
+					ba.jumlah, 
+					icd.harga AS harga_tindakan, 
+					ba.total_harga_tindakan
 			FROM Billing_Assessment ba
 			JOIN ICD9_CM icd ON ba.id_icd9_cm = icd.id_icd9_cm
 			WHERE ba.id_assessment = (SELECT id_assessment FROM Riwayat_Kunjungan WHERE id_kunjungan = ?)
@@ -306,6 +330,7 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 	}
 	defer rows.Close()
 
+	detail.Tindakan = []models.TindakanDetail{}
 	for rows.Next() {
 			var tindakan models.TindakanDetail
 			err := rows.Scan(
@@ -322,3 +347,7 @@ func (svc *BillingService) GetDetailBilling(idKunjungan int) (*models.DetailBill
 
 	return &detail, nil
 }
+
+var (
+	ErrKunjunganNotFound = errors.New("kunjungan not found")
+)
