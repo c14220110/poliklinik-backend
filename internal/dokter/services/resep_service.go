@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/dokter/models"
-	dmodels "github.com/c14220110/poliklinik-backend/internal/dokter/models"
 )
 
 var (
@@ -19,48 +18,77 @@ type ResepService struct{ DB *sql.DB }
 
 func NewResepService(db *sql.DB) *ResepService { return &ResepService{DB: db} }
 
-// CreateResep:
-//   • Memastikan id_kunjungan valid
-//   • Menghitung total harga dari setiap section (grandTotal)
-//   • Menulis E_Resep, Resep_Section, Komposisi   —  semuanya di dalam transaksi
-//   • Menautkan id_resep ke Riwayat_Kunjungan
-func (s *ResepService) CreateResep(req dmodels.ResepRequest) (int64, error) {
+// CreateResep creates a new prescription, calculates totals, and saves to the database.
+func (s *ResepService) CreateResep(req models.ResepRequest, idKaryawan int) (map[string]interface{}, error) {
     tx, err := s.DB.Begin()
     if err != nil {
-        return 0, err
+        return nil, err
     }
+    defer tx.Rollback() // Rollback jika tidak di-commit
 
     // 0. Validasi id_kunjungan
     var dummy int
     if err := tx.QueryRow("SELECT 1 FROM Riwayat_Kunjungan WHERE id_kunjungan = ?", req.IDKunjungan).Scan(&dummy); err != nil {
-        tx.Rollback()
         if err == sql.ErrNoRows {
-            return 0, ErrKunjunganNotFound
+            return nil, ErrKunjunganNotFound
         }
-        return 0, err
+        return nil, err
     }
 
-    // 1. Hitung grand total
+    // 1. Hitung total harga untuk setiap section dan grand total
     var grandTotal float64
-    for _, sec := range req.Sections {
-        grandTotal += sec.HargaTotal
+    sectionTotals := make([]float64, len(req.Sections))
+
+    for i, sec := range req.Sections {
+        var sectionTotal float64
+
+        if sec.SectionType == "obat" {
+            if sec.IDObat == nil {
+                return nil, errors.New("id_obat required for section_type 'obat'")
+            }
+            // Ambil harga_satuan dari tabel Obat
+            var hargaSatuan float64
+            err := tx.QueryRow("SELECT harga_satuan FROM Obat WHERE id_obat = ?", *sec.IDObat).Scan(&hargaSatuan)
+            if err != nil {
+                return nil, err
+            }
+            sectionTotal = hargaSatuan * float64(sec.Jumlah)
+        } else if sec.SectionType == "racikan" {
+            var racikanTotal float64
+            for _, cmp := range sec.Komposisi {
+                // Ambil harga_satuan untuk setiap obat dalam komposisi
+                var hargaSatuan float64
+                err := tx.QueryRow("SELECT harga_satuan FROM Obat WHERE id_obat = ?", cmp.IDObat).Scan(&hargaSatuan)
+                if err != nil {
+                    return nil, err
+                }
+                racikanTotal += hargaSatuan * float64(cmp.Dosis)
+            }
+            sectionTotal = racikanTotal * float64(sec.Jumlah)
+        } else {
+            return nil, errors.New("invalid section_type")
+        }
+
+        sectionTotals[i] = sectionTotal
+        grandTotal += sectionTotal
     }
 
     // 2. Insert ke E_Resep
     resResep, err := tx.Exec(
         `INSERT INTO E_Resep (id_kunjungan, id_karyawan, created_at, total_harga)
          VALUES (?,?,?,?)`,
-        req.IDKunjungan, req.IDKaryawan, time.Now(), grandTotal,
+        req.IDKunjungan, idKaryawan, time.Now(), grandTotal,
     )
     if err != nil {
-        tx.Rollback(); return 0, err
+        return nil, err
     }
     idResep, err := resResep.LastInsertId()
-    if err != nil { tx.Rollback(); return 0, err }
+    if err != nil {
+        return nil, err
+    }
 
     // 3. Loop section
-    for _, sec := range req.Sections {
-        // section_type mapping
+    for i, sec := range req.Sections {
         var secType int
         switch sec.SectionType {
         case "obat":
@@ -68,40 +96,43 @@ func (s *ResepService) CreateResep(req dmodels.ResepRequest) (int64, error) {
         case "racikan":
             secType = 2
         default:
-            tx.Rollback(); return 0, errors.New("invalid section_type")
+            return nil, errors.New("invalid section_type")
         }
 
         resSec, err := tx.Exec(
             `
-    INSERT INTO Resep_Section
-      (id_resep, section_type, nama_racikan, jumlah, jenis_kemasan, instruksi, harga_total)
-    VALUES (?,?,?,?,?,?,?)`,
+            INSERT INTO Resep_Section
+              (id_resep, section_type, nama_racikan, jumlah, jenis_kemasan, instruksi, harga_total)
+            VALUES (?,?,?,?,?,?,?)`,
             idResep,
             secType,
             sql.NullString{String: sec.NamaRacikan, Valid: secType == 2},
             sec.Jumlah,
             sql.NullString{String: sec.Kemasan, Valid: secType == 2},
             sec.Instruksi,
-            sec.HargaTotal,
+            sectionTotals[i],
         )
-        if err != nil { tx.Rollback(); return 0, err }
+        if err != nil {
+            return nil, err
+        }
 
         sectionID, err := resSec.LastInsertId()
-        if err != nil { tx.Rollback(); return 0, err }
+        if err != nil {
+            return nil, err
+        }
 
         // 4. Komposisi
         if secType == 1 {
-            // obat tunggal → dosis = jumlah
             if sec.IDObat == nil {
-                tx.Rollback(); return 0, errors.New("id_obat required for section_type 'obat'")
+                return nil, errors.New("id_obat required for section_type 'obat'")
             }
             if _, err := tx.Exec(`INSERT INTO Komposisi (id_section, id_obat, dosis) VALUES (?,?,?)`, sectionID, *sec.IDObat, sec.Jumlah); err != nil {
-                tx.Rollback(); return 0, err
+                return nil, err
             }
         } else {
             for _, cmp := range sec.Komposisi {
                 if _, err := tx.Exec(`INSERT INTO Komposisi (id_section, id_obat, dosis) VALUES (?,?,?)`, sectionID, cmp.IDObat, cmp.Dosis); err != nil {
-                    tx.Rollback(); return 0, err
+                    return nil, err
                 }
             }
         }
@@ -109,15 +140,25 @@ func (s *ResepService) CreateResep(req dmodels.ResepRequest) (int64, error) {
 
     // 5. Update Riwayat_Kunjungan dengan id_resep
     if _, err := tx.Exec(`UPDATE Riwayat_Kunjungan SET id_resep = ? WHERE id_kunjungan = ?`, idResep, req.IDKunjungan); err != nil {
-        tx.Rollback(); return 0, err
+        return nil, err
     }
 
     if err := tx.Commit(); err != nil {
-        return 0, err
+        return nil, err
     }
-    return idResep, nil
-}
 
+    // Siapkan data respons
+    responseData := map[string]interface{}{
+        "id_resep":    idResep,
+        "total_harga": grandTotal,
+    }
+    for i, total := range sectionTotals {
+        key := fmt.Sprintf("nomor_%d", i+1)
+        responseData[key] = total
+    }
+
+    return responseData, nil
+}
 
 // GetObatList menampilkan daftar obat dengan pencarian nama + pagination.
 // • q     : string pencarian, case‑insensitive, boleh kosong

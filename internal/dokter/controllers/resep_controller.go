@@ -22,64 +22,63 @@ func NewResepController(s *services.ResepService) *ResepController {
 func (rc *ResepController) CreateResepHandler(c echo.Context) error {
 	var req models.ResepRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, echo.Map{
-			"status":  http.StatusBadRequest,
-			"message": "Invalid request payload: " + err.Error(),
-			"data":    nil,
-		})
+			return c.JSON(http.StatusBadRequest, echo.Map{
+					"status":  http.StatusBadRequest,
+					"message": "Invalid request payload: " + err.Error(),
+					"data":    nil,
+			})
 	}
 
 	// --- ambil id_karyawan (dokter) dari JWT ---
 	claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
 	if !ok || claims == nil {
-		return c.JSON(http.StatusUnauthorized, echo.Map{
-			"status":  http.StatusUnauthorized,
-			"message": "Invalid or missing token claims",
-			"data":    nil,
-		})
+			return c.JSON(http.StatusUnauthorized, echo.Map{
+					"status":  http.StatusUnauthorized,
+					"message": "Invalid or missing token claims",
+					"data":    nil,
+			})
 	}
 	idKaryawan, err := strconv.Atoi(claims.IDKaryawan)
 	if err != nil || idKaryawan <= 0 {
-		return c.JSON(http.StatusUnauthorized, echo.Map{
-			"status":  http.StatusUnauthorized,
-			"message": "Invalid karyawan ID in token",
-			"data":    nil,
-		})
+			return c.JSON(http.StatusUnauthorized, echo.Map{
+					"status":  http.StatusUnauthorized,
+					"message": "Invalid karyawan ID in token",
+					"data":    nil,
+			})
 	}
-	req.IDKaryawan = idKaryawan // override nilai dari body (jika ada)
 
 	// --- validasi minimal ---
 	if req.IDKunjungan == 0 || len(req.Sections) == 0 {
-		return c.JSON(http.StatusBadRequest, echo.Map{
-			"status":  http.StatusBadRequest,
-			"message": "id_kunjungan and sections are required",
-			"data":    nil,
-		})
+			return c.JSON(http.StatusBadRequest, echo.Map{
+					"status":  http.StatusBadRequest,
+					"message": "id_kunjungan and sections are required",
+					"data":    nil,
+			})
 	}
 
 	// --- panggil service ---
-	idResep, err := rc.Service.CreateResep(req)
+	result, err := rc.Service.CreateResep(req, idKaryawan)
 	if err != nil {
-		switch err {
-		case services.ErrKunjunganNotFound:
-			return c.JSON(http.StatusNotFound, echo.Map{
-				"status":  http.StatusNotFound,
-				"message": "Kunjungan tidak ditemukan",
-				"data":    nil,
-			})
-		default:
-			return c.JSON(http.StatusInternalServerError, echo.Map{
-				"status":  http.StatusInternalServerError,
-				"message": "Failed to create resep: " + err.Error(),
-				"data":    nil,
-			})
-		}
+			switch err {
+			case services.ErrKunjunganNotFound:
+					return c.JSON(http.StatusNotFound, echo.Map{
+							"status":  http.StatusNotFound,
+							"message": "Kunjungan tidak ditemukan",
+							"data":    nil,
+					})
+			default:
+					return c.JSON(http.StatusInternalServerError, echo.Map{
+							"status":  http.StatusInternalServerError,
+							"message": "Failed to create resep: " + err.Error(),
+							"data":    nil,
+					})
+			}
 	}
 
 	return c.JSON(http.StatusOK, echo.Map{
-		"status":  http.StatusOK,
-		"message": "Resep created successfully",
-		"data":    echo.Map{"id_resep": idResep},
+			"status":  http.StatusOK,
+			"message": "Resep created successfully",
+			"data":    result,
 	})
 }
 
