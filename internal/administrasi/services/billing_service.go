@@ -469,15 +469,16 @@ func (s *BillingService) BayarTagihan(idBilling int, tipePembayaran string) (map
 	// Ambil data untuk WebSocket
 	var wsIdKunjungan, wsIdPasien int64
 	var wsNamaPasien, wsNomorRM, wsNamaPoli string
+	var wsUpdatedAt time.Time
 	err = tx.QueryRow(`
-		SELECT B.id_kunjungan, A.id_pasien, P.nama, RK.id_rm, Pol.nama_poli
+		SELECT B.id_kunjungan, A.id_pasien, P.nama, RK.id_rm, Pol.nama_poli, B.updated_at
 		FROM Billing B
 		JOIN Antrian A ON B.id_antrian = A.id_antrian
 		JOIN Pasien P ON A.id_pasien = P.id_pasien
 		JOIN Riwayat_Kunjungan RK ON B.id_kunjungan = RK.id_kunjungan
 		JOIN Kunjungan_Poli KP ON RK.id_kunjungan = KP.id_kunjungan
 		JOIN Poliklinik Pol ON KP.id_poli = Pol.id_poli
-		WHERE B.id_billing = ?`, idBilling).Scan(&wsIdKunjungan, &wsIdPasien, &wsNamaPasien, &wsNomorRM, &wsNamaPoli)
+		WHERE B.id_billing = ?`, idBilling).Scan(&wsIdKunjungan, &wsIdPasien, &wsNamaPasien, &wsNomorRM, &wsNamaPoli, &wsUpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("gagal mengambil data untuk WebSocket: %v", err)
 	}
@@ -488,7 +489,7 @@ func (s *BillingService) BayarTagihan(idBilling int, tipePembayaran string) (map
 		return nil, fmt.Errorf("gagal commit transaksi: %v", err)
 	}
 
-	// Kirim broadcast WebSocket
+	// Kirim broadcast WebSocket pertama
 	payload := map[string]interface{}{
 		"type": "billing_update",
 		"data": map[string]interface{}{
@@ -502,10 +503,26 @@ func (s *BillingService) BayarTagihan(idBilling int, tipePembayaran string) (map
 	}
 	msg, err := json.Marshal(payload)
 	if err != nil {
-		// Log error, tapi lanjutkan
 		log.Printf("Gagal marshal payload WebSocket: %v", err)
 	} else {
 		ws.HubInstance.Broadcast <- msg
+	}
+
+	// Kirim broadcast WebSocket kedua
+	payload2 := map[string]interface{}{
+		"type": "riwayat_update",
+		"data": map[string]interface{}{
+			"nama_pasien":        wsNamaPasien,
+			"tanggal_pembayaran": wsUpdatedAt,
+			"nama_poli":          wsNamaPoli,
+			"id_kunjungan":       wsIdKunjungan,
+		},
+	}
+	msg2, err := json.Marshal(payload2)
+	if err != nil {
+		log.Printf("Gagal marshal payload WebSocket kedua: %v", err)
+	} else {
+		ws.HubInstance.Broadcast <- msg2
 	}
 
 	// Siapkan response

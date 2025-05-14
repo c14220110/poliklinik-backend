@@ -321,16 +321,15 @@ func (s *ResepService) GetRiwayatKunjunganByPasien(idPasien int) ([]models.Riway
 // • q     : string pencarian, case-insensitive, boleh kosong
 // • limit : jumlah baris per halaman (default 20, max 100)
 // • page  : halaman dimulai dari 1 (default 1)
-func (s *ResepService) GetICD9CMList(q string, limit, page int) ([]map[string]interface{}, error) {
+// Mengembalikan list, total record, limit yang digunakan, dan error.
+func (s *ResepService) GetICD9CMList(q string, limit, page int) ([]map[string]interface{}, int64, int, error) {
     if limit <= 0 { limit = 20 }
     if limit > 100 { limit = 100 }
     if page  <= 0 { page  = 1  }
     offset := (page - 1) * limit
 
-    baseQuery := `
-        SELECT id_icd9_cm, display, version, harga
-        FROM ICD9_CM
-    `
+    // Query untuk menghitung total record
+    countQuery := "SELECT COUNT(*) FROM ICD9_CM"
     conds  := []string{}
     params := []interface{}{}
 
@@ -339,6 +338,21 @@ func (s *ResepService) GetICD9CMList(q string, limit, page int) ([]map[string]in
         params = append(params, "%"+strings.ToLower(q)+"%")
     }
 
+    if len(conds) > 0 {
+        countQuery += " WHERE " + strings.Join(conds, " AND ")
+    }
+
+    var total int64
+    err := s.DB.QueryRow(countQuery, params...).Scan(&total)
+    if err != nil {
+        return nil, 0, 0, fmt.Errorf("count query error: %v", err)
+    }
+
+    // Query untuk mengambil data
+    baseQuery := `
+        SELECT id_icd9_cm, display, version, harga
+        FROM ICD9_CM
+    `
     query := baseQuery
     if len(conds) > 0 {
         query += " WHERE " + strings.Join(conds, " AND ")
@@ -348,7 +362,7 @@ func (s *ResepService) GetICD9CMList(q string, limit, page int) ([]map[string]in
 
     rows, err := s.DB.Query(query, params...)
     if err != nil {
-        return nil, fmt.Errorf("query error: %v", err)
+        return nil, 0, 0, fmt.Errorf("query error: %v", err)
     }
     defer rows.Close()
 
@@ -361,7 +375,7 @@ func (s *ResepService) GetICD9CMList(q string, limit, page int) ([]map[string]in
             harga      float64
         )
         if err := rows.Scan(&id_icd9_cm, &display, &version, &harga); err != nil {
-            return nil, fmt.Errorf("scan error: %v", err)
+            return nil, 0, 0, fmt.Errorf("scan error: %v", err)
         }
         list = append(list, map[string]interface{}{
             "id_icd9_cm": id_icd9_cm,
@@ -370,5 +384,6 @@ func (s *ResepService) GetICD9CMList(q string, limit, page int) ([]map[string]in
             "harga":      harga,
         })
     }
-    return list, nil
+
+    return list, total, limit, nil
 }
