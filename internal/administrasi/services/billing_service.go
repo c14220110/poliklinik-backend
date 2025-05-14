@@ -496,7 +496,7 @@ func (s *BillingService) BayarTagihan(idBilling int, tipePembayaran string) (map
 			"id_kunjungan": wsIdKunjungan,
 			"id_pasien":    wsIdPasien,
 			"nama_pasien":  wsNamaPasien,
-			"nomor_rm":     wsNomorRM,
+			"id_rm":     wsNomorRM,
 			"poli_tujuan":  wsNamaPoli,
 			"status":       "Selesai",
 		},
