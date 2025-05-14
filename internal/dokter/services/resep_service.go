@@ -316,3 +316,59 @@ func (s *ResepService) GetRiwayatKunjunganByPasien(idPasien int) ([]models.Riway
 
     return result, nil
 }
+
+// GetICD9CMList menampilkan daftar ICD9_CM dengan pencarian display + pagination.
+// • q     : string pencarian, case-insensitive, boleh kosong
+// • limit : jumlah baris per halaman (default 20, max 100)
+// • page  : halaman dimulai dari 1 (default 1)
+func (s *ResepService) GetICD9CMList(q string, limit, page int) ([]map[string]interface{}, error) {
+    if limit <= 0 { limit = 20 }
+    if limit > 100 { limit = 100 }
+    if page  <= 0 { page  = 1  }
+    offset := (page - 1) * limit
+
+    baseQuery := `
+        SELECT id_icd9_cm, display, version, harga
+        FROM ICD9_CM
+    `
+    conds  := []string{}
+    params := []interface{}{}
+
+    if q != "" {
+        conds  = append(conds, "LOWER(display) LIKE ?")
+        params = append(params, "%"+strings.ToLower(q)+"%")
+    }
+
+    query := baseQuery
+    if len(conds) > 0 {
+        query += " WHERE " + strings.Join(conds, " AND ")
+    }
+    query += " ORDER BY id_icd9_cm"
+    query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+
+    rows, err := s.DB.Query(query, params...)
+    if err != nil {
+        return nil, fmt.Errorf("query error: %v", err)
+    }
+    defer rows.Close()
+
+    var list []map[string]interface{}
+    for rows.Next() {
+        var (
+            id_icd9_cm string
+            display    string
+            version    string
+            harga      float64
+        )
+        if err := rows.Scan(&id_icd9_cm, &display, &version, &harga); err != nil {
+            return nil, fmt.Errorf("scan error: %v", err)
+        }
+        list = append(list, map[string]interface{}{
+            "id_icd9_cm": id_icd9_cm,
+            "display":    display,
+            "version":    version,
+            "harga":      harga,
+        })
+    }
+    return list, nil
+}

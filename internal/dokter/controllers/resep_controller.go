@@ -138,3 +138,24 @@ func (rc *ResepController) GetRiwayatKunjunganHandler(c echo.Context) error {
 			"data":    riwayat,
 	})
 }
+
+func (rc *ResepController) GetICD9CMList(c echo.Context) error {
+	q        := c.QueryParam("q")                    // search display LIKE
+	limit, _ := strconv.Atoi(c.QueryParam("limit")) // default di-handle service
+	page, _  := strconv.Atoi(c.QueryParam("page"))  // halaman mulai 1
+
+	list, err := rc.Service.GetICD9CMList(q, limit, page)
+	if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+					"status":  http.StatusInternalServerError,
+					"message": "Failed to retrieve ICD9_CM list: " + err.Error(),
+					"data":    nil,
+			})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+			"status":  http.StatusOK,
+			"message": "ICD9_CM list retrieved successfully",
+			"data":    list,
+	})
+}
