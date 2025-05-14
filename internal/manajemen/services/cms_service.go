@@ -665,60 +665,90 @@ func (svc *CMSService) SaveAssessment(
 
 	idAssessment, _ := res.LastInsertId()
 
-	/* ---------- 8. Update Riwayat_Kunjungan ---------- */
-	// coba update baris yang sudah ada
-	up, err := tx.Exec(`
-		UPDATE Riwayat_Kunjungan
-		SET id_assessment = ?
-		WHERE id_antrian = ? AND id_assessment IS NULL`,
-		idAssessment, idAntrian)
-	if err != nil { return 0, err }
+/* ---------- 8. Update atau Insert Riwayat_Kunjungan ---------- */
+    // Selalu update Riwayat_Kunjungan untuk id_antrian yang diberikan
+    up, err := tx.Exec(`
+        UPDATE Riwayat_Kunjungan
+        SET id_assessment = ?
+        WHERE id_antrian = ?`,
+        idAssessment, idAntrian)
+    if err != nil {
+        return 0, err
+    }
 
-	affected, _ := up.RowsAffected()
-	var idKunjungan int64
+    affected, _ := up.RowsAffected()
+    var idKunjungan int64
 
-	if affected == 0 {
-		// baris RK belum ada → buat baru (butuh id_rm)
-		var idRM string
-		if err = tx.QueryRow(`
-			SELECT rm.id_rm
-			FROM Rekam_Medis rm
-			JOIN Pasien p ON p.id_pasien = ?
-			WHERE rm.id_pasien = p.id_pasien
-			LIMIT 1`, idPasien).Scan(&idRM); err != nil {
-			return 0, fmt.Errorf("patient has no rekam medis")
-		}
+    if affected == 0 {
+        // Tidak ada Riwayat_Kunjungan, buat baru
+        var idRM string
+        if err = tx.QueryRow(`
+            SELECT rm.id_rm
+            FROM Rekam_Medis rm
+            JOIN Pasien p ON p.id_pasien = ?
+            WHERE rm.id_pasien = p.id_pasien
+            LIMIT 1`, idPasien).Scan(&idRM); err != nil {
+            return 0, fmt.Errorf("pasien tidak memiliki rekam medis")
+        }
 
-		resRK, err2 := tx.Exec(`
-			INSERT INTO Riwayat_Kunjungan
-			  (id_rm,id_antrian,id_assessment,created_at)
-			VALUES (?,?,?,NOW())`,
-			idRM, idAntrian, idAssessment)
-		if err2 != nil { return 0, err2 }
-		idKunjungan, _ = resRK.LastInsertId()
-	} else {
-		// retrieve id_kunjungan yang barusan di‑update
-		if err = tx.QueryRow(`
-			SELECT id_kunjungan
-			FROM Riwayat_Kunjungan
-			WHERE id_antrian = ?`, idAntrian).Scan(&idKunjungan); err != nil {
-			return 0, err
-		}
-	}
+        resRK, err2 := tx.Exec(`
+            INSERT INTO Riwayat_Kunjungan
+              (id_rm, id_antrian, id_assessment, created_at)
+            VALUES (?, ?, ?, NOW())`,
+            idRM, idAntrian, idAssessment)
+        if err2 != nil {
+            return 0, err2
+        }
+        idKunjungan, _ = resRK.LastInsertId()
+    } else {
+        // Ambil id_kunjungan yang baru saja diperbarui
+        if err = tx.QueryRow(`
+            SELECT id_kunjungan
+            FROM Riwayat_Kunjungan
+            WHERE id_antrian = ?`, idAntrian).Scan(&idKunjungan); err != nil {
+            return 0, err
+        }
+    }
 
-	/* ---------- 9. INSERT Billing (status draft=1) ---------- */
-	if _, err = tx.Exec(`
-		INSERT INTO Billing
-		  (id_kunjungan,id_antrian,id_karyawan,
-		   id_assessment,id_status,created_at)
-		VALUES (?,?,?,?,1,NOW())`,
-		idKunjungan, idAntrian, idKaryawan, idAssessment); err != nil {
-		return 0, err
-	}
+    /* ---------- 9. Update atau Insert Billing ---------- */
+    // Cek apakah sudah ada billing untuk id_kunjungan
+    var existingBillingID int
+    err = tx.QueryRow(`
+        SELECT id_billing
+        FROM Billing
+        WHERE id_kunjungan = ?`, idKunjungan).Scan(&existingBillingID)
+    if err != nil && err != sql.ErrNoRows {
+        return 0, err
+    }
 
-	/* ---------- 10. Commit & return ---------- */
-	if err = tx.Commit(); err != nil { return 0, err }
-	return idAssessment, nil
+    if err == sql.ErrNoRows {
+        // Tidak ada billing, lakukan INSERT
+        _, err = tx.Exec(`
+            INSERT INTO Billing
+              (id_kunjungan, id_antrian, id_karyawan,
+               id_assessment, id_status, created_at)
+            VALUES (?, ?, ?, ?, 1, NOW())`,
+            idKunjungan, idAntrian, idKaryawan, idAssessment)
+        if err != nil {
+            return 0, err
+        }
+    } else {
+        // Billing sudah ada, lakukan UPDATE
+        _, err = tx.Exec(`
+            UPDATE Billing
+            SET id_assessment = ?, id_karyawan = ?, updated_at = NOW()
+            WHERE id_billing = ?`,
+            idAssessment, idKaryawan, existingBillingID)
+        if err != nil {
+            return 0, err
+        }
+    }
+
+    /* ---------- 10. Commit & return ---------- */
+    if err = tx.Commit(); err != nil {
+        return 0, err
+    }
+    return idAssessment, nil
 }
 
 
