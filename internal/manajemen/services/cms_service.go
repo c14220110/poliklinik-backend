@@ -55,35 +55,37 @@ func (svc *CMSService) CreateCMSWithSections(
 	// 3) validasi master Elements
 	if err = svc.validateElementIDs(tx, req); err != nil { return 0, err }
 
-	// 4) loop section / subsection / element
-	for _, sec := range req.Sections {
+// 4) loop section / subsection / element
+for _, sec := range req.Sections {
 
-		rSec, err2 := tx.Exec(
+	rSec, err2 := tx.Exec(
 			`INSERT INTO CMS_Section (id_cms,title) VALUES (?,?)`,
 			idCMS, sec.Title)
-		if err2 != nil { return 0, err2 }
-		idSection, _ := rSec.LastInsertId()
+	if err2 != nil { return 0, err2 }
+	idSection, _ := rSec.LastInsertId()
 
-		if len(sec.Subsections) > 0 { // -------- normal subseksi
-			for _, sub := range sec.Subsections {
+	// --- 4a. selalu simpan elemen langsung di section (jika ada) ---
+	if len(sec.Elements) > 0 {
+			if err = insertElements(tx, idSection, nil, sec.Elements); err != nil {
+					return 0, err
+			}
+	}
 
-				rSub, err3 := tx.Exec(
+	// --- 4b. kemudian proses setiap subseksi (jika ada) -------------
+	for _, sub := range sec.Subsections {
+
+			rSub, err3 := tx.Exec(
 					`INSERT INTO CMS_Subsection (id_section,title) VALUES (?,?)`,
 					idSection, sub.Title)
-				if err3 != nil { return 0, err3 }
-				idSub, _ := rSub.LastInsertId()
+			if err3 != nil { return 0, err3 }
+			idSub, _ := rSub.LastInsertId()
 
-				if err = insertElements(tx, idSection, &idSub, sub.Elements); err != nil {
+			if err = insertElements(tx, idSection, &idSub, sub.Elements); err != nil {
 					return 0, err
-				}
 			}
-
-		} else if len(sec.Elements) > 0 { // ---- elemen langsung di level section
-			if err = insertElements(tx, idSection, nil, sec.Elements); err != nil {
-				return 0, err
-			}
-		}
 	}
+}
+
 
 	// 5) audit trail Management_CMS
 	if _, err = tx.Exec(
