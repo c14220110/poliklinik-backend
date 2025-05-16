@@ -24,80 +24,76 @@ func NewCMSService(db *sql.DB) *CMSService {
 type errInvalidElementID struct{ ID int }
 func (e errInvalidElementID) Error() string { return fmt.Sprintf("invalid element ID: %d", e.ID) }
 
-// CreateCMSWithSections membuat record CMS baru, men‑soft‑delete CMS aktif di poli yg sama,
-// lalu menyimpan section, OPTIONAL subsection, elements (tanpa dummy), Detail_Element, dan Management_CMS.
+// ------------------------------------------------------------
+// CreateCMSWithSections  (NO dummy subsection)
+// ------------------------------------------------------------
 func (svc *CMSService) CreateCMSWithSections(
 	req models.CreateCMSRequest,
 	mgmt models.ManagementCMS,
 ) (int64, error) {
 
 	tx, err := svc.DB.Begin()
-	if err != nil {
-		return 0, err
-	}
+	if err != nil { return 0, err }
+	defer func() { if err != nil { tx.Rollback() } }()
+
 	now := time.Now()
 
-	// 1) Soft‑delete CMS lama di poli yg sama
-	if _, err := tx.Exec(
-		`UPDATE CMS SET deleted_at = ? WHERE id_poli = ? AND deleted_at IS NULL`,
+	// 1) soft-delete CMS aktif di poli yang sama
+	if _, err = tx.Exec(
+		`UPDATE CMS SET deleted_at=? WHERE id_poli=? AND deleted_at IS NULL`,
 		now, req.IDPoli); err != nil {
-		tx.Rollback()
 		return 0, err
 	}
 
-	// 2) Insert header CMS baru
+	// 2) header CMS
 	res, err := tx.Exec(
-		`INSERT INTO CMS (id_poli, title, created_at, updated_at) VALUES (?,?,?,?)`,
+		`INSERT INTO CMS (id_poli,title,created_at,updated_at) VALUES (?,?,?,?)`,
 		req.IDPoli, req.Title, now, now)
-	if err != nil { tx.Rollback(); return 0, err }
+	if err != nil { return 0, err }
 	idCMS, _ := res.LastInsertId()
 
-	// 3) Validasi id_element
-	if err := svc.validateElementIDs(tx, req); err != nil {
-		tx.Rollback(); return 0, err
-	}
+	// 3) validasi master Elements
+	if err = svc.validateElementIDs(tx, req); err != nil { return 0, err }
 
-	// 4) Insert Section + (optional) Subsection + Elements
+	// 4) loop section / subsection / element
 	for _, sec := range req.Sections {
 
-		rSec, err := tx.Exec(`INSERT INTO CMS_Section (id_cms, title) VALUES (?,?)`,
+		rSec, err2 := tx.Exec(
+			`INSERT INTO CMS_Section (id_cms,title) VALUES (?,?)`,
 			idCMS, sec.Title)
-		if err != nil { tx.Rollback(); return 0, err }
+		if err2 != nil { return 0, err2 }
 		idSection, _ := rSec.LastInsertId()
 
-		if len(sec.Subsections) > 0 {
-			// ada subseksi normal
+		if len(sec.Subsections) > 0 { // -------- normal subseksi
 			for _, sub := range sec.Subsections {
-				rSub, err := tx.Exec(`INSERT INTO CMS_Subsection (id_section, title) VALUES (?,?)`,
+
+				rSub, err3 := tx.Exec(
+					`INSERT INTO CMS_Subsection (id_section,title) VALUES (?,?)`,
 					idSection, sub.Title)
-				if err != nil { tx.Rollback(); return 0, err }
+				if err3 != nil { return 0, err3 }
 				idSub, _ := rSub.LastInsertId()
 
-				if err := insertElements(tx, idSection, &idSub, sub.Elements); err != nil {
-					tx.Rollback(); return 0, err
+				if err = insertElements(tx, idSection, &idSub, sub.Elements); err != nil {
+					return 0, err
 				}
 			}
-		} else if len(sec.Elements) > 0 {
-			// elemen langsung di level section (id_subsection = NULL)
-			if err := insertElements(tx, idSection, nil, sec.Elements); err != nil {
-				tx.Rollback(); return 0, err
+
+		} else if len(sec.Elements) > 0 { // ---- elemen langsung di level section
+			if err = insertElements(tx, idSection, nil, sec.Elements); err != nil {
+				return 0, err
 			}
 		}
 	}
 
-	// 5) Audit trail ke Management_CMS
-	if _, err := tx.Exec(`
-		INSERT INTO Management_CMS (id_management,id_cms,created_by,updated_by)
-		VALUES (?,?,?,?)`,
+	// 5) audit trail Management_CMS
+	if _, err = tx.Exec(
+		`INSERT INTO Management_CMS (id_management,id_cms,created_by,updated_by)
+		 VALUES (?,?,?,?)`,
 		mgmt.IDManagement, idCMS, mgmt.CreatedBy, mgmt.UpdatedBy); err != nil {
-		tx.Rollback(); return 0, err
-	}
-
-	// commit
-	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
-	return idCMS, nil
+
+	return idCMS, tx.Commit()
 }
 
 // -------------------- helper private --------------------
@@ -146,31 +142,27 @@ func (svc *CMSService) validateElementIDs(tx *sql.Tx, req models.CreateCMSReques
 	return nil
 }
 
-// insertElements menyisipkan array elemen ke CMS_Elements + Detail_Element.
-// idSub=nil ➜ kolom id_subsection disimpan NULL.
 func insertElements(
 	tx *sql.Tx,
 	idSection int64,
 	idSub *int64,
-	elements []models.ElementRequest,
+	elems []models.ElementRequest,
 ) error {
 
-	for _, el := range elements {
+	var subID interface{} = nil
+	if idSub != nil { subID = *idSub }
 
-		// siapkan element_options (nullable)
+	for _, el := range elems {
+
 		var opts interface{}
 		if len(el.ElementOptions) != 0 && string(el.ElementOptions) != "null" {
 			opts = json.RawMessage(el.ElementOptions)
 		}
 
-		// subID = NULL jika tidak ada subsection
-		var subID interface{} = nil
-		if idSub != nil { subID = *idSub }
-
 		rE, err := tx.Exec(`
 			INSERT INTO CMS_Elements
-			  (id_section, id_subsection, element_label, element_name,
-			   element_options, element_hint, is_required)
+			  (id_section,id_subsection,element_label,element_name,
+			   element_options,element_hint,is_required)
 			VALUES (?,?,?,?,?,?,?)`,
 			idSection, subID,
 			el.ElementLabel, el.ElementName,
@@ -178,9 +170,11 @@ func insertElements(
 		if err != nil { return err }
 
 		idCE, _ := rE.LastInsertId()
-		if _, err := tx.Exec(`
-			INSERT INTO Detail_Element (id_element, id_cms_elements) VALUES (?,?)`,
-			el.IDElement, idCE); err != nil { return err }
+		if _, err = tx.Exec(
+			`INSERT INTO Detail_Element (id_element,id_cms_elements) VALUES (?,?)`,
+			el.IDElement, idCE); err != nil {
+			return err
+		}
 	}
 	return nil
 }
