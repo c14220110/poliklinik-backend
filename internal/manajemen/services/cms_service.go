@@ -303,104 +303,106 @@ func (svc *CMSService) UpdateCMSWithSections(
 
 	tx, err := svc.DB.Begin()
 	if err != nil { return err }
+	defer func() { if err != nil { tx.Rollback() } }()
+
 	now := time.Now()
 
-	// 0) Pastikan CMS ada (boleh soft‑delete)
+	// 0) pastikan CMS ada (aktif ataupun soft-delete)
 	var dummy int
-	if err := tx.QueryRow(`SELECT id_cms FROM CMS WHERE id_cms = ?`,
-		req.IDCMS).Scan(&dummy); err != nil {
-		tx.Rollback()
+	if err = tx.QueryRow(
+		`SELECT id_cms FROM CMS WHERE id_cms = ?`, req.IDCMS).
+		Scan(&dummy); err != nil {
 		return fmt.Errorf("CMS tidak ditemukan")
 	}
 
-	// 1) Update header CMS
-	if _, err := tx.Exec(`
+	// 1) update header
+	if _, err = tx.Exec(`
 		UPDATE CMS SET id_poli=?, title=?, updated_at=? WHERE id_cms=?`,
 		req.IDPoli, req.Title, now, req.IDCMS); err != nil {
-		tx.Rollback(); return err
+		return err
 	}
 
 	reName := regexp.MustCompile(`[^a-zA-Z0-9\s]`)
 
+	// 2) loop sections
 	for _, sec := range req.Sections {
+
 		/* ---------- SECTION ---------- */
-		if sec.Deleted {
-			if _, err := tx.Exec(
+		if sec.Deleted && sec.IDSection != 0 {
+			if _, err = tx.Exec(
 				`UPDATE CMS_Section SET deleted_at=? WHERE id_section=?`,
-				now, sec.IDSection); err != nil { tx.Rollback(); return err }
+				now, sec.IDSection); err != nil { return err }
 			continue
 		}
 
 		var idSection int64
 		if sec.IDSection == 0 {
-			res, err := tx.Exec(
+			res, err2 := tx.Exec(
 				`INSERT INTO CMS_Section (id_cms,title) VALUES (?,?)`,
 				req.IDCMS, sec.Title)
-			if err != nil { tx.Rollback(); return err }
+			if err2 != nil { return err2 }
 			idSection, _ = res.LastInsertId()
 		} else {
 			idSection = int64(sec.IDSection)
-			if _, err := tx.Exec(
+			if _, err = tx.Exec(
 				`UPDATE CMS_Section SET title=? WHERE id_section=?`,
-				sec.Title, idSection); err != nil { tx.Rollback(); return err }
+				sec.Title, idSection); err != nil { return err }
 		}
 
-		/* ---------- SUBSECTION / ELEMENT ---------- */
-		if len(sec.Subsections) > 0 {
-			// ======== CASE: punya subseksi ==========
-			for _, sub := range sec.Subsections {
-				if sub.Deleted && sub.IDSubsection != 0 {
-					if _, err := tx.Exec(
-						`UPDATE CMS_Subsection SET deleted_at=? WHERE id_subsection=?`,
-						now, sub.IDSubsection); err != nil { tx.Rollback(); return err }
-					continue
-				}
+		/* ---------- 2a. elemen top-level ---------- */
+		if len(sec.Elements) > 0 {
+			if err = upsertElements(tx, idSection, nil,
+				sec.Elements, reName, now); err != nil { return err }
+		}
 
-				var idSub int64
-				if sub.IDSubsection == 0 {
-					res, err := tx.Exec(
-						`INSERT INTO CMS_Subsection (id_section,title) VALUES (?,?)`,
-						idSection, sub.Title)
-					if err != nil { tx.Rollback(); return err }
-					idSub, _ = res.LastInsertId()
-				} else {
-					idSub = int64(sub.IDSubsection)
-					if _, err := tx.Exec(
-						`UPDATE CMS_Subsection SET title=? WHERE id_subsection=?`,
-						sub.Title, idSub); err != nil { tx.Rollback(); return err }
-				}
+		/* ---------- 2b. subsections (jika ada) ----- */
+		for _, sub := range sec.Subsections {
 
-				// elemen di dalam subseksi
-				if err := upsertElements(tx, idSection, &idSub, sub.Elements, reName, now); err != nil {
-					tx.Rollback(); return err
-				}
+			if sub.Deleted && sub.IDSubsection != 0 {
+				if _, err = tx.Exec(
+					`UPDATE CMS_Subsection SET deleted_at=? WHERE id_subsection=?`,
+					now, sub.IDSubsection); err != nil { return err }
+				continue
 			}
-		} else if len(sec.Elements) > 0 {
-			// ======== CASE: elemen langsung di section ==========
-			if err := upsertElements(tx, idSection, nil, sec.Elements, reName, now); err != nil {
-				tx.Rollback(); return err
+
+			var idSub int64
+			if sub.IDSubsection == 0 {
+				res, err2 := tx.Exec(
+					`INSERT INTO CMS_Subsection (id_section,title) VALUES (?,?)`,
+					idSection, sub.Title)
+				if err2 != nil { return err2 }
+				idSub, _ = res.LastInsertId()
+			} else {
+				idSub = int64(sub.IDSubsection)
+				if _, err = tx.Exec(
+					`UPDATE CMS_Subsection SET title=? WHERE id_subsection=?`,
+					sub.Title, idSub); err != nil { return err }
 			}
+
+			if err = upsertElements(tx, idSection, &idSub,
+				sub.Elements, reName, now); err != nil { return err }
 		}
 	}
 
-	// 2) Audit trail
-	if _, err := tx.Exec(`
+	// 3) audit trail
+	if _, err = tx.Exec(`
 		INSERT INTO Management_CMS (id_management,id_cms,created_by,updated_by)
 		VALUES (?,?,?,?)
 		ON DUPLICATE KEY UPDATE updated_by=?`,
 		mgmt.IDManagement, req.IDCMS, mgmt.CreatedBy, mgmt.UpdatedBy,
-		mgmt.UpdatedBy); err != nil { tx.Rollback(); return err }
+		mgmt.UpdatedBy); err != nil {
+		return err
+	}
 
 	return tx.Commit()
 }
-
 /* ---------- helper ---------- */
 
 // upsertElements menangani create / update / soft‑delete elemen
 func upsertElements(
 	tx *sql.Tx,
 	idSection int64,
-	idSub *int64, // nil ➜ NULL di DB
+	idSub *int64,
 	elements []models.ElementUpdate,
 	reName *regexp.Regexp,
 	now time.Time,
@@ -408,13 +410,11 @@ func upsertElements(
 
 	for _, el := range elements {
 
+		// soft-delete
 		if el.Deleted && el.IDCMSElements != 0 {
-			// soft‑delete element
 			if _, err := tx.Exec(
 				`UPDATE CMS_Elements SET deleted_at=? WHERE id_cms_elements=?`,
-				now, el.IDCMSElements); err != nil {
-				return err
-			}
+				now, el.IDCMSElements); err != nil { return err }
 			continue
 		}
 
@@ -426,22 +426,22 @@ func upsertElements(
 			return fmt.Errorf("invalid element ID: %d", el.IDElement)
 		}
 
-		// sanitize
+		// normalisasi label + name
 		clean := strings.TrimSpace(reName.ReplaceAllString(el.ElementLabel, ""))
 		elemName := strings.ToLower(strings.ReplaceAll(clean, " ", "_"))
 
-		// options
+		// opsi
 		var opts interface{}
 		if len(el.ElementOptions) != 0 && string(el.ElementOptions) != "null" {
 			opts = el.ElementOptions
 		}
 
-		// id_subsection NULL?
+		// id_subsection (NULL jika top-level)
 		var subID interface{} = nil
 		if idSub != nil { subID = *idSub }
 
 		if el.IDCMSElements == 0 {
-			/* --------- CREATE --------- */
+			// ---------- CREATE ----------
 			rE, err := tx.Exec(`
 				INSERT INTO CMS_Elements
 				  (id_section,id_subsection,element_label,element_name,
@@ -457,7 +457,7 @@ func upsertElements(
 				el.IDElement, newID); err != nil { return err }
 
 		} else {
-			/* --------- UPDATE --------- */
+			// ---------- UPDATE ----------
 			if _, err := tx.Exec(`
 				UPDATE CMS_Elements
 				   SET element_label=?, element_name=?, element_options=?,
@@ -466,7 +466,6 @@ func upsertElements(
 				clean, elemName, opts, el.ElementHint, el.IsRequired,
 				subID, el.IDCMSElements); err != nil { return err }
 
-			// update Detail_Element bila id_element berubah
 			if _, err := tx.Exec(
 				`UPDATE Detail_Element SET id_element=? WHERE id_cms_elements=?`,
 				el.IDElement, el.IDCMSElements); err != nil { return err }
