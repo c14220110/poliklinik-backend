@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -392,145 +391,151 @@ var (
 )
 
 
-func (s *BillingService) BayarTagihan(idBilling int, tipePembayaran string) (map[string]interface{}, error) {
+func (s *BillingService) BayarTagihan(
+	idKunjungan int,
+	tipePembayaran string,
+) (map[string]interface{}, error) {
+
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("gagal memulai transaksi: %v", err)
+			return nil, fmt.Errorf("gagal memulai transaksi: %v", err)
 	}
 	defer tx.Rollback()
 
-	// Ambil data Billing
-	var idKunjungan, idAntrian, idAssessment sql.NullInt64
-	var currentStatus int
+	// 1) Ambil record Billing berdasarkan id_kunjungan
+	var (
+			idBilling    int
+			idAntrian    sql.NullInt64
+			idAssessment sql.NullInt64
+			currentStatus int
+	)
 	err = tx.QueryRow(`
-		SELECT id_kunjungan, id_antrian, id_assessment, id_status
-		FROM Billing
-		WHERE id_billing = ?`, idBilling).Scan(&idKunjungan, &idAntrian, &idAssessment, &currentStatus)
+			SELECT id_billing, id_antrian, id_assessment, id_status
+			FROM Billing
+			WHERE id_kunjungan = ?`,
+			idKunjungan,
+	).Scan(&idBilling, &idAntrian, &idAssessment, &currentStatus)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("tagihan tidak ditemukan")
-		}
-		return nil, fmt.Errorf("gagal mengambil data billing: %v", err)
+			if err == sql.ErrNoRows {
+					return nil, fmt.Errorf("tagihan tidak ditemukan")
+			}
+			return nil, fmt.Errorf("gagal mengambil data billing: %v", err)
 	}
 	if currentStatus == 2 {
-		return nil, fmt.Errorf("tagihan sudah dibayar")
+			return nil, fmt.Errorf("tagihan sudah dibayar")
 	}
 
-	// Hitung harga dokter
+	// 2) Hitung harga dokter (jika ada assessment)
 	var hargaDokter float64
 	if idAssessment.Valid {
-		var idKaryawan int
-		err = tx.QueryRow(`
-			SELECT id_karyawan FROM Assessment WHERE id_assessment = ?`, idAssessment.Int64).Scan(&idKaryawan)
-		if err != nil && err != sql.ErrNoRows {
-			return nil, fmt.Errorf("gagal mengambil id_karyawan: %v", err)
-		}
-		if err == nil {
-			err = tx.QueryRow(`
-				SELECT harga FROM Tarif_Dokter WHERE id_karyawan = ?`, idKaryawan).Scan(&hargaDokter)
-			if err != nil && err != sql.ErrNoRows {
-				return nil, fmt.Errorf("gagal mengambil harga dokter: %v", err)
+			var idKaryawanAssess int
+			if err = tx.QueryRow(
+					`SELECT id_karyawan FROM Assessment WHERE id_assessment = ?`,
+					idAssessment.Int64,
+			).Scan(&idKaryawanAssess); err != nil && err != sql.ErrNoRows {
+					return nil, fmt.Errorf("gagal mengambil id_karyawan: %v", err)
 			}
-		}
+			if err == nil {
+					tx.QueryRow(
+							`SELECT harga FROM Tarif_Dokter WHERE id_karyawan = ?`,
+							idKaryawanAssess,
+					).Scan(&hargaDokter) // nol jika tidak ada
+			}
 	}
 
-	// Hitung harga obat
+	// 3) Hitung total obat
 	var totalObat float64
-	if idKunjungan.Valid {
-		err = tx.QueryRow(`
-			SELECT COALESCE(SUM(total_harga), 0) FROM E_Resep WHERE id_kunjungan = ?`, idKunjungan.Int64).Scan(&totalObat)
-		if err != nil && err != sql.ErrNoRows {
-			return nil, fmt.Errorf("gagal mengambil total harga obat: %v", err)
-		}
+	if idKunjungan > 0 {
+			tx.QueryRow(
+					`SELECT COALESCE(SUM(total_harga),0) FROM E_Resep WHERE id_kunjungan = ?`,
+					idKunjungan,
+			).Scan(&totalObat)
 	}
 
-	// Hitung harga tindakan
+	// 4) Hitung total tindakan
 	var totalTindakan float64
 	if idAssessment.Valid {
-		err = tx.QueryRow(`
-			SELECT COALESCE(SUM(total_harga_tindakan), 0) FROM Billing_Assessment WHERE id_assessment = ?`, idAssessment.Int64).Scan(&totalTindakan)
-		if err != nil && err != sql.ErrNoRows {
-			return nil, fmt.Errorf("gagal mengambil total harga tindakan: %v", err)
-		}
+			tx.QueryRow(
+					`SELECT COALESCE(SUM(total_harga_tindakan),0) 
+					 FROM Billing_Assessment 
+					 WHERE id_assessment = ?`,
+					idAssessment.Int64,
+			).Scan(&totalTindakan)
 	}
 
-	// Hitung total
+	// 5) Total keseluruhan
 	total := hargaDokter + totalObat + totalTindakan
 
-	// Update Billing
-	_, err = tx.Exec(`
-		UPDATE Billing
-		SET tipe_pembayaran = ?, total = ?, id_status = 2
-		WHERE id_billing = ?`, tipePembayaran, total, idBilling)
-	if err != nil {
-		return nil, fmt.Errorf("gagal memperbarui billing: %v", err)
+	// 6) Update Billing (by PK id_billing)
+	if _, err = tx.Exec(`
+			UPDATE Billing
+			SET tipe_pembayaran = ?, total = ?, id_status = 2
+			WHERE id_billing = ?`,
+			tipePembayaran, total, idBilling,
+	); err != nil {
+			return nil, fmt.Errorf("gagal memperbarui billing: %v", err)
 	}
 
-	// Ambil data untuk WebSocket
-	var wsIdKunjungan, wsIdPasien int64
-	var wsNamaPasien, wsNomorRM, wsNamaPoli string
-	var wsUpdatedAt time.Time
+	// 7) Ambil data utk broadcast WebSocket
+	var (
+			wsIdPasien  int64
+			wsNamaPasien, wsNomorRM, wsNamaPoli string
+			wsUpdatedAt time.Time
+	)
 	err = tx.QueryRow(`
-		SELECT B.id_kunjungan, A.id_pasien, P.nama, RK.id_rm, Pol.nama_poli, B.updated_at
-		FROM Billing B
-		JOIN Antrian A ON B.id_antrian = A.id_antrian
-		JOIN Pasien P ON A.id_pasien = P.id_pasien
-		JOIN Riwayat_Kunjungan RK ON B.id_kunjungan = RK.id_kunjungan
-		JOIN Kunjungan_Poli KP ON RK.id_kunjungan = KP.id_kunjungan
-		JOIN Poliklinik Pol ON KP.id_poli = Pol.id_poli
-		WHERE B.id_billing = ?`, idBilling).Scan(&wsIdKunjungan, &wsIdPasien, &wsNamaPasien, &wsNomorRM, &wsNamaPoli, &wsUpdatedAt)
+			SELECT A.id_pasien, P.nama, RK.id_rm, Pol.nama_poli, B.updated_at
+			FROM Billing B
+			JOIN Antrian A ON B.id_antrian = A.id_antrian
+			JOIN Pasien P   ON A.id_pasien  = P.id_pasien
+			JOIN Riwayat_Kunjungan RK ON B.id_kunjungan = RK.id_kunjungan
+			JOIN Kunjungan_Poli KP   ON RK.id_kunjungan = KP.id_kunjungan
+			JOIN Poliklinik Pol      ON KP.id_poli = Pol.id_poli
+			WHERE B.id_billing = ?`,
+			idBilling,
+	).Scan(&wsIdPasien, &wsNamaPasien, &wsNomorRM, &wsNamaPoli, &wsUpdatedAt)
 	if err != nil {
-		return nil, fmt.Errorf("gagal mengambil data untuk WebSocket: %v", err)
+			return nil, fmt.Errorf("gagal mengambil data untuk WebSocket: %v", err)
 	}
 
-	// Commit transaksi
-	err = tx.Commit()
-	if err != nil {
-		return nil, fmt.Errorf("gagal commit transaksi: %v", err)
+	// commit
+	if err = tx.Commit(); err != nil {
+			return nil, fmt.Errorf("gagal commit transaksi: %v", err)
 	}
 
-	// Kirim broadcast WebSocket pertama
+	// broadcast pertama
 	payload := map[string]interface{}{
-		"type": "billing_update",
-		"data": map[string]interface{}{
-			"id_kunjungan": wsIdKunjungan,
-			"id_pasien":    wsIdPasien,
-			"nama_pasien":  wsNamaPasien,
-			"id_rm":     wsNomorRM,
-			"nama_poli":  wsNamaPoli,
-			"status":       "Selesai",
-		},
+			"type": "billing_update",
+			"data": map[string]interface{}{
+					"id_kunjungan": idKunjungan,
+					"id_pasien":    wsIdPasien,
+					"nama_pasien":  wsNamaPasien,
+					"id_rm":        wsNomorRM,
+					"nama_poli":    wsNamaPoli,
+					"status":       "Selesai",
+			},
 	}
-	msg, err := json.Marshal(payload)
-	if err != nil {
-		log.Printf("Gagal marshal payload WebSocket: %v", err)
-	} else {
-		ws.HubInstance.Broadcast <- msg
-	}
+	msg, _ := json.Marshal(payload)
+	ws.HubInstance.Broadcast <- msg
 
-	// Kirim broadcast WebSocket kedua
+	// broadcast kedua
 	payload2 := map[string]interface{}{
-		"type": "riwayat_update",
-		"data": map[string]interface{}{
-			"nama_pasien":        wsNamaPasien,
-			"tanggal_pembayaran": wsUpdatedAt,
-			"nama_poli":          wsNamaPoli,
-			"id_kunjungan":       wsIdKunjungan,
-		},
+			"type": "riwayat_update",
+			"data": map[string]interface{}{
+					"nama_pasien":        wsNamaPasien,
+					"tanggal_pembayaran": wsUpdatedAt,
+					"nama_poli":          wsNamaPoli,
+					"id_kunjungan":       idKunjungan,
+			},
 	}
-	msg2, err := json.Marshal(payload2)
-	if err != nil {
-		log.Printf("Gagal marshal payload WebSocket kedua: %v", err)
-	} else {
-		ws.HubInstance.Broadcast <- msg2
-	}
+	msg2, _ := json.Marshal(payload2)
+	ws.HubInstance.Broadcast <- msg2
 
-	// Siapkan response
+	// 8) prepare response
 	result := map[string]interface{}{
-		"tarif_dokter":   hargaDokter,
-		"total_obat":     totalObat,
-		"total_tindakan": totalTindakan,
-		"total":          total,
+			"tarif_dokter":   hargaDokter,
+			"total_obat":     totalObat,
+			"total_tindakan": totalTindakan,
+			"total":          total,
 	}
 	return result, nil
 }
