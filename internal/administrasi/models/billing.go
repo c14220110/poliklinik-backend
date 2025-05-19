@@ -13,6 +13,7 @@ type InputBillingRequest struct {
 
 //detail bilin
 type DetailBilling struct {
+	IDKunjungan           int               `json:"id_kunjungan"`
 	NamaPasien             string           `json:"nama_pasien"`
 	IDRM                   string           `json:"id_rm"`
 	NamaPoli               string           `json:"nama_poli"`

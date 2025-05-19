@@ -135,16 +135,17 @@ func (bc *BillingController) GetDetailBillingHandler(c echo.Context) error {
 			})
 	}
 
+	// *** Tambahkan id_kunjungan di dalam data ***
 	return c.JSON(http.StatusOK, map[string]interface{}{
-    "status":  http.StatusOK,
-    "message": "Detail billing retrieved successfully",
-    "data": map[string]interface{}{
-        "id_kunjungan": idKunjungan,
-        "detail":       detail,
-    },
-})
-
+			"status":  http.StatusOK,
+			"message": "Detail billing retrieved successfully",
+			"data": map[string]interface{}{
+					"id_kunjungan": idKunjungan,
+					"detail":       detail,
+			},
+	})
 }
+
 
 var (
 	ErrKunjunganNotFound = errors.New("kunjungan not found")
