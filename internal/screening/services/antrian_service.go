@@ -398,3 +398,32 @@ func (s *AntrianService) GetDetailAntrianByID(idAntrian int) (map[string]interfa
 
 	return result, nil
 }
+
+
+// GetAntrianTerlama mengambil ID_Antrian dan Nomor_Antrian dari pasien dengan antrian paling lama (status = 1) pada hari ini
+func (s *AntrianService) GetAntrianTerlamaDokter(idPoli int) (map[string]interface{}, error) {
+	query := `
+		SELECT id_antrian, nomor_antrian 
+		FROM Antrian 
+		WHERE id_poli = ? AND id_status = 4 AND DATE(created_at) = CURDATE()
+		ORDER BY nomor_antrian ASC 
+		LIMIT 1
+	`
+	var idAntrian int
+	var nomorAntrian int
+
+	err := s.DB.QueryRow(query, idPoli).Scan(&idAntrian, &nomorAntrian)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, errors.New("tidak ada antrian yang menunggu")
+		}
+		return nil, err
+	}
+
+	result := map[string]interface{}{
+		"id_antrian":    idAntrian,
+		"nomor_antrian": nomorAntrian,
+	}
+
+	return result, nil
+}

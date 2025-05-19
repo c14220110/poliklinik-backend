@@ -391,3 +391,41 @@ func (ac *AntrianController) GetDetailAntrianHandler(c echo.Context) error {
 		"data":    result,
 	})
 }
+
+
+// GetAntrianTerlamaHandler menangani request untuk mendapatkan antrian pasien paling lama dengan status = 0
+func (ac *AntrianController) GetAntrianTerlamaDokterHandler(c echo.Context) error {
+    idPoliParam := c.QueryParam("id_poli")
+    if idPoliParam == "" {
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{
+            "status":  http.StatusBadRequest,
+            "message": "id_poli harus diberikan",
+            "data":    nil,
+        })
+    }
+
+    idPoli, err := strconv.Atoi(idPoliParam)
+    if err != nil {
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{
+            "status":  http.StatusBadRequest,
+            "message": "id_poli harus berupa angka",
+            "data":    nil,
+        })
+    }
+
+    // Perbaiki: gunakan ac.AntrianService, bukan ac.Service
+    data, err := ac.AntrianService.GetAntrianTerlama(idPoli)
+    if err != nil {
+        return c.JSON(http.StatusNotFound, map[string]interface{}{
+            "status":  http.StatusNotFound,
+            "message": err.Error(),
+            "data":    nil,
+        })
+    }
+
+    return c.JSON(http.StatusOK, map[string]interface{}{
+        "status":  http.StatusOK,
+        "message": "Antrian ditemukan",
+        "data":    data,
+    })
+}

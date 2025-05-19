@@ -130,7 +130,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter := api.Group("/dokter")
 	dokter.POST("/login", dokterController.LoginDokter) // Tidak pakai JWT
 	dokter.GET("/poliklinik", poliklinikController.GetActivePoliklinikList)
-	dokter.GET("/antrian/terlama", antrianController.GetAntrianTerlamaHandler, middlewares.JWTMiddleware())
+	dokter.GET("/antrian/terlama", antrianController.GetAntrianTerlamaDokterHandler, middlewares.JWTMiddleware())
 	dokter.POST("/input-screening", screeningController.InputScreening, middlewares.JWTMiddleware())
 	dokter.GET("/screening", screeningController.GetScreeningByPasienHandler, middlewares.JWTMiddleware())
 	dokter.GET("/kunjungan", resepController.GetRiwayatKunjunganHandler, middlewares.JWTMiddleware())
