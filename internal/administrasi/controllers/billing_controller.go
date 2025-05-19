@@ -135,16 +135,22 @@ func (bc *BillingController) GetDetailBillingHandler(c echo.Context) error {
 			})
 	}
 
-	// *** Tambahkan id_kunjungan di dalam data ***
+	// Prepare a one-level response: id_kunjungan + all fields from detail
+	resp := struct {
+			IDKunjungan int `json:"id_kunjungan"`
+			*models.DetailBilling
+	}{
+			IDKunjungan:     idKunjungan,
+			DetailBilling: detail,
+	}
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
 			"status":  http.StatusOK,
 			"message": "Detail billing retrieved successfully",
-			"data": map[string]interface{}{
-					"id_kunjungan": idKunjungan,
-					"detail":       detail,
-			},
+			"data":    resp,
 	})
 }
+
 
 
 var (
