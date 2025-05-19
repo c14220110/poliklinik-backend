@@ -136,10 +136,14 @@ func (bc *BillingController) GetDetailBillingHandler(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-			"status":  http.StatusOK,
-			"message": "Detail billing retrieved successfully",
-			"data":    detail,
-	})
+    "status":  http.StatusOK,
+    "message": "Detail billing retrieved successfully",
+    "data": map[string]interface{}{
+        "id_kunjungan": idKunjungan,
+        "detail":       detail,
+    },
+})
+
 }
 
 var (
