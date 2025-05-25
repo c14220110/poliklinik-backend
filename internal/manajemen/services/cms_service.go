@@ -296,9 +296,6 @@ func (svc *CMSService) GetCMSListByPoli(poliID int) ([]models.CMSListItem, error
 }
 
 
-// ---------------------------------------------------------------
-// services/cms_service.go  – UpdateCMSWithSections & helpers
-// ---------------------------------------------------------------
 func (svc *CMSService) UpdateCMSWithSections(
 	req models.UpdateCMSRequest,
 	mgmt models.ManagementCMS,
