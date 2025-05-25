@@ -362,6 +362,9 @@ func (svc *CMSService) UpdateCMSWithSections(
 				if _, err = tx.Exec(
 					`UPDATE CMS_Subsection SET deleted_at=? WHERE id_subsection=?`,
 					now, sub.IDSubsection); err != nil { return err }
+    if _, err = tx.Exec(
+			`UPDATE CMS_Elements SET deleted_at=? WHERE id_subsection=?`,
+			now, sub.IDSubsection); err != nil { return err }
 				continue
 			}
 
