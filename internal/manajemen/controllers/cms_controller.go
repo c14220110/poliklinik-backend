@@ -280,23 +280,26 @@ func (cc *CMSController) DeactivateCMSHandler(c echo.Context) error {
 }
 
 
+// SaveAssessmentHandler
+// POST /api/dokter/assessment?id_antrian={id}&id_poli={id}
 func (cc *CMSController) SaveAssessmentHandler(c echo.Context) error {
-	/* ---------- Query params ---------- */
+	/* ---------- query-param ---------- */
 	idAntrianStr := c.QueryParam("id_antrian")
-	idCMSStr     := c.QueryParam("id_cms")
-	if idAntrianStr == "" || idCMSStr == "" {
+	idPoliStr    := c.QueryParam("id_poli")
+	if idAntrianStr == "" || idPoliStr == "" {
 		return c.JSON(http.StatusBadRequest, echo.Map{
 			"status":  http.StatusBadRequest,
-			"message": "id_antrian & id_cms are required",
+			"message": "id_antrian & id_poli are required",
 			"data":    nil,
 		})
 	}
+
 	idAntrian, err1 := strconv.Atoi(idAntrianStr)
-	idCMS,     err2 := strconv.Atoi(idCMSStr)
+	idPoli,    err2 := strconv.Atoi(idPoliStr)
 	if err1 != nil || err2 != nil {
 		return c.JSON(http.StatusBadRequest, echo.Map{
 			"status":  http.StatusBadRequest,
-			"message": "id_antrian & id_cms must be numbers",
+			"message": "id_antrian & id_poli must be numbers",
 			"data":    nil,
 		})
 	}
@@ -312,7 +315,7 @@ func (cc *CMSController) SaveAssessmentHandler(c echo.Context) error {
 	}
 	idKaryawan, _ := strconv.Atoi(claims.IDKaryawan)
 
-	/* ---------- Body ---------- */
+	/* ---------- payload ---------- */
 	var input models.AssessmentInput
 	if err := c.Bind(&input); err != nil {
 		return c.JSON(http.StatusBadRequest, echo.Map{
@@ -322,34 +325,28 @@ func (cc *CMSController) SaveAssessmentHandler(c echo.Context) error {
 		})
 	}
 
-	/* ---------- Service ---------- */
-	idAss, err := cc.Service.SaveAssessment(idAntrian, idCMS, idKaryawan, input)
+	/* ---------- service ---------- */
+	idAss, err := cc.Service.SaveAssessment(idAntrian, idPoli, idKaryawan, input)
 	if err != nil {
-		// custom validation errors = 400
-		if strings.HasPrefix(err.Error(), "required field") ||
-			strings.HasPrefix(err.Error(), "unknown field") {
-			return c.JSON(http.StatusBadRequest, echo.Map{
-				"status":  http.StatusBadRequest,
-				"message": err.Error(),
-				"data":    nil,
-			})
-		}
-
-		// domain errors
 		switch err {
 		case services.ErrAntrianNotFound:
-			return c.JSON(http.StatusNotFound, echo.Map{
-				"status":  http.StatusNotFound,
-				"message": "Antrian not found",
-				"data":    nil,
-			})
-		case services.ErrCMSNotFound:
-			return c.JSON(http.StatusNotFound, echo.Map{
-				"status":  http.StatusNotFound,
-				"message": "CMS not found",
-				"data":    nil,
-			})
+			return c.JSON(http.StatusNotFound, echo.Map{"status": http.StatusNotFound, "message": "Antrian not found"})
+		case services.ErrCMSMultipleActive:
+			return c.JSON(http.StatusConflict, echo.Map{"status": http.StatusConflict, "message": "Poliklinik memiliki lebih dari 1 CMS aktif"})
+		case services.ErrCMSNoneActive:
+			return c.JSON(http.StatusNotFound, echo.Map{"status": http.StatusNotFound, "message": "Poliklinik tidak memiliki CMS aktif"})
+		case services.ErrCMSNeverCreated:
+			return c.JSON(http.StatusNotFound, echo.Map{"status": http.StatusNotFound, "message": "Poliklinik belum memiliki CMS sama sekali"})
 		default:
+			// validasi custom → 400
+			if strings.HasPrefix(err.Error(), "unknown id_cms_elements") ||
+				strings.HasPrefix(err.Error(), "required id_cms_elements") {
+				return c.JSON(http.StatusBadRequest, echo.Map{
+					"status":  http.StatusBadRequest,
+					"message": err.Error(),
+					"data":    nil,
+				})
+			}
 			return c.JSON(http.StatusInternalServerError, echo.Map{
 				"status":  http.StatusInternalServerError,
 				"message": "Failed to save assessment: " + err.Error(),

@@ -632,70 +632,102 @@ func (svc *CMSService) DeactivateCMS(cmsID int) error {
 var ErrAntrianNotFound = errors.New("antrian not found")
 
 func (svc *CMSService) SaveAssessment(
-	idAntrian, idCMS, idKaryawan int,
+	idAntrian, idPoli, idKaryawan int,
 	input models.AssessmentInput,
-) (int64, error) {
+) (idAssessment int64, err error) {
 
 	tx, err := svc.DB.Begin()
-	if err != nil { return 0, err }
-	defer func() { if err != nil { tx.Rollback() } }()
-
-	/* ---------- 1. Ambil pasien & poli dari Antrian ---------- */
-	var idPasien, idPoli int
-	if err = tx.QueryRow(`
-		SELECT id_pasien, id_poli
-		FROM Antrian
-		WHERE id_antrian = ?`, idAntrian).
-		Scan(&idPasien, &idPoli); err != nil {
-
-		if err == sql.ErrNoRows { return 0, ErrAntrianNotFound }
+	if err != nil {
 		return 0, err
 	}
+	defer func() { if err != nil { _ = tx.Rollback() } }()
 
-	/* ---------- 2. Validasi CMS ---------- */
-	var cmsPoli int
-	if err = tx.QueryRow(`
-		SELECT id_poli FROM CMS WHERE id_cms = ?`,
-		idCMS).Scan(&cmsPoli); err != nil {
-
-		if err == sql.ErrNoRows { return 0, ErrCMSNotFound }
+	/* --- 1. pastikan antrian ada & konsisten dgn poli --- */
+	var idPasien, poliFromAntrian int
+	err = tx.QueryRow(`SELECT id_pasien, id_poli FROM Antrian WHERE id_antrian = ?`,
+		idAntrian).Scan(&idPasien, &poliFromAntrian)
+	if err == sql.ErrNoRows {
+		return 0, ErrAntrianNotFound
+	}
+	if err != nil {
 		return 0, err
 	}
-	// pakai poli CMS untuk konsistensi
-	idPoli = cmsPoli
+	if poliFromAntrian != idPoli {
+		return 0, fmt.Errorf("id_poli mismatch with antrian")
+	}
 
-	/* ---------- 3. Elemen aktif & validasi answers ---------- */
-	rows, err := tx.Query(`
-		SELECT e.id_cms_elements, e.is_required
-		FROM CMS_Section s
-		  JOIN CMS_Elements e  ON e.id_section = s.id_section
-		                       AND e.deleted_at IS NULL
-		WHERE s.id_cms = ? AND s.deleted_at IS NULL`, idCMS)
-	if err != nil { return 0, err }
-	defer rows.Close()
-
-	required := map[int]struct{}{}
-	allowed   := map[int]struct{}{}
-
+	/* --- 2. cari CMS aktif utk poli --- */
+	rows, err := tx.Query(`SELECT id_cms FROM CMS WHERE id_poli = ? AND deleted_at IS NULL`, idPoli)
+	if err != nil {
+		return 0, err
+	}
+	var activeCMS []int
 	for rows.Next() {
-		var id, req int
-		if err = rows.Scan(&id, &req); err != nil { return 0, err }
-		allowed[id] = struct{}{}
-		if req != 0 { required[id] = struct{}{} }
+		var id int
+		if err = rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		activeCMS = append(activeCMS, id)
 	}
-	if len(allowed) == 0 {
-		return 0, fmt.Errorf("CMS has no active elements")
+	rows.Close()
+
+	switch len(activeCMS) {
+	case 0:
+		var total int
+		if err = tx.QueryRow(`SELECT COUNT(*) FROM CMS WHERE id_poli = ?`, idPoli).Scan(&total); err != nil {
+			return 0, err
+		}
+		if total == 0 {
+			return 0, ErrCMSNeverCreated
+		}
+		return 0, ErrCMSNoneActive
+	case 1:
+		// ok
+	default:
+		return 0, ErrCMSMultipleActive
 	}
+	idCMS := activeCMS[0]
+
+	/* --- 3. ambil elemen aktif & validasi jawaban --- */
+	elemRows, err := tx.Query(`
+		SELECT e.id_cms_elements, e.is_required
+		FROM   CMS_Section s
+		JOIN   CMS_Elements e ON e.id_section = s.id_section
+		WHERE  s.id_cms = ? AND s.deleted_at IS NULL AND e.deleted_at IS NULL`,
+		idCMS)
+	if err != nil {
+		return 0, err
+	}
+	required := map[int]struct{}{}
+	allowed  := map[int]struct{}{}
+	for elemRows.Next() {
+		var idElem int
+		var req int
+		if err = elemRows.Scan(&idElem, &req); err != nil {
+			return 0, err
+		}
+		allowed[idElem] = struct{}{}
+		if req != 0 {
+			required[idElem] = struct{}{}
+		}
+	}
+	elemRows.Close()
 
 	ansByID := map[int]models.CMSAnswer{}
-	for _, a := range input.Answers { ansByID[a.IDCmsElement] = a }
+	for _, a := range input.Answers {
+		ansByID[a.IDCmsElement] = a
+	}
 
 	var unknown, missing []int
 	for id := range ansByID {
-		if _, ok := allowed[id]; !ok { unknown = append(unknown, id) }
+		if _, ok := allowed[id]; !ok {
+			unknown = append(unknown, id)
+		}
 	}
 	for id := range required {
-		if a, ok := ansByID[id]; !ok || isEmpty(a.Value) { missing = append(missing, id) }
+		if a, ok := ansByID[id]; !ok || isEmpty(a.Value) {
+			missing = append(missing, id)
+		}
 	}
 	if len(unknown) > 0 {
 		return 0, fmt.Errorf("unknown id_cms_elements: %v", unknown)
@@ -704,11 +736,9 @@ func (svc *CMSService) SaveAssessment(
 		return 0, fmt.Errorf("required id_cms_elements empty: %v", missing)
 	}
 
-	/* ---------- 4. Ekstrak mapping khusus ---------- */
-	var (
-		idRuang sql.NullInt64
-		idICD10 sql.NullString
-	)
+	/* --- 4. mapping khusus ruang_poli & diagnosis_awal_medis --- */
+	var idRuang sql.NullInt64
+	var idICD10 sql.NullString
 	for _, a := range input.Answers {
 		switch a.Name {
 		case "ruang_poli":
@@ -722,26 +752,31 @@ func (svc *CMSService) SaveAssessment(
 		}
 	}
 
-	/* ---------- 5. Serialize answers ---------- */
+	/* --- 5. serialisasi jawaban --- */
 	raw, err := json.Marshal(input.Answers)
-	if err != nil { return 0, err }
+	if err != nil {
+		return 0, err
+	}
 
-	/* ---------- 6. Hilangkan assessment lama (jika ada) ---------- */
-	if _, err = tx.Exec(`
-		DELETE FROM Assessment WHERE id_pasien=? AND id_cms=?`,
-		idPasien, idCMS); err != nil { return 0, err }
+	/* --- 6. hapus assessment lama jika ada --- */
+	_, err = tx.Exec(`DELETE FROM Assessment WHERE id_pasien = ? AND id_cms = ?`, idPasien, idCMS)
+	if err != nil {
+		return 0, err
+	}
 
-	/* ---------- 7. INSERT Assessment ---------- */
+	/* --- 7. insert assessment baru --- */
 	res, err := tx.Exec(`
 		INSERT INTO Assessment
-		  (id_pasien,id_karyawan,id_poli,id_ruang,
-		   id_cms,id_icd10,hasil_assessment,created_at)
+		  (id_pasien, id_karyawan, id_poli, id_ruang,
+		   id_cms, id_icd10, hasil_assessment, created_at)
 		VALUES (?,?,?,?,?,?,?,NOW())`,
 		idPasien, idKaryawan, idPoli, idRuang,
 		idCMS, idICD10, raw)
-	if err != nil { return 0, err }
-
-	idAssessment, _ := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	idAssessment64, _ := res.LastInsertId()
+	idAssessment = int64(idAssessment64)
 
 /* ---------- 8. Update atau Insert Riwayat_Kunjungan ---------- */
     // Selalu update Riwayat_Kunjungan untuk id_antrian yang diberikan
@@ -833,22 +868,23 @@ func (svc *CMSService) SaveAssessment(
 
 /* ------- helper ------- */
 
-// isEmpty menentukan "kosong" utk tipe value fleksibel
 func isEmpty(v interface{}) bool {
 	switch vv := v.(type) {
 	case nil:
 		return true
 	case string:
 		return strings.TrimSpace(vv) == ""
-	case float64: // JSON angka
-		return false // 0 dianggap terisi
-	case bool:
+	case float64, bool:
 		return false
 	default:
 		return false
 	}
 }
-
+var (
+	ErrCMSMultipleActive = errors.New("more than one active CMS")
+	ErrCMSNoneActive     = errors.New("no active CMS")
+	ErrCMSNeverCreated   = errors.New("no CMS ever created for this poliklinik")
+)
 
 var ErrAssessmentAbsent  = errors.New("no assessment yet")
 
