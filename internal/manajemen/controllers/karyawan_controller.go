@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"database/sql"
 	"net/http"
 	"strconv"
 	"time"
@@ -19,12 +20,11 @@ type AddKaryawanRequest struct {
 	TanggalLahir string   `json:"tanggal_lahir"`
 	Alamat       string   `json:"alamat"`
 	NoTelp       string   `json:"no_telp"`
-	Roles        []string `json:"roles"` // Changed from Role string to Roles []string
-	NomorSIP     string   `json:"nomor_sip"`
 	Username     string   `json:"username"`
 	Password     string   `json:"password"`
+	NomorSIP     string   `json:"nomor_sip"`
+	Roles        []string `json:"roles"`
 }
-
 type UpdateKaryawanRequest struct {
 	NIK          string   `json:"nik"`
 	Nama         string   `json:"nama"`
@@ -35,7 +35,7 @@ type UpdateKaryawanRequest struct {
 	Alamat       string   `json:"alamat"`
 	NoTelp       string   `json:"no_telp"`
 	Roles        []string `json:"roles"`
-	NomorSIP     string   `json:"nomor_sip"` // Added field
+	NomorSIP     string   `json:"nomor_sip"`
 }
 
 
@@ -77,7 +77,12 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 		NoTelp:       req.NoTelp,
 		Username:     req.Username,
 		Password:     req.Password,
-		Sip:          req.NomorSIP,
+	}
+	// Atur Sip berdasarkan req.NomorSIP
+	if req.NomorSIP != "" {
+		karyawan.Sip = sql.NullString{String: req.NomorSIP, Valid: true}
+	} else {
+		karyawan.Sip = sql.NullString{Valid: false}
 	}
 
 	// Ambil klaim JWT dari context
@@ -174,15 +179,14 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-	idKaryawanInt, err := strconv.Atoi(idKaryawanStr)
-	if err != nil || idKaryawanInt <= 0 {
+	idKaryawan, err := strconv.Atoi(idKaryawanStr)
+	if err != nil || idKaryawan <= 0 {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"status":  http.StatusBadRequest,
 			"message": "id_karyawan must be a valid number",
 			"data":    nil,
 		})
 	}
-	idKaryawan := int64(idKaryawanInt)
 
 	var req UpdateKaryawanRequest
 	if err := c.Bind(&req); err != nil {
@@ -202,6 +206,7 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 		})
 	}
 
+	// Parse tanggal lahir
 	parsedDate, err := time.Parse("2006-01-02", req.TanggalLahir)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
@@ -213,16 +218,36 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 
 	// Buat objek Karyawan untuk update
 	karyawan := models.Karyawan{
-		IDKaryawan:   idKaryawan,
+		IDKaryawan:   int64(idKaryawan),
 		NIK:          req.NIK,
 		Nama:         req.Nama,
 		JenisKelamin: req.JenisKelamin,
-		Username:     req.Username,
-		Password:     req.Password,
 		TanggalLahir: parsedDate,
 		Alamat:       req.Alamat,
 		NoTelp:       req.NoTelp,
-		Sip:          req.NomorSIP, // Map the new field
+		Username:     req.Username,
+		Password:     req.Password,
+	}
+
+	// Atur Sip berdasarkan role
+	hasDokter := false
+	for _, role := range req.Roles {
+		if role == "Dokter" {
+			hasDokter = true
+			break
+		}
+	}
+	if hasDokter {
+		if req.NomorSIP == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status":  http.StatusBadRequest,
+				"message": "nomor_sip is required for Dokter role",
+				"data":    nil,
+			})
+		}
+		karyawan.Sip = sql.NullString{String: req.NomorSIP, Valid: true}
+	} else {
+		karyawan.Sip = sql.NullString{Valid: false} // NULL untuk non-Dokter
 	}
 
 	// Ambil klaim JWT dari context
@@ -236,18 +261,17 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 	}
 
 	// Konversi id_management dari JWT ke integer
-	idManagementInt, err := strconv.Atoi(claims.IDKaryawan)
-	if err != nil || idManagementInt <= 0 {
+	idManagement, err := strconv.Atoi(claims.IDKaryawan)
+	if err != nil || idManagement <= 0 {
 		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,
 			"message": "Invalid management ID in token",
 			"data":    nil,
 		})
 	}
-	idManagement := idManagementInt
 
-	// Panggil service untuk update karyawan dengan multiple roles
-	updatedID, err := kc.Service.UpdateKaryawan(karyawan, req.Roles, idManagement)
+	// Panggil service untuk update karyawan
+	idUpdated, err := kc.Service.UpdateKaryawan(karyawan, req.Roles, idManagement)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"status":  http.StatusInternalServerError,
@@ -260,7 +284,7 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 		"status":  http.StatusOK,
 		"message": "Karyawan updated successfully",
 		"data": map[string]interface{}{
-			"id_karyawan": updatedID,
+			"id_karyawan": idUpdated,
 		},
 	})
 }

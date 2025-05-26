@@ -39,12 +39,12 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, roles []string
 		return 0, fmt.Errorf("username %s sudah terdaftar", karyawan.Username)
 	}
 
-	// 1c. Cek apakah SIP sudah terdaftar (jika disediakan)
-	if karyawan.Sip != "" {
+	// 1c. Cek apakah SIP sudah terdaftar (jika disediakan dan valid)
+	if karyawan.Sip.Valid && karyawan.Sip.String != "" {
 		var existingSipID int64
-		err = tx.QueryRow("SELECT id_karyawan FROM Karyawan WHERE sip = ?", karyawan.Sip).Scan(&existingSipID)
+		err = tx.QueryRow("SELECT id_karyawan FROM Karyawan WHERE sip = ?", karyawan.Sip.String).Scan(&existingSipID)
 		if err != sql.ErrNoRows {
-			return 0, fmt.Errorf("SIP %s sudah terdaftar", karyawan.Sip)
+			return 0, fmt.Errorf("SIP %s sudah terdaftar", karyawan.Sip.String)
 		}
 	}
 
@@ -83,8 +83,8 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, roles []string
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	var sipValue interface{}
-	if karyawan.Sip != "" {
-		sipValue = karyawan.Sip
+	if karyawan.Sip.Valid {
+		sipValue = karyawan.Sip.String
 	} else {
 		sipValue = nil
 	}
@@ -139,6 +139,7 @@ func (s *ManagementService) AddKaryawan(karyawan models.Karyawan, roles []string
 }
 
 
+
 func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []string, idManagement int) (int64, error) {
 	// Mulai transaksi
 	tx, err := s.DB.Begin()
@@ -163,50 +164,47 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 	}
 
 	// 2. Cek duplikasi username (selain record ini)
-	var count int
-	err = tx.QueryRow("SELECT COUNT(*) FROM Karyawan WHERE username = ? AND id_karyawan <> ?", karyawan.Username, karyawan.IDKaryawan).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("gagal memeriksa duplikasi username: %v", err)
-	}
-	if count > 0 {
-		return 0, fmt.Errorf("username %s sudah digunakan", karyawan.Username)
+	var existingUsername int64
+	err = tx.QueryRow("SELECT id_karyawan FROM Karyawan WHERE username = ? AND id_karyawan != ?", karyawan.Username, karyawan.IDKaryawan).Scan(&existingUsername)
+	if err != sql.ErrNoRows {
+		return 0, fmt.Errorf("username %s sudah terdaftar", karyawan.Username)
 	}
 
 	// 3. Cek duplikasi NIK (selain record ini)
-	count = 0
-	err = tx.QueryRow("SELECT COUNT(*) FROM Karyawan WHERE nik = ? AND id_karyawan <> ?", karyawan.NIK, karyawan.IDKaryawan).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("gagal memeriksa duplikasi NIK: %v", err)
-	}
-	if count > 0 {
-		return 0, fmt.Errorf("NIK %s sudah digunakan", karyawan.NIK)
+	var existingNIK int64
+	err = tx.QueryRow("SELECT id_karyawan FROM Karyawan WHERE nik = ? AND id_karyawan != ?", karyawan.NIK, karyawan.IDKaryawan).Scan(&existingNIK)
+	if err != sql.ErrNoRows {
+		return 0, fmt.Errorf("NIK %s sudah terdaftar", karyawan.NIK)
 	}
 
-	// 4. Cek duplikasi SIP (selain record ini, jika disediakan)
-	if karyawan.Sip != "" {
-		count = 0
-		err = tx.QueryRow("SELECT COUNT(*) FROM Karyawan WHERE sip = ? AND id_karyawan <> ?", karyawan.Sip, karyawan.IDKaryawan).Scan(&count)
-		if err != nil {
-			return 0, fmt.Errorf("gagal memeriksa duplikasi SIP: %v", err)
-		}
-		if count > 0 {
-			return 0, fmt.Errorf("SIP %s sudah digunakan oleh karyawan lain", karyawan.Sip)
+	// 4. Cek duplikasi SIP (selain record ini, hanya jika Sip valid)
+	if karyawan.Sip.Valid && karyawan.Sip.String != "" {
+		var existingSipID int64
+		err = tx.QueryRow("SELECT id_karyawan FROM Karyawan WHERE sip = ? AND id_karyawan != ?", karyawan.Sip.String, karyawan.IDKaryawan).Scan(&existingSipID)
+		if err != sql.ErrNoRows {
+			return 0, fmt.Errorf("SIP %s sudah terdaftar", karyawan.Sip.String)
 		}
 	}
 
-	// 5. Hash password baru (jika diupdate)
+	// 5. Hash password baru
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(karyawan.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return 0, fmt.Errorf("failed to hash password: %v", err)
 	}
 	karyawan.Password = string(hashedPassword)
 
-	// 6. Update record Karyawan, termasuk sip
+	// 6. Update data karyawan
 	updateKaryawan := `
 		UPDATE Karyawan 
 		SET nama = ?, username = ?, password = ?, nik = ?, tanggal_lahir = ?, alamat = ?, no_telp = ?, jenis_kelamin = ?, sip = ?
 		WHERE id_karyawan = ?
 	`
+	var sipValue interface{}
+	if karyawan.Sip.Valid {
+		sipValue = karyawan.Sip.String
+	} else {
+		sipValue = nil
+	}
 	_, err = tx.Exec(updateKaryawan,
 		karyawan.Nama,
 		karyawan.Username,
@@ -216,14 +214,14 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 		karyawan.Alamat,
 		karyawan.NoTelp,
 		karyawan.JenisKelamin,
-		karyawan.Sip, // Added to update query
+		sipValue,
 		karyawan.IDKaryawan,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("gagal mengupdate karyawan: %v", err)
 	}
 
-	// 7. Update Management_Karyawan untuk mencatat siapa yang melakukan pembaruan
+	// 7. Update Management_Karyawan
 	updateManagement := `
 		UPDATE Management_Karyawan 
 		SET updated_by = ?
@@ -234,13 +232,13 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 		return 0, fmt.Errorf("gagal mencatat di Management_Karyawan: %v", err)
 	}
 
-	// 8. Hapus semua role lama di Detail_Role_Karyawan
+	// 8. Hapus semua role lama
 	_, err = tx.Exec("DELETE FROM Detail_Role_Karyawan WHERE id_karyawan = ?", karyawan.IDKaryawan)
 	if err != nil {
 		return 0, fmt.Errorf("gagal menghapus detail role lama: %v", err)
 	}
 
-	// 9. Validasi dan masukkan role baru
+	// 9. Tambahkan role baru
 	insertDetailRole := `
 		INSERT INTO Detail_Role_Karyawan (id_role, id_karyawan)
 		VALUES (?, ?)
@@ -256,7 +254,7 @@ func (s *ManagementService) UpdateKaryawan(karyawan models.Karyawan, roles []str
 
 		_, err = tx.Exec(insertDetailRole, idRole, karyawan.IDKaryawan)
 		if err != nil {
-			return 0, fmt.Errorf("gagal mencatat detail role baru untuk %s: %v", role, err)
+			return 0, fmt.Errorf("gagal mencatat role %s: %v", role, err)
 		}
 	}
 
