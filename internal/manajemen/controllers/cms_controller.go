@@ -410,3 +410,55 @@ func (cc *CMSController) GetRincianAsesmenHandler(c echo.Context) error {
         "data":    rincian,
     })
 }
+
+func (cc *CMSController) GetAssessmentDetail(c echo.Context) error {
+
+	idStr := c.QueryParam("id_assessment")
+	if idStr == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"status":  http.StatusBadRequest,
+			"message": "id_assessment query parameter is required",
+			"data":    nil,
+		})
+	}
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"status":  http.StatusBadRequest,
+			"message": "id_assessment must be a positive number",
+			"data":    nil,
+		})
+	}
+
+	/* ----------  optional JWT validation  ---------- */
+	// (hapus blok ini jika endpoint boleh publik)
+	if _, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims); !ok {
+		return c.JSON(http.StatusUnauthorized, echo.Map{
+			"status":  http.StatusUnauthorized,
+			"message": "Invalid or missing token claims",
+			"data":    nil,
+		})
+	}
+
+	hasil, err := cc.Service.GetAssessmentJSONByID(id)
+	if err != nil {
+		if err == services.ErrAssessmentNotFound {
+			return c.JSON(http.StatusNotFound, echo.Map{
+				"status":  http.StatusNotFound,
+				"message": "Assessment not found",
+				"data":    nil,
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve assessment: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	return c.JSON(http.StatusOK, echo.Map{
+		"status":  http.StatusOK,
+		"message": "Assessment retrieved successfully",
+		"data":    hasil, // sudah berupa array/object ter-decode
+	})
+}

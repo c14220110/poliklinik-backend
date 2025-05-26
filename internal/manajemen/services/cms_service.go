@@ -954,3 +954,30 @@ func toString(v interface{}) string {
         return string(raw)
     }
 }
+
+// GetAssessmentJSONByID mengembalikan hasil_assessment yang telah di-decode.
+func (svc *CMSService) GetAssessmentJSONByID(id int) (interface{}, error) {
+	var raw string
+	err := svc.DB.QueryRow(`
+		SELECT hasil_assessment
+		FROM   Assessment
+		WHERE  id_assessment = ? AND deleted_at IS NULL
+	`, id).Scan(&raw)
+
+	if err == sql.ErrNoRows {
+		return nil, ErrAssessmentNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query error: %v", err)
+	}
+
+	// hasil_assessment disimpan valid JSON (cek constraint), decode ke interface{}
+	var data interface{}
+	if err = json.Unmarshal([]byte(raw), &data); err != nil {
+		// Seharusnya tidak terjadi karena CHECK JSON_VALID, tapi jaga-jaga.
+		return nil, fmt.Errorf("invalid JSON stored in database: %v", err)
+	}
+	return data, nil
+}
+
+var ErrAssessmentNotFound = errors.New("assessment not found")
