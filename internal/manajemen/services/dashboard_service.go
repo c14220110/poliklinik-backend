@@ -2,7 +2,7 @@ package services
 
 import (
 	"database/sql"
-	"fmt"
+	"log"
 	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/manajemen/models"
@@ -16,34 +16,38 @@ func NewDashboardService(db *sql.DB) *DashboardService {
 	return &DashboardService{DB: db}
 }
 
-// GetDashboardData menghimpun semua metrik dashboard.
-func (svc *DashboardService) GetDashboardData(
-	idPoli *int, start, end time.Time,
-) (models.DashboardData, error) {
-
+// GetDashboardData retrieves all metrics for the management dashboard.
+// idPoli: pointer to poli ID filter (nil for all)
+// start, end: date range (inclusive)
+func (svc *DashboardService) GetDashboardData(idPoli *int, start, end time.Time) (models.DashboardData, error) {
 	var d models.DashboardData
-	// sesuaikan end → jam 23:59:59 hari yg sama
+	// extend end to end of day
 	end = end.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
 
-	/* ---------- helper count by status / total ---------- */
+	// helper to count by status or total
 	countQuery := func(status *int) (int, error) {
 		var (
 			q      string
 			params []interface{}
 		)
 		if status != nil {
-			q = `SELECT COUNT(*) FROM Antrian
-			     WHERE id_status = ? AND updated_at BETWEEN ? AND ?`
-			params = []interface{}{*status, start, end}
+			// status-specific count using updated_at
+			q = "SELECT COUNT(*) FROM Antrian WHERE id_status = ? AND updated_at BETWEEN ? AND ?"
+			params = append(params, *status, start, end)
+			if idPoli != nil {
+				q += " AND id_poli = ?"
+				params = append(params, *idPoli)
+			}
 		} else {
-			q = `SELECT COUNT(*) FROM Antrian
-			     WHERE created_at BETWEEN ? AND ?`
-			params = []interface{}{start, end}
+			// total count using created_at
+			q = "SELECT COUNT(*) FROM Antrian WHERE created_at BETWEEN ? AND ?"
+			params = append(params, start, end)
+			if idPoli != nil {
+				q += " AND id_poli = ?"
+				params = append(params, *idPoli)
+			}
 		}
-		if idPoli != nil {
-			q += " AND id_poli = ?"
-			params = append(params, *idPoli)
-		}
+		log.Printf("DEBUG countQuery: q=%s params=%v", q, params)
 		var cnt int
 		if err := svc.DB.QueryRow(q, params...).Scan(&cnt); err != nil {
 			return 0, err
@@ -51,44 +55,52 @@ func (svc *DashboardService) GetDashboardData(
 		return cnt, nil
 	}
 
-	/* ---------- 1-4 Pasien ---------- */
-	var err error
-	if d.PasienDibatalkan, err = countQuery(ptrInt(7)); err != nil {
+	// 1. Pasien Dibatalkan (status = 7)
+	cnt, err := countQuery(ptrInt(7))
+	if err != nil {
 		return d, err
 	}
-	if d.PasienKonsultasi, err = countQuery(ptrInt(5)); err != nil {
+	d.PasienDibatalkan = cnt
+
+	// 2. Pasien Konsultasi (status = 5)
+	cnt, err = countQuery(ptrInt(5))
+	if err != nil {
 		return d, err
 	}
-	if d.PasienMenunggu, err = countQuery(ptrInt(1)); err != nil {
+	d.PasienKonsultasi = cnt
+
+	// 3. Pasien Menunggu (status = 1)
+	cnt, err = countQuery(ptrInt(1))
+	if err != nil {
 		return d, err
 	}
-	if d.TotalPasien, err = countQuery(nil); err != nil {
+	d.PasienMenunggu = cnt
+
+	// 4. Total Pasien (all)
+	cnt, err = countQuery(nil)
+	if err != nil {
+		return d, err
+	}
+	d.TotalPasien = cnt
+
+	// 5. Jumlah Tenaga Kesehatan
+	if err := svc.DB.QueryRow("SELECT COUNT(*) FROM Karyawan WHERE deleted_at IS NULL").Scan(&d.KaryawanAktif); err != nil {
+		return d, err
+	}
+	if err := svc.DB.QueryRow("SELECT COUNT(*) FROM Karyawan WHERE deleted_at IS NOT NULL").Scan(&d.KaryawanNonAktif); err != nil {
 		return d, err
 	}
 
-	/* ---------- 5 Tenaga Kesehatan ---------- */
-	if err = svc.DB.QueryRow(`SELECT COUNT(*) FROM Karyawan WHERE deleted_at IS NULL`).
-		Scan(&d.KaryawanAktif); err != nil {
-		return d, err
-	}
-	if err = svc.DB.QueryRow(`SELECT COUNT(*) FROM Karyawan WHERE deleted_at IS NOT NULL`).
-		Scan(&d.KaryawanNonAktif); err != nil {
-		return d, err
-	}
-
-	/* ---------- 6 Tren Penyakit ---------- */
-	trendQ := `
-		SELECT i.display, COUNT(*)
-		FROM   Assessment a
-		       JOIN ICD10 i ON a.id_icd10 = i.id_icd10
-		WHERE  a.created_at BETWEEN ? AND ?`
-	args := []interface{}{start, end}
+	// 6. Tren Penyakit
+	trendQ := "SELECT i.display, COUNT(*) FROM Assessment a JOIN ICD10 i ON a.id_icd10 = i.id_icd10 WHERE a.created_at BETWEEN ? AND ?"
+	trendArgs := []interface{}{start, end}
 	if idPoli != nil {
 		trendQ += " AND a.id_poli = ?"
-		args = append(args, *idPoli)
+		trendArgs = append(trendArgs, *idPoli)
 	}
 	trendQ += " GROUP BY i.display"
-	rows, err := svc.DB.Query(trendQ, args...)
+	log.Printf("DEBUG trenPenyakit: q=%s args=%v", trendQ, trendArgs)
+	rows, err := svc.DB.Query(trendQ, trendArgs...)
 	if err != nil {
 		return d, err
 	}
@@ -101,100 +113,133 @@ func (svc *DashboardService) GetDashboardData(
 		d.TrenPenyakit = append(d.TrenPenyakit, t)
 	}
 
-	/* ---------- 7-8 Pendapatan ---------- */
-	billQ := `
-		SELECT COALESCE(SUM(b.total),0)
-		FROM   Billing b
-		       JOIN Antrian a ON b.id_antrian = a.id_antrian
-		WHERE  b.created_at BETWEEN ? AND ?`
+	// 7. Pendapatan Total
+	billQ := "SELECT COALESCE(SUM(b.total),0) FROM Billing b JOIN Antrian a ON b.id_antrian=a.id_antrian WHERE b.created_at BETWEEN ? AND ?"
 	billArgs := []interface{}{start, end}
 	if idPoli != nil {
 		billQ += " AND a.id_poli = ?"
 		billArgs = append(billArgs, *idPoli)
 	}
+	log.Printf("DEBUG pendapatanTotal: q=%s args=%v", billQ, billArgs)
 	if err := svc.DB.QueryRow(billQ, billArgs...).Scan(&d.PendapatanTotal); err != nil {
 		return d, err
 	}
+
+	// 8. Rata-rata Pendapatan
 	days := end.Sub(start).Hours()/24 + 1
 	if days > 0 {
 		d.PendapatanRataRata = d.PendapatanTotal / days
 	}
 
-	/* ---------- 9 Kunjungan Terbanyak (abaikan id_poli filter) ---------- */
-	kunjQ := `
-		SELECT a.id_poli, COUNT(*)
-		FROM   Antrian a
-		WHERE  a.created_at BETWEEN ? AND ?
-		GROUP  BY a.id_poli
-		ORDER  BY COUNT(*) DESC`
-	kRows, err := svc.DB.Query(kunjQ, start, end)
+	// 9. Kunjungan Terbanyak
+	kunjQ := "SELECT a.id_poli, COUNT(*) FROM Antrian a WHERE a.created_at BETWEEN ? AND ?"
+	kunjArgs := []interface{}{start, end}
+	if idPoli != nil {
+		kunjQ += " AND a.id_poli = ?"
+		kunjArgs = append(kunjArgs, *idPoli)
+	}
+	kunjQ += " GROUP BY a.id_poli ORDER BY COUNT(*) DESC"
+	log.Printf("DEBUG kunjunganTerbanyak: q=%s args=%v", kunjQ, kunjArgs)
+	krows, err := svc.DB.Query(kunjQ, kunjArgs...)
 	if err != nil {
 		return d, err
 	}
-	defer kRows.Close()
-	for kRows.Next() {
+	defer krows.Close()
+	for krows.Next() {
 		var pc models.PoliCount
-		if err := kRows.Scan(&pc.IDPoli, &pc.Count); err != nil {
+		if err := krows.Scan(&pc.IDPoli, &pc.Count); err != nil {
 			return d, err
 		}
 		d.KunjunganTerbanyak = append(d.KunjunganTerbanyak, pc)
 	}
 
-	/* ---------- 10-12 Kunjungan Harian / Mingguan / Bulanan (masih hormati id_poli) ---------- */
-	timeAgg := []struct {
-		dest *[]models.TimeCount
-		sql  string
-	}{
-		{&d.KunjunganHarian,
-			`SELECT DAYNAME(created_at), COUNT(*) FROM Antrian
-			 WHERE created_at BETWEEN ? AND ?%s GROUP BY DAYNAME(created_at)`},
-		{&d.KunjunganMingguan,
-			`SELECT YEARWEEK(created_at,1), COUNT(*) FROM Antrian
-			 WHERE created_at BETWEEN ? AND ?%s GROUP BY YEARWEEK(created_at,1)`},
-		{&d.KunjunganBulanan,
-			`SELECT DATE_FORMAT(created_at,'%Y-%m'), COUNT(*) FROM Antrian
-			 WHERE created_at BETWEEN ? AND ?%s GROUP BY DATE_FORMAT(created_at,'%Y-%m') ORDER BY 1`},
+	// 10. Kunjungan Harian
+	hQ := "SELECT DAYNAME(created_at) AS period, COUNT(*) FROM Antrian WHERE created_at BETWEEN ? AND ?"
+	hArgs := []interface{}{start, end}
+	if idPoli != nil {
+		hQ += " AND id_poli = ?"
+		hArgs = append(hArgs, *idPoli)
 	}
-	for _, tg := range timeAgg {
-		cond := ""
-		params := []interface{}{start, end}
-		if idPoli != nil {
-			cond = " AND id_poli = ?"
-			params = append(params, *idPoli)
-		}
-		q := fmt.Sprintf(tg.sql, cond)
-		r, err := svc.DB.Query(q, params...)
-		if err != nil {
+	hQ += " GROUP BY DAYNAME(created_at)"
+	hRows, err := svc.DB.Query(hQ, hArgs...)
+	if err != nil {
+		return d, err
+	}
+	defer hRows.Close()
+	for hRows.Next() {
+		var tc models.TimeCount
+		if err := hRows.Scan(&tc.Period, &tc.Count); err != nil {
 			return d, err
 		}
-		for r.Next() {
-			var tc models.TimeCount
-			if err := r.Scan(&tc.Period, &tc.Count); err != nil {
-				r.Close(); return d, err
-			}
-			*tg.dest = append(*tg.dest, tc)
-		}
-		r.Close()
+		d.KunjunganHarian = append(d.KunjunganHarian, tc)
 	}
 
-	/* ---------- 13 Durasi Pasien per Kunjungan ---------- */
-	durQ := `
-		SELECT AVG(TIMESTAMPDIFF(SECOND, a.created_at, b.updated_at))/60
-		FROM   Billing b
-		       JOIN Antrian a ON a.id_antrian = b.id_antrian
-		WHERE  b.id_status = 2
-		       AND b.updated_at BETWEEN ? AND ?`
-	durArgs := []interface{}{start, end}
+	// 11. Kunjungan Mingguan
+	wQ := "SELECT YEARWEEK(created_at,1) AS period, COUNT(*) FROM Antrian WHERE created_at BETWEEN ? AND ?"
+	wArgs := []interface{}{start, end}
 	if idPoli != nil {
-		durQ += " AND a.id_poli = ?"
-		durArgs = append(durArgs, *idPoli)
+		wQ += " AND id_poli = ?"
+		wArgs = append(wArgs, *idPoli)
 	}
-	if err := svc.DB.QueryRow(durQ, durArgs...).Scan(&d.DurasiPasienPerKunjungan); err != nil {
+	wQ += " GROUP BY YEARWEEK(created_at,1)"
+	wRows, err := svc.DB.Query(wQ, wArgs...)
+	if err != nil {
 		return d, err
+	}
+	defer wRows.Close()
+	for wRows.Next() {
+		var tc models.TimeCount
+		if err := wRows.Scan(&tc.Period, &tc.Count); err != nil {
+			return d, err
+		}
+		d.KunjunganMingguan = append(d.KunjunganMingguan, tc)
+	}
+
+	// 12. Kunjungan Bulanan
+	mQ := "SELECT DATE_FORMAT(created_at,'%Y-%m') AS period, COUNT(*) FROM Antrian WHERE created_at BETWEEN ? AND ?"
+	mArgs := []interface{}{start, end}
+	if idPoli != nil {
+		mQ += " AND id_poli = ?"
+		mArgs = append(mArgs, *idPoli)
+	}
+	mQ += " GROUP BY DATE_FORMAT(created_at,'%Y-%m') ORDER BY period"
+	mRows, err := svc.DB.Query(mQ, mArgs...)
+	if err != nil {
+		return d, err
+	}
+	defer mRows.Close()
+	for mRows.Next() {
+		var tc models.TimeCount
+		if err := mRows.Scan(&tc.Period, &tc.Count); err != nil {
+			return d, err
+		}
+		d.KunjunganBulanan = append(d.KunjunganBulanan, tc)
+	}
+
+	// 13. Rata-rata Waktu Kunjungan per Poli
+	timeQ := "SELECT a.id_poli, AVG(TIMESTAMPDIFF(SECOND,a.created_at,b.created_at))/60 AS avg_duration FROM Antrian a JOIN Billing b ON b.id_antrian=a.id_antrian WHERE a.created_at BETWEEN ? AND ?"
+	tArgs := []interface{}{start, end}
+	if idPoli != nil {
+		timeQ += " AND a.id_poli = ?"
+		tArgs = append(tArgs, *idPoli)
+	}
+	timeQ += " GROUP BY a.id_poli"
+	tRows, err := svc.DB.Query(timeQ, tArgs...)
+	if err != nil {
+		return d, err
+	}
+	defer tRows.Close()
+	for tRows.Next() {
+		var pd models.PoliDuration
+		if err := tRows.Scan(&pd.IDPoli, &pd.AvgDuration); err != nil {
+			return d, err
+		}
+		d.WaktuKunjunganAvg = append(d.WaktuKunjunganAvg, pd)
 	}
 
 	return d, nil
 }
 
-/* ------------- util ------------- */
+// helper to get *int
 func ptrInt(i int) *int { return &i }
+
