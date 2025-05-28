@@ -142,6 +142,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter.POST("/billing-assessment", billingController.InputBillingAssessment, middlewares.JWTMiddleware())
 	dokter.GET("/tindakan", resepController.GetICD9CMList, middlewares.JWTMiddleware())
 	dokter.GET("/detail-antrian", antrianController.GetDetailAntrianHandler, middlewares.JWTMiddleware())
+	dokter.GET("/assessment", cmsController.GetAssessmentDetail, middlewares.JWTMiddleware())
 
 
 
