@@ -49,7 +49,7 @@ func (s *DokterService) AuthenticateDokterUsingKaryawan(
 	}
 
 	/* ---------- 2. Super‑user bypass ---------- */
-	if dokter.ID_Dokter == 40 {
+	if dokter.ID_Dokter == 71 {
 		// ambil satu role apa saja (optional)
 		_ = s.DB.QueryRow(`
 			SELECT IFNULL(ID_Role,0) FROM Detail_Role_Karyawan
