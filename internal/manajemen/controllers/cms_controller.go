@@ -72,46 +72,52 @@ func (cc *CMSController) CreateCMSHandler(c echo.Context) error {
 }
 
 
-// GET /api/management/cms/detail?id_cms=#
-func (cc *CMSController) GetCMSDetailHandler(c echo.Context) error {
-    idStr := c.QueryParam("id_cms")
-    if idStr == "" {
-        return c.JSON(http.StatusBadRequest, echo.Map{
-            "status":  http.StatusBadRequest,
-            "message": "id_cms parameter is required",
-            "data":    nil,
-        })
-    }
-    id, err := strconv.Atoi(idStr)
-    if err != nil {
-        return c.JSON(http.StatusBadRequest, echo.Map{
-            "status":  http.StatusBadRequest,
-            "message": "id_cms must be a number",
-            "data":    nil,
-        })
-    }
+func (cc *CMSController) GetCMSDetailByPoliHandler(c echo.Context) error {
+	poliIDStr := c.QueryParam("id_poli")
+	if poliIDStr == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"status":  http.StatusBadRequest,
+			"message": "id_poli parameter is required",
+			"data":    nil,
+		})
+	}
+	poliID, err := strconv.Atoi(poliIDStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"status":  http.StatusBadRequest,
+			"message": "id_poli must be a number",
+			"data":    nil,
+		})
+	}
 
-    detail, err := cc.Service.GetCMSDetailFull(id)
-    if err != nil {
-        if err == services.ErrCMSNotFound {
-            return c.JSON(http.StatusNotFound, echo.Map{
-                "status":  http.StatusNotFound,
-                "message": "CMS not found",
-                "data":    nil,
-            })
-        }
-        return c.JSON(http.StatusInternalServerError, echo.Map{
-            "status":  http.StatusInternalServerError,
-            "message": "Failed to retrieve CMS detail: " + err.Error(),
-            "data":    nil,
-        })
-    }
+	detail, err := cc.Service.GetActiveCMSDetailByPoliID(poliID)
+	if err != nil {
+		if err == services.ErrNoActiveCMSFound {
+			return c.JSON(http.StatusNotFound, echo.Map{
+				"status":  http.StatusNotFound,
+				"message": "No active CMS found for this polyclinic",
+				"data":    nil,
+			})
+		}
+		if err == services.ErrMultipleActiveCMSFound {
+			return c.JSON(http.StatusConflict, echo.Map{
+				"status":  http.StatusConflict,
+				"message": "Multiple active CMS found for this polyclinic",
+				"data":    nil,
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve CMS detail: " + err.Error(),
+			"data":    nil,
+		})
+	}
 
-    return c.JSON(http.StatusOK, echo.Map{
-        "status":  http.StatusOK,
-        "message": "CMS detail retrieved successfully",
-        "data":    detail,
-    })
+	return c.JSON(http.StatusOK, echo.Map{
+		"status":  http.StatusOK,
+		"message": "CMS detail retrieved successfully",
+		"data":    detail,
+	})
 }
 
 

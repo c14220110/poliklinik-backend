@@ -186,7 +186,50 @@ func insertElements(
 var ErrCMSNotFound = fmt.Errorf("cms not found")
 
 
+var (
+	ErrNoActiveCMSFound       = errors.New("no active CMS found for this polyclinic")
+	ErrMultipleActiveCMSFound = errors.New("multiple active CMS found for this polyclinic")
+)
 
+func (svc *CMSService) GetActiveCMSIDByPoliID(poliID int) (int, error) {
+	rows, err := svc.DB.Query(
+		`SELECT id_cms FROM CMS WHERE id_poli = ? AND deleted_at IS NULL`, poliID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err = rows.Err(); err != nil {
+		return 0, err
+	}
+
+	if len(ids) == 0 {
+		return 0, ErrNoActiveCMSFound
+	}
+	if len(ids) > 1 {
+		return 0, ErrMultipleActiveCMSFound
+	}
+	return ids[0], nil
+}
+
+func (svc *CMSService) GetActiveCMSDetailByPoliID(poliID int) (models.CMSDetailResponse, error) {
+	idCMS, err := svc.GetActiveCMSIDByPoliID(poliID)
+	if err != nil {
+		return models.CMSDetailResponse{}, err
+	}
+	return svc.GetCMSDetailFull(idCMS)
+}
+
+// Existing GetCMSDetailFull method remains unchanged
 func (svc *CMSService) GetCMSDetailFull(cmsID int) (models.CMSDetailResponse, error) {
 	var resp models.CMSDetailResponse
 
@@ -222,7 +265,9 @@ func (svc *CMSService) GetCMSDetailFull(cmsID int) (models.CMSDetailResponse, er
 	  ORDER BY s.id_section, ss.id_subsection, e.id_cms_elements
 	`
 	rows, err := svc.DB.Query(query, cmsID)
-	if err != nil { return resp, err }
+	if err != nil {
+		return resp, err
+	}
 	defer rows.Close()
 
 	for rows.Next() {
@@ -243,8 +288,10 @@ func (svc *CMSService) GetCMSDetailFull(cmsID int) (models.CMSDetailResponse, er
 		); err != nil {
 			return resp, err
 		}
-		if subID.Valid { det.IDSubsection = int(subID.Int64) }
-		det.SubTitle = subTit.String   // kosong bila NULL
+		if subID.Valid {
+			det.IDSubsection = int(subID.Int64)
+		}
+		det.SubTitle = subTit.String
 		det.Required = req != 0
 		resp.Elements = append(resp.Elements, det)
 	}

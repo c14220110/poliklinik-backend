@@ -143,6 +143,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter.GET("/tindakan", resepController.GetICD9CMList, middlewares.JWTMiddleware())
 	dokter.GET("/detail-antrian", antrianController.GetDetailAntrianHandler, middlewares.JWTMiddleware())
 	dokter.GET("/assessment", cmsController.GetAssessmentDetail, middlewares.JWTMiddleware())
+	dokter.GET("/cms/detail", cmsController.GetCMSDetailByPoliHandler, middlewares.JWTMiddleware()) 
 
 
 
@@ -185,7 +186,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.PUT("/shift/updateCustom", shiftController.UpdateCustomShiftHandler, middlewares.JWTMiddleware())
 	management.PUT("/shift/soft-delete", shiftController.SoftDeleteShiftHandler, middlewares.JWTMiddleware())
 	management.GET("/shift", shiftController.GetShiftPoliList, middlewares.JWTMiddleware())
-	management.GET("/cms/detail", cmsController.GetCMSDetailHandler, middlewares.JWTMiddleware()) 
+	management.GET("/cms/detail", cmsController.GetCMSDetailByPoliHandler, middlewares.JWTMiddleware()) 
 	management.GET("/cms", cmsController.GetCMSListByPoliHandler, middlewares.JWTMiddleware()) 
 	management.PUT("/cms/update", cmsController.UpdateCMSHandler, middlewares.JWTMiddleware()) 
 	management.PUT("/cms/activate", cmsController.ActivateCMSHandler, middlewares.JWTMiddleware()) 
