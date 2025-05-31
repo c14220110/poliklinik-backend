@@ -184,3 +184,25 @@ type RincianAsesmen struct {
     JenisReaksi       string `json:"jenis_reaksi"`
     KeadaanUmumPasien string `json:"keadaan_umum_pasien"`
 }
+
+type AssessmentElement struct {
+	/* from CMS_Elements hierarchy */
+	IDCMSElement int    `json:"id_cms_elements"`
+	IDSection    int    `json:"id_section"`
+	SectionTitle string `json:"section_title"`
+	IDSubsection int    `json:"id_subsection"`
+	SubTitle     string `json:"subsection_title"`
+	IDElement    int    `json:"id_element"`
+	ElementType  string `json:"element_type"`
+	Label        string `json:"label"`
+	Name         string `json:"name"`
+	/* nilai yang di-isi dokter/perawat */
+	Value any `json:"value"`
+}
+
+type AssessmentDetailResponse struct {
+	IDAssessment int                 `json:"id_assessment"`
+	IDCMS        int                 `json:"id_cms"`
+	Title        string              `json:"cms_title"`
+	Elements     []AssessmentElement `json:"elements"`
+}

@@ -1002,29 +1002,118 @@ func toString(v interface{}) string {
     }
 }
 
-// GetAssessmentJSONByID mengembalikan hasil_assessment yang telah di-decode.
-func (svc *CMSService) GetAssessmentJSONByID(id int) (interface{}, error) {
-	var raw string
+func (svc *CMSService) GetAssessmentDetailFull(id int) (models.AssessmentDetailResponse, error) {
+	var res models.AssessmentDetailResponse
+
+	/* ---------------- 1. tarik header & blob ---------------- */
+	var (
+			cmsID int
+			title string
+			raw   string
+	)
 	err := svc.DB.QueryRow(`
-		SELECT hasil_assessment
-		FROM   Assessment
-		WHERE  id_assessment = ? AND deleted_at IS NULL
-	`, id).Scan(&raw)
+			SELECT a.id_assessment,
+						 a.id_cms,
+						 c.title,
+						 a.hasil_assessment
+				FROM Assessment a
+				JOIN CMS c ON c.id_cms = a.id_cms
+			 WHERE a.id_assessment = ? AND a.deleted_at IS NULL`,
+			id).Scan(&res.IDAssessment, &cmsID, &title, &raw)
 
 	if err == sql.ErrNoRows {
-		return nil, ErrAssessmentNotFound
+			return res, ErrAssessmentNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("query error: %v", err)
+			return res, err
+	}
+	res.IDCMS = cmsID
+	res.Title = title
+
+	/* ---------------- 2. decode jawaban --------------------- */
+	var answers []struct {
+			IDCMSElement int         `json:"id_cms_elements"`
+			Label        string      `json:"label"`
+			Name         string      `json:"name"`
+			Value        interface{} `json:"value"`
+	}
+	if err = json.Unmarshal([]byte(raw), &answers); err != nil {
+			return res, fmt.Errorf("bad stored JSON: %v", err)
+	}
+	if len(answers) == 0 {
+			return res, nil // tidak ada jawaban
 	}
 
-	// hasil_assessment disimpan valid JSON (cek constraint), decode ke interface{}
-	var data interface{}
-	if err = json.Unmarshal([]byte(raw), &data); err != nil {
-		// Seharusnya tidak terjadi karena CHECK JSON_VALID, tapi jaga-jaga.
-		return nil, fmt.Errorf("invalid JSON stored in database: %v", err)
+	/* ---------------- 3. ambil meta-data semua id  ---------- */
+	ids := make([]string, 0, len(answers))
+	for _, a := range answers {
+			ids = append(ids, fmt.Sprintf("%d", a.IDCMSElement))
 	}
-	return data, nil
+	metaQ := fmt.Sprintf(`
+			SELECT e.id_cms_elements,
+						 s.id_section,          s.title,
+						 COALESCE(ss.id_subsection,0),
+						 COALESCE(ss.title,''),  d.id_element,
+						 el.type
+				FROM CMS_Elements   e
+				LEFT JOIN CMS_Section   s  ON s.id_section   = e.id_section
+				LEFT JOIN CMS_Subsection ss ON ss.id_subsection = e.id_subsection
+				LEFT JOIN Detail_Element d  ON d.id_cms_elements = e.id_cms_elements
+				LEFT JOIN Elements       el ON el.id_element     = d.id_element
+			 WHERE e.id_cms_elements IN (%s)`, strings.Join(ids, ","))
+	rows, err := svc.DB.Query(metaQ)
+	if err != nil {
+			return res, err
+	}
+	defer rows.Close()
+
+	meta := map[int]struct {
+			secID   int
+			secTtl  string
+			subID   int
+			subTtl  string
+			elID    int
+			elType  string
+	}{}
+	for rows.Next() {
+			var (
+					idElem int
+					m      struct {
+							secID   int
+							secTtl  string
+							subID   int
+							subTtl  string
+							elID    int
+							elType  string
+					}
+			)
+			if err := rows.Scan(&idElem,
+					&m.secID, &m.secTtl, &m.subID, &m.subTtl, &m.elID, &m.elType); err != nil {
+					return res, err
+			}
+			meta[idElem] = m
+	}
+
+	/* ---------------- 4. compose response ------------------- */
+	for _, a := range answers {
+			var det models.AssessmentElement
+
+			det.IDCMSElement = a.IDCMSElement
+			det.Label = a.Label
+			det.Name  = a.Name
+			det.Value = a.Value
+
+			if m, ok := meta[a.IDCMSElement]; ok {
+					det.IDSection    = m.secID
+					det.SectionTitle = m.secTtl
+					det.IDSubsection = m.subID
+					det.SubTitle     = m.subTtl
+					det.IDElement    = m.elID
+					det.ElementType  = m.elType
+			}
+			res.Elements = append(res.Elements, det)
+	}
+
+	return res, nil
 }
-
 var ErrAssessmentNotFound = errors.New("assessment not found")

@@ -418,7 +418,6 @@ func (cc *CMSController) GetRincianAsesmenHandler(c echo.Context) error {
 }
 
 func (cc *CMSController) GetAssessmentDetail(c echo.Context) error {
-
 	idStr := c.QueryParam("id_assessment")
 	if idStr == "" {
 		return c.JSON(http.StatusBadRequest, echo.Map{
@@ -436,8 +435,7 @@ func (cc *CMSController) GetAssessmentDetail(c echo.Context) error {
 		})
 	}
 
-	/* ----------  optional JWT validation  ---------- */
-	// (hapus blok ini jika endpoint boleh publik)
+	// boleh di-comment kalau endpoint publik
 	if _, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims); !ok {
 		return c.JSON(http.StatusUnauthorized, echo.Map{
 			"status":  http.StatusUnauthorized,
@@ -446,7 +444,7 @@ func (cc *CMSController) GetAssessmentDetail(c echo.Context) error {
 		})
 	}
 
-	hasil, err := cc.Service.GetAssessmentJSONByID(id)
+	detail, err := cc.Service.GetAssessmentDetailFull(id)
 	if err != nil {
 		if err == services.ErrAssessmentNotFound {
 			return c.JSON(http.StatusNotFound, echo.Map{
@@ -465,6 +463,6 @@ func (cc *CMSController) GetAssessmentDetail(c echo.Context) error {
 	return c.JSON(http.StatusOK, echo.Map{
 		"status":  http.StatusOK,
 		"message": "Assessment retrieved successfully",
-		"data":    hasil, // sudah berupa array/object ter-decode
+		"data":    detail,
 	})
 }
