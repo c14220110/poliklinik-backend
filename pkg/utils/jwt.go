@@ -10,7 +10,7 @@ import (
 
 // Claims terpadu dengan field flat untuk id_role, privileges, dan nama.
 type Claims struct {
-	IDKaryawan string   `json:"id_karyawan"`
+	IDKaryawan int   `json:"id_karyawan"`
 	Role       string   `json:"role"`
 	IDRole     int      `json:"id_role"`
 	Privileges []int    `json:"privileges"`
@@ -21,7 +21,7 @@ type Claims struct {
 }
 
 // GenerateJWTToken membuat token JWT dengan payload flat dan exp sesuai parameter.
-func GenerateJWTToken(idKaryawan string, role string, idRole int, privileges []int, idPoli int, username, nama string, exp time.Time) (string, error) {
+func GenerateJWTToken(idKaryawan int, role string, idRole int, privileges []int, idPoli int, username, nama string, exp time.Time) (string, error) {
 	jwtKey := []byte(os.Getenv("JWT_SECRET_KEY"))
 	if len(jwtKey) == 0 {
 		return "", fmt.Errorf("JWT secret key is missing")

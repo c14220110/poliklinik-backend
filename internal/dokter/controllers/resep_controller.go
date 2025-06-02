@@ -38,14 +38,7 @@ func (rc *ResepController) CreateResepHandler(c echo.Context) error {
 					"data":    nil,
 			})
 	}
-	idKaryawan, err := strconv.Atoi(claims.IDKaryawan)
-	if err != nil || idKaryawan <= 0 {
-			return c.JSON(http.StatusUnauthorized, echo.Map{
-					"status":  http.StatusUnauthorized,
-					"message": "Invalid karyawan ID in token",
-					"data":    nil,
-			})
-	}
+	idKaryawan := claims.IDKaryawan
 
 	// --- validasi minimal ---
 	if req.IDKunjungan == 0 || len(req.Sections) == 0 {

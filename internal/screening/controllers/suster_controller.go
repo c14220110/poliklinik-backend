@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/screening/services"
@@ -61,7 +60,7 @@ func (sc *SusterController) LoginSuster(c echo.Context) error {
 
 	// Generate token JWT dengan memasukkan nama suster ke dalam payload.
 	token, err := utils.GenerateJWTToken(
-		strconv.Itoa(suster.ID_Suster),
+		suster.ID_Suster,
 		"Suster",
 		suster.ID_Role,
 		suster.Privileges,

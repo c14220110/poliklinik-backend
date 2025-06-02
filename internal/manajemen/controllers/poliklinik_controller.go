@@ -76,8 +76,8 @@ func (pc *PoliklinikController) SoftDeletePoliklinikHandler(c echo.Context) erro
 			"data":    nil,
 		})
 	}
-	idManagement, err := strconv.Atoi(claims.IDKaryawan)
-	if err != nil || idManagement <= 0 {
+	idManagement := claims.IDKaryawan
+	if  idManagement <= 0 {
 		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,
 			"message": "Invalid management ID in token",
@@ -183,7 +183,7 @@ func (pc *PoliklinikController) AddPoliklinikHandler(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-	idManagement, err := strconv.Atoi(claims.IDKaryawan)
+	idManagement := claims.IDKaryawan
 	if err != nil || idManagement <= 0 {
 		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,
@@ -298,7 +298,7 @@ func (pc *PoliklinikController) UpdatePoliklinikHandler(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-	idManagement, err := strconv.Atoi(claims.IDKaryawan)
+	idManagement := claims.IDKaryawan
 	if err != nil || idManagement <= 0 {
 		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,

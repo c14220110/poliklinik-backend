@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/dokter/services"
@@ -60,7 +59,7 @@ func (dc *DokterController) LoginDokter(c echo.Context) error {
 	}
 
 	token, err := utils.GenerateJWTToken(
-		strconv.Itoa(dokter.ID_Dokter),
+		dokter.ID_Dokter,
 		"Dokter",
 		dokter.ID_Role,
 		dokter.Privileges,

@@ -113,8 +113,8 @@ func (sc *ShiftController) SoftDeleteShiftHandler(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-	idManagement, err := strconv.Atoi(claims.IDKaryawan)
-	if err != nil || idManagement <= 0 {
+	idManagement := claims.IDKaryawan
+	if idManagement <= 0 {
 		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,
 			"message": "invalid management id in token",
@@ -350,8 +350,8 @@ func (sc *ShiftController) AssignShiftHandlerNew(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-	idManagement, err := strconv.Atoi(claims.IDKaryawan)
-	if err != nil || idManagement <= 0 {
+	idManagement :=claims.IDKaryawan
+	if idManagement <= 0 {
 		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,
 			"message": "invalid management id in token",

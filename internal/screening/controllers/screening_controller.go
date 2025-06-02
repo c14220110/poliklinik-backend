@@ -44,8 +44,8 @@ func (sc *ScreeningController) InputScreening(c echo.Context) error {
         })
     }
 
-    operatorID, err := strconv.Atoi(claims.IDKaryawan)
-    if err != nil || operatorID <= 0 {
+    operatorID := claims.IDKaryawan
+    if  operatorID <= 0 {
         return c.JSON(http.StatusUnauthorized, map[string]interface{}{
             "status":  http.StatusUnauthorized,
             "message": "Invalid operator ID in token",

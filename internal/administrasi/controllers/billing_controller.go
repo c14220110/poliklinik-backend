@@ -70,7 +70,7 @@ func (bc *BillingController) InputBillingAssessment(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-	idKaryawanJWT, _ := strconv.Atoi(claims.IDKaryawan)
+	idKaryawanJWT := claims.IDKaryawan
 
 	// -------- body ----------
 	var req models.InputBillingRequest

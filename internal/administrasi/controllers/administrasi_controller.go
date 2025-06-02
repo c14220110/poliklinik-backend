@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/c14220110/poliklinik-backend/internal/administrasi/services"
@@ -45,7 +44,7 @@ func (ac *AdministrasiController) Login(c echo.Context) error {
 	// Set expiration token dengan durasi yang panjang untuk administrasi
 	expTime := time.Now().Add(999999 * time.Hour)
 	token, err := utils.GenerateJWTToken(
-		strconv.Itoa(admin.ID_Admin),
+		admin.ID_Admin,
 		"Administrasi",
 		admin.ID_Role,
 		admin.Privileges,

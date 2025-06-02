@@ -96,8 +96,8 @@ func (kc *KaryawanController) AddKaryawan(c echo.Context) error {
 	}
 
 	// Konversi id_management dari JWT ke integer
-	idManagement, err := strconv.Atoi(claims.IDKaryawan)
-	if err != nil || idManagement <= 0 {
+	idManagement := claims.IDKaryawan
+	if idManagement <= 0 {
 		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,
 			"message": "Invalid management ID in token",
@@ -261,8 +261,8 @@ func (kc *KaryawanController) UpdateKaryawanHandler(c echo.Context) error {
 	}
 
 	// Konversi id_management dari JWT ke integer
-	idManagement, err := strconv.Atoi(claims.IDKaryawan)
-	if err != nil || idManagement <= 0 {
+	idManagement := claims.IDKaryawan
+	if idManagement <= 0 {
 		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
 			"status":  http.StatusUnauthorized,
 			"message": "Invalid management ID in token",
@@ -319,13 +319,13 @@ func (kc *KaryawanController) SoftDeleteKaryawanHandler(c echo.Context) error {
 	}
 
 	// Asumsikan claims.IDKaryawan adalah string, konversi ke int
-	deletedByID, err := strconv.Atoi(claims.IDKaryawan)
-	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-			"status":  http.StatusUnauthorized,
-			"message": "Invalid IDKaryawan in token",
-			"data":    nil,
-		})
+	deletedByID := claims.IDKaryawan
+	if deletedByID <= 0 {
+			return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+					"status":  http.StatusUnauthorized,
+					"message": "Invalid IDKaryawan in token",
+					"data":    nil,
+			})
 	}
 
 	err = kc.Service.SoftDeleteKaryawan(idKaryawan, deletedByID)

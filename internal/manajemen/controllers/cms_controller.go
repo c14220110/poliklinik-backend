@@ -56,10 +56,8 @@ func (cc *CMSController) CreateCMSHandler(c echo.Context) error {
 	if !ok || claims == nil {
 		return c.JSON(http.StatusUnauthorized, echo.Map{"status": http.StatusUnauthorized, "message": "Invalid token claims"})
 	}
-	uid, err := strconv.Atoi(claims.IDKaryawan)
-	if err != nil || uid <= 0 {
-		return c.JSON(http.StatusUnauthorized, echo.Map{"status": http.StatusUnauthorized, "message": "Invalid user ID"})
-	}
+	uid := claims.IDKaryawan
+
 	mgmt := models.ManagementCMS{IDManagement: uid, CreatedBy: uid, UpdatedBy: uid}
 
 	// call service
@@ -189,7 +187,7 @@ func (cc *CMSController) UpdateCMSHandler(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, echo.Map{
 			"status": http.StatusUnauthorized, "message": "Invalid token claims"})
 	}
-	uid, _ := strconv.Atoi(claims.IDKaryawan)
+	uid := claims.IDKaryawan
 	mgmt := models.ManagementCMS{IDManagement: uid, CreatedBy: uid, UpdatedBy: uid}
 
 	if err := cc.Service.UpdateCMSWithSections(req, mgmt); err != nil {
@@ -319,7 +317,7 @@ func (cc *CMSController) SaveAssessmentHandler(c echo.Context) error {
 			"data":    nil,
 		})
 	}
-	idKaryawan, _ := strconv.Atoi(claims.IDKaryawan)
+	idKaryawan := claims.IDKaryawan
 
 	/* ---------- payload ---------- */
 	var input models.AssessmentInput

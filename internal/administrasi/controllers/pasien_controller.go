@@ -56,14 +56,8 @@ func (pc *PasienController) RegisterPasien(c echo.Context) error {
 	}
 	// Ambil operatorID dari JWT
 	claims := c.Get(string(common.ContextKeyClaims)).(*jwtUtils.Claims)
-	operatorID, err := strconv.Atoi(claims.IDKaryawan)
-	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-			"status":  http.StatusUnauthorized,
-			"message": "Invalid operator ID in token",
-			"data":    nil,
-		})
-	}
+	operatorID := claims.IDKaryawan
+
 	// Cari ID agama berdasarkan nama agama
 	var idAgama int
 	err = pc.Service.DB.QueryRow("SELECT id_agama FROM Agama WHERE nama = ?", req.Agama).Scan(&idAgama)
