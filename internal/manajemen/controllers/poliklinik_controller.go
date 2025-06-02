@@ -341,3 +341,41 @@ func (pc *PoliklinikController) GetActivePoliklinikList(c echo.Context) error {
 		"data":    list,
 	})
 }
+
+
+
+
+func (pc *PoliklinikController) GetRuangList(c echo.Context) error {
+	idPoliStr := c.QueryParam("id_poli")
+	if idPoliStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "id_poli is required",
+			"data":    nil,
+		})
+	}
+
+	idPoli, err := strconv.Atoi(idPoliStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "invalid id_poli",
+			"data":    nil,
+		})
+	}
+
+	list, err := pc.Service.GetRuangListByPoliID(idPoli)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve ruang list: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "Ruang list retrieved successfully",
+		"data":    list,
+	})
+}

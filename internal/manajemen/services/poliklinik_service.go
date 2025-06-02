@@ -279,3 +279,38 @@ func (ps *PoliklinikService) GetActivePoliklinikList() ([]map[string]interface{}
 	}
 	return list, nil
 }
+
+// GetRuangListByPoliID retrieves the list of rooms for a specific poli from the database
+func (ps *PoliklinikService) GetRuangListByPoliID(idPoli int) ([]map[string]interface{}, error) {
+	query := `
+			SELECT
+					id_ruang,
+					nama_ruang
+			FROM Ruang
+			WHERE id_poli = ?
+	`
+	rows, err := ps.DB.Query(query, idPoli)
+	if err != nil {
+			return nil, fmt.Errorf("query error: %v", err)
+	}
+	defer rows.Close()
+
+	var list []map[string]interface{}
+	for rows.Next() {
+			var idRuang int
+			var namaRuang string
+			if err := rows.Scan(&idRuang, &namaRuang); err != nil {
+					return nil, fmt.Errorf("scan error: %v", err)
+			}
+			record := map[string]interface{}{
+					"id_ruang":   idRuang,
+					"nama_ruang": namaRuang,
+			}
+			list = append(list, record)
+	}
+	if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("rows error: %v", err)
+	}
+
+	return list, nil
+}
