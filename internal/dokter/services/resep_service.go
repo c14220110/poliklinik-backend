@@ -388,14 +388,14 @@ func (s *ResepService) GetICD9CMList(q string, limit, page int) ([]map[string]in
     return list, total, limit, nil
 }
 
-func (s *ResepService) GetICD9List(q string, limit, page int) ([]map[string]interface{}, int64, int, error) {
+func (s *ResepService) GetICD10List(q string, limit, page int) ([]map[string]interface{}, int64, int, error) {
     if limit <= 0 { limit = 20 }
     if limit > 100 { limit = 100 }
     if page  <= 0 { page  = 1  }
     offset := (page - 1) * limit
 
     // Query untuk menghitung total record
-    countQuery := "SELECT COUNT(*) FROM ICD9"
+    countQuery := "SELECT COUNT(*) FROM ICD10"
     conds  := []string{}
     params := []interface{}{}
 
@@ -416,14 +416,14 @@ func (s *ResepService) GetICD9List(q string, limit, page int) ([]map[string]inte
 
     // Query untuk mengambil data
     baseQuery := `
-        SELECT id_icd9, display, version, harga
-        FROM ICD9_CM
+        SELECT id_icd10, display, version, harga
+        FROM ICD10
     `
     query := baseQuery
     if len(conds) > 0 {
         query += " WHERE " + strings.Join(conds, " AND ")
     }
-    query += " ORDER BY id_icd9_cm"
+    query += " ORDER BY id_icd10"
     query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
 
     rows, err := s.DB.Query(query, params...)
@@ -435,16 +435,16 @@ func (s *ResepService) GetICD9List(q string, limit, page int) ([]map[string]inte
     var list []map[string]interface{}
     for rows.Next() {
         var (
-            id_icd9_cm string
+            id_icd10 string
             display    string
             version    string
             harga      float64
         )
-        if err := rows.Scan(&id_icd9_cm, &display, &version, &harga); err != nil {
+        if err := rows.Scan(&id_icd10, &display, &version, &harga); err != nil {
             return nil, 0, 0, fmt.Errorf("scan error: %v", err)
         }
         list = append(list, map[string]interface{}{
-            "id_icd9": id_icd9_cm,
+            "id_icd10": id_icd10,
             "display":    display,
             "version":    version,
             "harga":      harga,
