@@ -416,7 +416,7 @@ func (s *ResepService) GetICD10List(q string, limit, page int) ([]map[string]int
 
     // Query untuk mengambil data
     baseQuery := `
-        SELECT id_icd10, display, version, harga
+        SELECT id_icd10, display, version
         FROM ICD10
     `
     query := baseQuery
@@ -438,16 +438,14 @@ func (s *ResepService) GetICD10List(q string, limit, page int) ([]map[string]int
             id_icd10 string
             display    string
             version    string
-            harga      float64
         )
-        if err := rows.Scan(&id_icd10, &display, &version, &harga); err != nil {
+        if err := rows.Scan(&id_icd10, &display, &version); err != nil {
             return nil, 0, 0, fmt.Errorf("scan error: %v", err)
         }
         list = append(list, map[string]interface{}{
             "id_icd10": id_icd10,
             "display":    display,
             "version":    version,
-            "harga":      harga,
         })
     }
 
