@@ -181,3 +181,53 @@ func (rc *ResepController) GetICD10List(c echo.Context) error {
 			},
 	})
 }
+
+func (rc *ResepController) GetResepDetail(c echo.Context) error {
+	idResepStr := c.QueryParam("id_resep")
+	if idResepStr == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"status":  http.StatusBadRequest,
+			"message": "id_resep query parameter is required",
+			"data":    nil,
+		})
+	}
+	idResep, err := strconv.Atoi(idResepStr)
+	if err != nil || idResep <= 0 {
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"status":  http.StatusBadRequest,
+			"message": "id_resep must be a positive number",
+			"data":    nil,
+		})
+	}
+
+	// boleh di-comment kalau endpoint publik
+	if _, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims); !ok {
+		return c.JSON(http.StatusUnauthorized, echo.Map{
+			"status":  http.StatusUnauthorized,
+			"message": "Invalid or missing token claims",
+			"data":    nil,
+		})
+	}
+
+	details, err := rc.Service.GetResepDetails(idResep)
+	if err != nil {
+		if err == services.ErrResepNotFound {
+			return c.JSON(http.StatusNotFound, echo.Map{
+				"status":  http.StatusNotFound,
+				"message": "Resep not found",
+				"data":    nil,
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to retrieve resep details: " + err.Error(),
+			"data":    nil,
+		})
+	}
+
+	return c.JSON(http.StatusOK, echo.Map{
+		"status":  http.StatusOK,
+		"message": "Resep details retrieved successfully",
+		"data":    details,
+	})
+}

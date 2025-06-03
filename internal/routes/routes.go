@@ -146,6 +146,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	dokter.GET("/assessment", cmsController.GetAssessmentDetail, middlewares.JWTMiddleware())
 	dokter.GET("/cms/detail", cmsController.GetCMSDetailByPoliHandler, middlewares.JWTMiddleware()) 
 	dokter.GET("/ruang", poliklinikController.GetRuangList, middlewares.JWTMiddleware()) 
+	dokter.GET("/resep", resepController.CreateResepHandler, middlewares.JWTMiddleware())
 
 
 

@@ -21,3 +21,15 @@ type KomposisiRequest struct {
     IDObat int `json:"id_obat"`
     Dosis  int `json:"dosis"`
 }
+
+
+type ResepSection struct {
+	IDSection    int     `json:"id_section"`
+	IDResep      int     `json:"id_resep"`
+	SectionType  int     `json:"section_type"`
+	NamaRacikan  *string `json:"nama_racikan"`
+	Jumlah       int     `json:"jumlah"`
+	JenisKemasan *string `json:"jenis_kemasan"`
+	Instruksi    string  `json:"instruksi"`
+	HargaTotal   float64 `json:"harga_total"`
+}

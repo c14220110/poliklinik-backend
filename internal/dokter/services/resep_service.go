@@ -451,3 +451,33 @@ func (s *ResepService) GetICD10List(q string, limit, page int) ([]map[string]int
 
     return list, total, limit, nil
 }
+
+func (s *ResepService) GetResepDetails(idResep int) ([]models.ResepSection, error) {
+	var details []models.ResepSection
+	rows, err := s.DB.Query(`
+		SELECT id_section, id_resep, section_type, nama_racikan, jumlah, jenis_kemasan, instruksi, harga_total
+		FROM Resep_Section
+		WHERE id_resep = ?`, idResep)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var detail models.ResepSection
+		err := rows.Scan(&detail.IDSection, &detail.IDResep, &detail.SectionType, &detail.NamaRacikan, 
+			&detail.Jumlah, &detail.JenisKemasan, &detail.Instruksi, &detail.HargaTotal)
+		if err != nil {
+			return nil, err
+		}
+		details = append(details, detail)
+	}
+
+	if len(details) == 0 {
+		return nil, ErrResepNotFound
+	}
+
+	return details, nil
+}
+
+var ErrResepNotFound = errors.New("resep not found")
