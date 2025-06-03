@@ -387,3 +387,69 @@ func (s *ResepService) GetICD9CMList(q string, limit, page int) ([]map[string]in
 
     return list, total, limit, nil
 }
+
+func (s *ResepService) GetICD9List(q string, limit, page int) ([]map[string]interface{}, int64, int, error) {
+    if limit <= 0 { limit = 20 }
+    if limit > 100 { limit = 100 }
+    if page  <= 0 { page  = 1  }
+    offset := (page - 1) * limit
+
+    // Query untuk menghitung total record
+    countQuery := "SELECT COUNT(*) FROM ICD9"
+    conds  := []string{}
+    params := []interface{}{}
+
+    if q != "" {
+        conds  = append(conds, "LOWER(display) LIKE ?")
+        params = append(params, "%"+strings.ToLower(q)+"%")
+    }
+
+    if len(conds) > 0 {
+        countQuery += " WHERE " + strings.Join(conds, " AND ")
+    }
+
+    var total int64
+    err := s.DB.QueryRow(countQuery, params...).Scan(&total)
+    if err != nil {
+        return nil, 0, 0, fmt.Errorf("count query error: %v", err)
+    }
+
+    // Query untuk mengambil data
+    baseQuery := `
+        SELECT id_icd9, display, version, harga
+        FROM ICD9_CM
+    `
+    query := baseQuery
+    if len(conds) > 0 {
+        query += " WHERE " + strings.Join(conds, " AND ")
+    }
+    query += " ORDER BY id_icd9_cm"
+    query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+
+    rows, err := s.DB.Query(query, params...)
+    if err != nil {
+        return nil, 0, 0, fmt.Errorf("query error: %v", err)
+    }
+    defer rows.Close()
+
+    var list []map[string]interface{}
+    for rows.Next() {
+        var (
+            id_icd9_cm string
+            display    string
+            version    string
+            harga      float64
+        )
+        if err := rows.Scan(&id_icd9_cm, &display, &version, &harga); err != nil {
+            return nil, 0, 0, fmt.Errorf("scan error: %v", err)
+        }
+        list = append(list, map[string]interface{}{
+            "id_icd9": id_icd9_cm,
+            "display":    display,
+            "version":    version,
+            "harga":      harga,
+        })
+    }
+
+    return list, total, limit, nil
+}

@@ -156,3 +156,28 @@ func (rc *ResepController) GetICD9CMList(c echo.Context) error {
 			},
 	})
 }
+
+func (rc *ResepController) GetICD9List(c echo.Context) error {
+	q        := c.QueryParam("q")                    // search display LIKE
+	limit, _ := strconv.Atoi(c.QueryParam("limit")) // default di-handle service
+	page, _  := strconv.Atoi(c.QueryParam("page"))  // halaman mulai 1
+
+	list, total, limit, err := rc.Service.GetICD9CMList(q, limit, page)
+	if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+					"status":  http.StatusInternalServerError,
+					"message": "Failed to retrieve ICD9 list: " + err.Error(),
+					"data":    nil,
+			})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+			"status":  http.StatusOK,
+			"message": "ICD9 list retrieved successfully",
+			"data": map[string]interface{}{
+					"list":  list,
+					"total": total,
+					"limit": limit,
+			},
+	})
+}
