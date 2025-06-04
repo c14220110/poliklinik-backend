@@ -1175,3 +1175,170 @@ var (
 	ErrCMSNotInactive  = errors.New("cms must be inactive to be moved")
 	ErrCMSActiveInPoli = errors.New("another active cms exists in the target poli")
 )
+
+// DuplicateCMS duplicates a CMS along with its active sections, subsections, and elements
+func (svc *CMSService) DuplicateCMS(idCMS int) (int64, error) {
+	tx, err := svc.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	now := time.Now()
+
+	// Validasi CMS asli ada dan aktif
+	var idPoli int
+	var title string
+	err = tx.QueryRow(
+		`SELECT id_poli, title FROM CMS WHERE id_cms = ? AND deleted_at IS NULL`,
+		idCMS,
+	).Scan(&idPoli, &title)
+	if err == sql.ErrNoRows {
+		return 0, ErrCMSNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	// Buat CMS baru
+	newTitle := title + " (Copy)"
+	res, err := tx.Exec(
+		`INSERT INTO CMS (id_poli, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		idPoli, newTitle, now, now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	newIDCMS, _ := res.LastInsertId()
+
+	// Duplikasi sections
+	sections, err := tx.Query(
+		`SELECT id_section, title FROM CMS_Section WHERE id_cms = ? AND deleted_at IS NULL`,
+		idCMS,
+	)
+	if err != nil {
+		return 0, err
+	}
+	defer sections.Close()
+
+	sectionMap := make(map[int]int64) // Mapping id_section lama ke baru
+	for sections.Next() {
+		var oldIDSection int
+		var sectionTitle string
+		if err := sections.Scan(&oldIDSection, &sectionTitle); err != nil {
+			return 0, err
+		}
+		res, err := tx.Exec(
+			`INSERT INTO CMS_Section (id_cms, title) VALUES (?, ?)`,
+			newIDCMS, sectionTitle,
+		)
+		if err != nil {
+			return 0, err
+		}
+		newIDSection, _ := res.LastInsertId()
+		sectionMap[oldIDSection] = newIDSection
+	}
+
+	// Duplikasi subsections
+	subsections, err := tx.Query(
+		`SELECT id_subsection, id_section, title FROM CMS_Subsection WHERE id_section IN (SELECT id_section FROM CMS_Section WHERE id_cms = ?) AND deleted_at IS NULL`,
+		idCMS,
+	)
+	if err != nil {
+		return 0, err
+	}
+	defer subsections.Close()
+
+	subsectionMap := make(map[int]int64) // Mapping id_subsection lama ke baru
+	for subsections.Next() {
+		var oldIDSubsection, oldIDSection int
+		var subsectionTitle string
+		if err := subsections.Scan(&oldIDSubsection, &oldIDSection, &subsectionTitle); err != nil {
+			return 0, err
+		}
+		newIDSection, ok := sectionMap[oldIDSection]
+		if !ok {
+			return 0, fmt.Errorf("section not found for subsection")
+		}
+		res, err := tx.Exec(
+			`INSERT INTO CMS_Subsection (id_section, title) VALUES (?, ?)`,
+			newIDSection, subsectionTitle,
+		)
+		if err != nil {
+			return 0, err
+		}
+		newIDSubsection, _ := res.LastInsertId()
+		subsectionMap[oldIDSubsection] = newIDSubsection
+	}
+
+	// Duplikasi elements
+	elements, err := tx.Query(
+		`SELECT id_cms_elements, id_section, id_subsection, element_label, element_name, element_options, element_hint, is_required
+		 FROM CMS_Elements
+		 WHERE id_section IN (SELECT id_section FROM CMS_Section WHERE id_cms = ?) AND deleted_at IS NULL`,
+		idCMS,
+	)
+	if err != nil {
+		return 0, err
+	}
+	defer elements.Close()
+
+	for elements.Next() {
+		var oldIDCMSElements, oldIDSection int
+		var oldIDSubsection sql.NullInt64
+		var elementLabel, elementName string
+		var elementOptions, elementHint sql.NullString
+		var isRequired bool
+		if err := elements.Scan(&oldIDCMSElements, &oldIDSection, &oldIDSubsection, &elementLabel, &elementName, &elementOptions, &elementHint, &isRequired); err != nil {
+			return 0, err
+		}
+		newIDSection, ok := sectionMap[oldIDSection]
+		if !ok {
+			return 0, fmt.Errorf("section not found for element")
+		}
+		var newIDSubsection interface{}
+		if oldIDSubsection.Valid {
+			newIDSubsectionInt, ok := subsectionMap[int(oldIDSubsection.Int64)]
+			if !ok {
+				return 0, fmt.Errorf("subsection not found for element")
+			}
+			newIDSubsection = newIDSubsectionInt
+		} else {
+			newIDSubsection = nil
+		}
+		res, err := tx.Exec(
+			`INSERT INTO CMS_Elements (id_section, id_subsection, element_label, element_name, element_options, element_hint, is_required)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			newIDSection, newIDSubsection, elementLabel, elementName, elementOptions.String, elementHint.String, isRequired,
+		)
+		if err != nil {
+			return 0, err
+		}
+		newIDCMSElements, _ := res.LastInsertId()
+
+		// Duplikasi Detail_Element
+		var idElement int
+		err = tx.QueryRow(
+			`SELECT id_element FROM Detail_Element WHERE id_cms_elements = ?`,
+			oldIDCMSElements,
+		).Scan(&idElement)
+		if err != nil && err != sql.ErrNoRows {
+			return 0, err
+		}
+		if err == nil {
+			_, err = tx.Exec(
+				`INSERT INTO Detail_Element (id_element, id_cms_elements) VALUES (?, ?)`,
+				idElement, newIDCMSElements,
+			)
+			if err != nil {
+				return 0, err
+			}
+		}
+	}
+
+	return newIDCMS, tx.Commit()
+}
