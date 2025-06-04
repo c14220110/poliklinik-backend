@@ -464,3 +464,67 @@ func (cc *CMSController) GetAssessmentDetail(c echo.Context) error {
 		"data":    detail,
 	})
 }
+
+
+// MoveCMS handles the PUT /move-to?id_cms endpoint to move an inactive CMS to a new poli
+func (cc *CMSController) MoveCMS(ctx echo.Context) error {
+	// Ambil id_cms dari query parameter
+	idCMSStr := ctx.QueryParam("id_cms")
+	idCMS, err := strconv.Atoi(idCMSStr)
+	if err != nil {
+		return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Invalid id_cms",
+			"data":    nil,
+		})
+	}
+
+	// Ambil id_poli dari body request
+	var req struct {
+		IDPoli int `json:"id_poli"`
+	}
+	if err := ctx.Bind(&req); err != nil {
+		return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+			"status":  http.StatusBadRequest,
+			"message": "Invalid request body",
+			"data":    nil,
+		})
+	}
+
+	// Panggil service untuk memindahkan CMS
+	err = cc.Service.MoveCMS(idCMS, req.IDPoli)
+	if err != nil {
+		if err == services.ErrCMSNotFound {
+			return ctx.JSON(http.StatusNotFound, map[string]interface{}{
+				"status":  http.StatusNotFound,
+				"message": "CMS not found",
+				"data":    nil,
+			})
+		} else if err == services.ErrCMSNotInactive {
+			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status":  http.StatusBadRequest,
+				"message": "CMS must be inactive to be moved",
+				"data":    nil,
+			})
+		} else if err == services.ErrCMSActiveInPoli {
+			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status":  http.StatusBadRequest,
+				"message": "Another active CMS exists in the target poli",
+				"data":    nil,
+			})
+		} else {
+			return ctx.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"status":  http.StatusInternalServerError,
+				"message": "Failed to move CMS: " + err.Error(),
+				"data":    nil,
+			})
+		}
+	}
+
+	// Jika berhasil, kembalikan response sukses
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
+		"status":  http.StatusOK,
+		"message": "CMS moved successfully",
+		"data":    nil,
+	})
+}

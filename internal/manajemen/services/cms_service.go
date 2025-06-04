@@ -1117,3 +1117,64 @@ func (svc *CMSService) GetAssessmentDetailFull(id int) (models.AssessmentDetailR
 	return res, nil
 }
 var ErrAssessmentNotFound = errors.New("assessment not found")
+
+
+// MoveCMS memindahkan CMS yang nonaktif ke poli baru
+func (svc *CMSService) MoveCMS(idCMS, newIDPoli int) error {
+	tx, err := svc.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	now := time.Now()
+
+	// 1. Pastikan CMS ada dan nonaktif
+	var deletedAt sql.NullTime
+	var currentPoliID int
+	err = tx.QueryRow(
+		`SELECT id_poli, deleted_at FROM CMS WHERE id_cms = ?`,
+		idCMS,
+	).Scan(&currentPoliID, &deletedAt)
+	if err == sql.ErrNoRows {
+		return ErrCMSNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if !deletedAt.Valid {
+		return ErrCMSNotInactive
+	}
+
+	// 2. Cek apakah ada CMS aktif di poli tujuan
+	var activeCMS int
+	err = tx.QueryRow(
+		`SELECT id_cms FROM CMS WHERE id_poli = ? AND deleted_at IS NULL LIMIT 1`,
+		newIDPoli,
+	).Scan(&activeCMS)
+	if err == nil {
+		return ErrCMSActiveInPoli
+	} else if err != sql.ErrNoRows {
+		return err
+	}
+
+	// 3. Update id_poli pada CMS
+	_, err = tx.Exec(
+		`UPDATE CMS SET id_poli = ?, updated_at = ? WHERE id_cms = ?`,
+		newIDPoli, now, idCMS,
+	)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+var (
+	ErrCMSNotInactive  = errors.New("cms must be inactive to be moved")
+	ErrCMSActiveInPoli = errors.New("another active cms exists in the target poli")
+)

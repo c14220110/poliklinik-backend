@@ -197,8 +197,9 @@ func Init(e *echo.Echo, db *sql.DB) {
 	management.PUT("/cms/update", cmsController.UpdateCMSHandler, middlewares.JWTMiddleware()) 
 	management.PUT("/cms/activate", cmsController.ActivateCMSHandler, middlewares.JWTMiddleware()) 
 	management.PUT("/cms/deactivate", cmsController.DeactivateCMSHandler, middlewares.JWTMiddleware()) 
-
 	management.POST("/cms/create", cmsController.CreateCMSHandler, middlewares.JWTMiddleware()) 
+	management.PUT("/cms/move-to", cmsController.MoveCMS, middlewares.JWTMiddleware()) 
+
 
 	management.GET("/shift/karyawan", shiftController.GetKaryawanListHandler, middlewares.JWTMiddleware())
 	management.GET("/shift/karyawan-tanpa-shift", shiftController.GetKaryawanTanpaShiftHandler, middlewares.JWTMiddleware())
