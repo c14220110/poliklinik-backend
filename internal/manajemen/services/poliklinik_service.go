@@ -315,10 +315,10 @@ func (ps *PoliklinikService) GetRuangListByPoliID(idPoli int) ([]map[string]inte
 	return list, nil
 }
 
-// GetPICList menampilkan daftar PIC dengan pencarian nama + pagination.
-// • q     : string pencarian, case-insensitive, boleh kosong
-// • limit : jumlah baris per halaman (default 20, max 100)
-// • page  : halaman dimulai dari 1 (default 1)
+// GetPICList retrieves a list of PICs with name search and pagination.
+// • q     : search string, case-insensitive, can be empty
+// • limit : rows per page (default 20, max 100)
+// • page  : page number starting from 1 (default 1)
 func (ps *PoliklinikService) GetPICList(q string, limit, page int) ([]map[string]interface{}, error) {
 	if limit <= 0 { limit = 20 }
 	if limit > 100 { limit = 100 }
@@ -345,7 +345,7 @@ func (ps *PoliklinikService) GetPICList(q string, limit, page int) ([]map[string
 			query += " AND " + strings.Join(conds, " AND ")
 	}
 	query += " ORDER BY k.id_karyawan"
-	query += fmt.Sprintf(" LIMIT %d OFFSETautomatically %d", limit, offset)
+	query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset) // Fixed typo
 
 	rows, err := ps.DB.Query(query, params...)
 	if err != nil {
