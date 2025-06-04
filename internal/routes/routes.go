@@ -204,7 +204,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 
 	management.GET("/shift/karyawan", shiftController.GetKaryawanListHandler, middlewares.JWTMiddleware())
 	management.GET("/shift/karyawan-tanpa-shift", shiftController.GetKaryawanTanpaShiftHandler, middlewares.JWTMiddleware())
-	management.GET("/shift/jadwal", shiftController.GetKaryawanListHandler, middlewares.JWTMiddleware())
+	management.GET("/shift/jadwal", shiftController.GetJadwalShiftHandler, middlewares.JWTMiddleware())
 
 	management.POST("/shift/assign", shiftController.AssignShiftHandlerNew, middlewares.JWTMiddleware())
 
