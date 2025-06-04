@@ -119,7 +119,7 @@ func Init(e *echo.Echo, db *sql.DB) {
 	screening.GET("/antrian/terlama", antrianController.GetAntrianTerlamaHandler, middlewares.JWTMiddleware())
 	screening.PUT("/masukkan", antrianController.MasukkanPasienHandler, middlewares.JWTMiddleware())
 	screening.GET("/poliklinik", poliklinikController.GetActivePoliklinikList)
-	screening.PUT("/alihkan-pasien", antrianController.AlihkanPasienHandler, middlewares.JWTMiddleware())
+	screening.PUT("/alihkan-pasien", antrianController.AlihkanPasienHandler)
 	screening.GET("/antrian", antrianController.GetTodayScreeningAntrianHandler, middlewares.JWTMiddleware())
 	screening.GET("/detail-antrian", antrianController.GetDetailAntrianHandler, middlewares.JWTMiddleware())
 	screening.GET("/rincian/asesmen", cmsController.GetRincianAsesmenHandler, middlewares.JWTMiddleware()) 
