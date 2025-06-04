@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -523,51 +524,45 @@ func (cc *CMSController) MoveCMS(ctx echo.Context) error {
 	})
 }
 
+// DuplicateCMSHandler handles PUT request to duplicate a CMS record.
 func (cc *CMSController) DuplicateCMSHandler(c echo.Context) error {
-	idStr := c.QueryParam("id_cms")
-	if idStr == "" {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+	idCMSStr := c.QueryParam("id_cms")
+	if idCMSStr == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{
 			"status":  http.StatusBadRequest,
-			"message": "id_cms parameter is required",
+			"message": "id_cms query parameter is required",
 			"data":    nil,
 		})
 	}
-	idCMS, err := strconv.Atoi(idStr)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+
+	idCMS, err := strconv.Atoi(idCMSStr)
+	if err != nil || idCMS <= 0 {
+		return c.JSON(http.StatusBadRequest, echo.Map{
 			"status":  http.StatusBadRequest,
-			"message": "id_cms must be a number",
+			"message": "id_cms must be a positive integer",
 			"data":    nil,
 		})
 	}
 
 	newIDCMS, err := cc.Service.DuplicateCMS(idCMS)
 	if err != nil {
-		switch err {
-		case services.ErrCMSNotFound:
-			return c.JSON(http.StatusNotFound, map[string]interface{}{
+		if err.Error() == fmt.Sprintf("CMS with id_cms %d not found or deleted", idCMS) {
+			return c.JSON(http.StatusNotFound, echo.Map{
 				"status":  http.StatusNotFound,
-				"message": "CMS not found",
-				"data":    nil,
-			})
-		case services.ErrCMSNotInactive:
-			return c.JSON(http.StatusBadRequest, map[string]interface{}{
-				"status":  http.StatusBadRequest,
-				"message": "Only inactive CMS can be duplicated",
-				"data":    nil,
-			})
-		default:
-			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-				"status":  http.StatusInternalServerError,
-				"message": "Failed to duplicate CMS: " + err.Error(),
+				"message": "CMS not found or deleted",
 				"data":    nil,
 			})
 		}
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"status":  http.StatusInternalServerError,
+			"message": "Failed to duplicate CMS: " + err.Error(),
+			"data":    nil,
+		})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
+	return c.JSON(http.StatusOK, echo.Map{
 		"status":  http.StatusOK,
 		"message": "CMS duplicated successfully",
-		"data":    map[string]interface{}{"new_id_cms": newIDCMS},
+		"data":    map[string]int64{"new_id_cms": newIDCMS},
 	})
 }
