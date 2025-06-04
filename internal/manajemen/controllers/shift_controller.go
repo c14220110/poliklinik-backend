@@ -375,3 +375,76 @@ func (sc *ShiftController) AssignShiftHandlerNew(c echo.Context) error {
 		"data":    nil,
 	})
 }
+
+func (sc *ShiftController) GetJadwalShiftHandler(c echo.Context) error {
+	//-------------------------------- query-param -------------------------------
+	idKaryawanStr := c.QueryParam("id_karyawan")
+	if idKaryawanStr == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"status":  http.StatusBadRequest,
+			"message": "id_karyawan is required",
+			"data":    nil,
+		})
+	}
+	idKaryawan, err := strconv.Atoi(idKaryawanStr)
+	if err != nil || idKaryawan <= 0 {
+		return c.JSON(http.StatusBadRequest, echo.Map{
+			"status":  http.StatusBadRequest,
+			"message": "invalid id_karyawan (must be positive integer)",
+			"data":    nil,
+		})
+	}
+
+	// bulan & tahun optional
+	nowJakarta := time.Now().In(time.FixedZone("WIB", 7*3600))
+	month := int(nowJakarta.Month())
+	year  := nowJakarta.Year()
+
+	if m := c.QueryParam("bulan"); m != "" {
+		if v, err := strconv.Atoi(m); err == nil && v >= 1 && v <= 12 {
+			month = v
+		} else {
+			return c.JSON(http.StatusBadRequest, echo.Map{
+				"status":  http.StatusBadRequest,
+				"message": "invalid bulan (1-12)",
+				"data":    nil,
+			})
+		}
+	}
+	if y := c.QueryParam("tahun"); y != "" {
+		if v, err := strconv.Atoi(y); err == nil && v >= 1900 {
+			year = v
+		} else {
+			return c.JSON(http.StatusBadRequest, echo.Map{
+				"status":  http.StatusBadRequest,
+				"message": "invalid tahun",
+				"data":    nil,
+			})
+		}
+	}
+
+	//-------------------------------- service call ------------------------------
+	result, err := sc.Service.GetJadwalShift(idKaryawan, month, year)
+	if err != nil {
+		switch err {
+		case services.ErrNoShiftData:
+			return c.JSON(http.StatusNotFound, echo.Map{
+				"status":  http.StatusNotFound,
+				"message": "Tidak ada data shift untuk periode tersebut",
+				"data":    nil,
+			})
+		default:
+			return c.JSON(http.StatusInternalServerError, echo.Map{
+				"status":  http.StatusInternalServerError,
+				"message": "Failed to fetch shift: " + err.Error(),
+				"data":    nil,
+			})
+		}
+	}
+
+	return c.JSON(http.StatusOK, echo.Map{
+		"status":  http.StatusOK,
+		"message": "Success",
+		"data":    result,
+	})
+}

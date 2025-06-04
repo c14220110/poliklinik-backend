@@ -3,9 +3,12 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/c14220110/poliklinik-backend/internal/manajemen/models"
 )
 
 type ShiftService struct {
@@ -612,3 +615,109 @@ func (s *ShiftService) AssignShiftNew(idPoli, idShift, idManagement int, tanggal
 
 	return nil
 }
+
+func (s *ShiftService) GetJadwalShift(
+	idKaryawan, month, year int,
+) ([]models.JadwalShiftPerHari, error) {
+
+	// Ambil semua shift 1 bulan itu
+	rows, err := s.DB.Query(`
+		SELECT
+			sk.id_shift_karyawan,
+			sk.custom_jam_mulai,
+			sk.custom_jam_selesai,
+			p.nama_poli,
+			sk.tanggal
+		FROM Shift_Karyawan sk
+			JOIN Poliklinik p ON p.id_poli = sk.id_poli
+		WHERE sk.id_karyawan = ?
+		  AND MONTH(sk.tanggal) = ?
+		  AND YEAR(sk.tanggal)  = ?
+		ORDER BY sk.tanggal, sk.custom_jam_mulai`,
+		idKaryawan, month, year)
+	if err != nil { return nil, err }
+	defer rows.Close()
+
+	// Kelompokkan ke map[tanggal]struct{ pagi,sore }
+	type bucket struct {
+		Pagi []models.ShiftDetail
+		Sore []models.ShiftDetail
+	}
+	buckets := map[string]*bucket{}
+
+	for rows.Next() {
+		var (
+			detail        models.ShiftDetail
+			tgl           time.Time
+			jamMulai, jamAkhir string
+		)
+		if err = rows.Scan(
+			&detail.IDShiftKaryawan,
+			&jamMulai, &jamAkhir,
+			&detail.NamaPoli,
+			&tgl,
+		); err != nil {
+			return nil, err
+		}
+		detail.JamMulai = jamMulai
+		detail.JamAkhir = jamAkhir
+
+		key := tgl.Format("02/01/2006") // dd/mm/yyyy
+		if _, ok := buckets[key]; !ok {
+			buckets[key] = &bucket{}
+		}
+
+		// Simple rule: jam mulai < 12:00 ⇒ pagi, else sore
+		if jamMulai < "12:00:00" {
+			buckets[key].Pagi = append(buckets[key].Pagi, detail)
+		} else {
+			buckets[key].Sore = append(buckets[key].Sore, detail)
+		}
+	}
+	if err = rows.Err(); err != nil { return nil, err }
+
+	if len(buckets) == 0 {
+		return nil, ErrNoShiftData
+	}
+
+	// Convert map → slice terurut (tanggal ascending)
+	locJakarta := time.FixedZone("WIB", 7*3600)
+	layout := "02/01/2006"
+	var result []models.JadwalShiftPerHari
+
+	for tglStr, v := range buckets {
+		t, _ := time.ParseInLocation(layout, tglStr, locJakarta)
+		result = append(result, models.JadwalShiftPerHari{
+			Tanggal:   tglStr,
+			Hari:      namaHariIndo(t.Weekday()),
+			ShiftPagi: v.Pagi,
+			ShiftSore: v.Sore,
+		})
+	}
+
+	// sort manual (karena map acak)
+	sort.Slice(result, func(i, j int) bool {
+		ti, _ := time.ParseInLocation(layout, result[i].Tanggal, locJakarta)
+		tj, _ := time.ParseInLocation(layout, result[j].Tanggal, locJakarta)
+		return ti.Before(tj)
+	})
+
+	return result, nil
+}
+
+// -----------------------------------------------------------------------------
+// util kecil: ubah Weekday Go → nama Indonesia
+// -----------------------------------------------------------------------------
+func namaHariIndo(wd time.Weekday) string {
+	switch wd {
+	case time.Monday:    return "Senin"
+	case time.Tuesday:   return "Selasa"
+	case time.Wednesday: return "Rabu"
+	case time.Thursday:  return "Kamis"
+	case time.Friday:    return "Jumat"
+	case time.Saturday:  return "Sabtu"
+	default:             return "Minggu"
+	}
+}
+
+var ErrNoShiftData = fmt.Errorf("no shift data")
