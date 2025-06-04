@@ -147,8 +147,8 @@ billingInner := map[string]interface{}{
     "id_kunjungan": idKunjungan,
     "id_pasien":    patientID,
     "nama_pasien":  req.Nama,
-    "nomor_rm":     idRM,
-    "poli_tujuan":  namaPoli,
+    "id_rm":     idRM,
+    "nama_poli":  namaPoli,
     "status":       "Belum",
 }
 billingWrapper := map[string]interface{}{
@@ -283,8 +283,8 @@ billingInner := map[string]interface{}{
     "id_kunjungan": idKunjungan,
     "id_pasien":    idPasien,
     "nama_pasien":  req.Nama,
-    "nomor_rm":     idRM,
-    "poli_tujuan":  namaPoli,
+    "id_rm":     idRM,
+    "nama_poli":  namaPoli,
     "status":       "Belum",
 }
 billingWrapper := map[string]interface{}{
