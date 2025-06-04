@@ -522,55 +522,51 @@ func (cc *CMSController) MoveCMS(ctx echo.Context) error {
 		"data":    nil,
 	})
 }
-
-// DuplicateCMSHandler handles PUT /api/management/cms/duplicate?id_cms
 func (cc *CMSController) DuplicateCMSHandler(c echo.Context) error {
-	idCMSStr := c.QueryParam("id_cms")
-	if idCMSStr == "" {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"status":  http.StatusBadRequest,
-			"message": "id_cms parameter is required",
-			"data":    nil,
-		})
+	idStr := c.QueryParam("id_cms")
+	if idStr == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+					"status":  http.StatusBadRequest,
+					"message": "id_cms parameter is required",
+					"data":    nil,
+			})
 	}
-	idCMS, err := strconv.Atoi(idCMSStr)
+	idCMS, err := strconv.Atoi(idStr)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"status":  http.StatusBadRequest,
-			"message": "id_cms must be a number",
-			"data":    nil,
-		})
-	}
-
-	// Ambil user ID dari JWT
-	claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
-	if !ok || claims == nil {
-		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-			"status":  http.StatusUnauthorized,
-			"message": "Invalid token claims",
-			"data":    nil,
-		})
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+					"status":  http.StatusBadRequest,
+					"message": "id_cms must be a number",
+					"data":    nil,
+			})
 	}
 
 	newIDCMS, err := cc.Service.DuplicateCMS(idCMS)
 	if err != nil {
-		if err == services.ErrCMSNotFound {
-			return c.JSON(http.StatusNotFound, map[string]interface{}{
-				"status":  http.StatusNotFound,
-				"message": "CMS not found",
-				"data":    nil,
-			})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-			"status":  http.StatusInternalServerError,
-			"message": "Failed to duplicate CMS: " + err.Error(),
-			"data":    nil,
-		})
+			switch err {
+			case services.ErrCMSNotFound:
+					return c.JSON(http.StatusNotFound, map[string]interface{}{
+							"status":  http.StatusNotFound,
+							"message": "CMS not found",
+							"data":    nil,
+					})
+			case services.ErrCMSNotInactive:
+					return c.JSON(http.StatusBadRequest, map[string]interface{}{
+							"status":  http.StatusBadRequest,
+							"message": "Only inactive CMS can be duplicated",
+							"data":    nil,
+					})
+			default:
+					return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+							"status":  http.StatusInternalServerError,
+							"message": "Failed to duplicate CMS: " + err.Error(),
+							"data":    nil,
+					})
+			}
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"status":  http.StatusOK,
-		"message": "CMS duplicated successfully",
-		"data":    map[string]interface{}{"id_cms": newIDCMS},
+			"status":  http.StatusOK,
+			"message": "CMS duplicated successfully",
+			"data":    map[string]interface{}{"new_id_cms": newIDCMS},
 	})
 }
