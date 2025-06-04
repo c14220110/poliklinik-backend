@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -523,46 +522,58 @@ func (cc *CMSController) MoveCMS(ctx echo.Context) error {
 		"data":    nil,
 	})
 }
-
-// DuplicateCMSHandler handles PUT request to duplicate a CMS record.
 func (cc *CMSController) DuplicateCMSHandler(c echo.Context) error {
+	// -------- query param ----------
 	idCMSStr := c.QueryParam("id_cms")
 	if idCMSStr == "" {
 		return c.JSON(http.StatusBadRequest, echo.Map{
 			"status":  http.StatusBadRequest,
-			"message": "id_cms query parameter is required",
+			"message": "id_cms is required",
 			"data":    nil,
 		})
 	}
-
 	idCMS, err := strconv.Atoi(idCMSStr)
 	if err != nil || idCMS <= 0 {
 		return c.JSON(http.StatusBadRequest, echo.Map{
 			"status":  http.StatusBadRequest,
-			"message": "id_cms must be a positive integer",
+			"message": "invalid id_cms (must be positive integer)",
 			"data":    nil,
 		})
 	}
 
-	newIDCMS, err := cc.Service.DuplicateCMS(idCMS)
+	// -------- JWT claims ----------
+	claims, ok := c.Get(string(middlewares.ContextKeyClaims)).(*utils.Claims)
+	if !ok || claims == nil {
+		return c.JSON(http.StatusUnauthorized, echo.Map{
+			"status":  http.StatusUnauthorized,
+			"message": "Invalid or missing token claims",
+			"data":    nil,
+		})
+	}
+	idKaryawan := claims.IDKaryawan // hanya untuk audit trail (optional)
+
+	// -------- service call ----------
+	newID, err := cc.Service.DuplicateCMS(idCMS, idKaryawan)
 	if err != nil {
-		if err.Error() == fmt.Sprintf("CMS with id_cms %d not found or deleted", idCMS) {
+		switch err {
+		case services.ErrCMSNotFound:
 			return c.JSON(http.StatusNotFound, echo.Map{
 				"status":  http.StatusNotFound,
-				"message": "CMS not found or deleted",
+				"message": "CMS tidak ditemukan",
+				"data":    nil,
+			})
+		default:
+			return c.JSON(http.StatusInternalServerError, echo.Map{
+				"status":  http.StatusInternalServerError,
+				"message": "Failed to duplicate CMS: " + err.Error(),
 				"data":    nil,
 			})
 		}
-		return c.JSON(http.StatusInternalServerError, echo.Map{
-			"status":  http.StatusInternalServerError,
-			"message": "Failed to duplicate CMS: " + err.Error(),
-			"data":    nil,
-		})
 	}
 
 	return c.JSON(http.StatusOK, echo.Map{
 		"status":  http.StatusOK,
-		"message": "CMS duplicated successfully",
-		"data":    map[string]int64{"new_id_cms": newIDCMS},
+		"message": "CMS duplicated",
+		"data":    echo.Map{"id_cms_baru": newID},
 	})
 }
