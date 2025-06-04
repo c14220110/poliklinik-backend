@@ -379,3 +379,26 @@ func (pc *PoliklinikController) GetRuangList(c echo.Context) error {
 		"data":    list,
 	})
 }
+
+
+// GET /pic?q=some_name&limit=20&page=2
+func (pc *PoliklinikController) GetPICList(c echo.Context) error {
+	q        := c.QueryParam("q")                    // search nama LIKE
+	limit, _ := strconv.Atoi(c.QueryParam("limit")) // default di-handle service
+	page, _  := strconv.Atoi(c.QueryParam("page"))  // halaman mulai 1
+
+	list, err := pc.Service.GetPICList(q, limit, page)
+	if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+					"status":  http.StatusInternalServerError,
+					"message": "Failed to retrieve PIC list: " + err.Error(),
+					"data":    nil,
+			})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+			"status":  http.StatusOK,
+			"message": "PIC list retrieved successfully",
+			"data":    list,
+	})
+}

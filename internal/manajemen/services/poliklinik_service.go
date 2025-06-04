@@ -314,3 +314,60 @@ func (ps *PoliklinikService) GetRuangListByPoliID(idPoli int) ([]map[string]inte
 
 	return list, nil
 }
+
+// GetPICList menampilkan daftar PIC dengan pencarian nama + pagination.
+// • q     : string pencarian, case-insensitive, boleh kosong
+// • limit : jumlah baris per halaman (default 20, max 100)
+// • page  : halaman dimulai dari 1 (default 1)
+func (ps *PoliklinikService) GetPICList(q string, limit, page int) ([]map[string]interface{}, error) {
+	if limit <= 0 { limit = 20 }
+	if limit > 100 { limit = 100 }
+	if page  <= 0 { page  = 1  }
+	offset := (page - 1) * limit
+
+	baseQuery := `
+			SELECT DISTINCT k.id_karyawan, k.nama, k.nik
+			FROM Karyawan k
+			JOIN Detail_Role_Karyawan drk ON k.id_karyawan = drk.id_karyawan
+			WHERE k.deleted_at IS NULL
+			AND drk.id_role IN (2,3)
+	`
+	conds  := []string{}
+	params := []interface{}{}
+
+	if q != "" {
+			conds  = append(conds, "LOWER(k.nama) LIKE ?")
+			params = append(params, "%"+strings.ToLower(q)+"%")
+	}
+
+	query := baseQuery
+	if len(conds) > 0 {
+			query += " AND " + strings.Join(conds, " AND ")
+	}
+	query += " ORDER BY k.id_karyawan"
+	query += fmt.Sprintf(" LIMIT %d OFFSETautomatically %d", limit, offset)
+
+	rows, err := ps.DB.Query(query, params...)
+	if err != nil {
+			return nil, fmt.Errorf("query error: %v", err)
+	}
+	defer rows.Close()
+
+	var list []map[string]interface{}
+	for rows.Next() {
+			var (
+					id   int
+					nama string
+					nik  string
+			)
+			if err := rows.Scan(&id, &nama, &nik); err != nil {
+					return nil, fmt.Errorf("scan error: %v", err)
+			}
+			list = append(list, map[string]interface{}{
+					"id_karyawan": id,
+					"nama":        nama,
+					"nik":         nik,
+			})
+	}
+	return list, nil
+}
