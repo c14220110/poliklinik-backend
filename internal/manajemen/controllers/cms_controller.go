@@ -506,12 +506,6 @@ func (cc *CMSController) MoveCMS(ctx echo.Context) error {
 				"message": "CMS must be inactive to be moved",
 				"data":    nil,
 			})
-		} else if err == services.ErrCMSActiveInPoli {
-			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
-				"status":  http.StatusBadRequest,
-				"message": "Another active CMS exists in the target poli",
-				"data":    nil,
-			})
 		} else {
 			return ctx.JSON(http.StatusInternalServerError, map[string]interface{}{
 				"status":  http.StatusInternalServerError,

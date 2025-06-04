@@ -1150,19 +1150,16 @@ func (svc *CMSService) MoveCMS(idCMS, newIDPoli int) error {
 		return ErrCMSNotInactive
 	}
 
-	// 2. Cek apakah ada CMS aktif di poli tujuan
-	var activeCMS int
-	err = tx.QueryRow(
-		`SELECT id_cms FROM CMS WHERE id_poli = ? AND deleted_at IS NULL LIMIT 1`,
-		newIDPoli,
-	).Scan(&activeCMS)
-	if err == nil {
-		return ErrCMSActiveInPoli
-	} else if err != sql.ErrNoRows {
+	// 2. Soft delete semua CMS aktif di poli target
+	_, err = tx.Exec(
+		`UPDATE CMS SET deleted_at = ?, updated_at = ? WHERE id_poli = ? AND deleted_at IS NULL`,
+		now, now, newIDPoli,
+	)
+	if err != nil {
 		return err
 	}
 
-	// 3. Update id_poli pada CMS
+	// 3. Perbarui id_poli pada CMS yang dipindahkan
 	_, err = tx.Exec(
 		`UPDATE CMS SET id_poli = ?, updated_at = ? WHERE id_cms = ?`,
 		newIDPoli, now, idCMS,
