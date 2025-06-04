@@ -23,13 +23,33 @@ type KomposisiRequest struct {
 }
 
 
+// type ResepSection struct {
+// 	IDSection    int     `json:"id_section"`
+// 	IDResep      int     `json:"id_resep"`
+// 	SectionType  int     `json:"section_type"`
+// 	NamaRacikan  *string `json:"nama_racikan"`
+// 	Jumlah       int     `json:"jumlah"`
+// 	JenisKemasan *string `json:"jenis_kemasan"`
+// 	Instruksi    string  `json:"instruksi"`
+// 	HargaTotal   float64 `json:"harga_total"`
+// }
+
+type KomposisiDetail struct {
+    NamaObat    string  `json:"nama_obat"`
+    Dosis       int     `json:"dosis"`
+    Satuan      string  `json:"satuan"`
+    HargaSatuan float64 `json:"harga_satuan"`
+}
+
+// ResepSection represents a section of a prescription
 type ResepSection struct {
-	IDSection    int     `json:"id_section"`
-	IDResep      int     `json:"id_resep"`
-	SectionType  int     `json:"section_type"`
-	NamaRacikan  *string `json:"nama_racikan"`
-	Jumlah       int     `json:"jumlah"`
-	JenisKemasan *string `json:"jenis_kemasan"`
-	Instruksi    string  `json:"instruksi"`
-	HargaTotal   float64 `json:"harga_total"`
+    IDSection    int               `json:"id_section"`
+    IDResep      int               `json:"id_resep"`
+    SectionType  int               `json:"section_type"`
+    NamaRacikan  *string           `json:"nama_racikan"`
+    Jumlah       int               `json:"jumlah"`
+    JenisKemasan *string           `json:"jenis_kemasan"`
+    Instruksi    string            `json:"instruksi"`
+    HargaTotal   float64           `json:"harga_total"`
+    Komposisi    []KomposisiDetail `json:"komposisi,omitempty"`
 }

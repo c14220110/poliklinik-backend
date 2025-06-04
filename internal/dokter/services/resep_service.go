@@ -453,31 +453,54 @@ func (s *ResepService) GetICD10List(q string, limit, page int) ([]map[string]int
 }
 
 func (s *ResepService) GetResepDetails(idResep int) ([]models.ResepSection, error) {
-	var details []models.ResepSection
-	rows, err := s.DB.Query(`
-		SELECT id_section, id_resep, section_type, nama_racikan, jumlah, jenis_kemasan, instruksi, harga_total
-		FROM Resep_Section
-		WHERE id_resep = ?`, idResep)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+    var details []models.ResepSection
+    rows, err := s.DB.Query(`
+        SELECT id_section, id_resep, section_type, nama_racikan, jumlah, jenis_kemasan, instruksi, harga_total
+        FROM Resep_Section
+        WHERE id_resep = ?`, idResep)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
 
-	for rows.Next() {
-		var detail models.ResepSection
-		err := rows.Scan(&detail.IDSection, &detail.IDResep, &detail.SectionType, &detail.NamaRacikan, 
-			&detail.Jumlah, &detail.JenisKemasan, &detail.Instruksi, &detail.HargaTotal)
-		if err != nil {
-			return nil, err
-		}
-		details = append(details, detail)
-	}
+    for rows.Next() {
+        var detail models.ResepSection
+        err := rows.Scan(&detail.IDSection, &detail.IDResep, &detail.SectionType, &detail.NamaRacikan, 
+            &detail.Jumlah, &detail.JenisKemasan, &detail.Instruksi, &detail.HargaTotal)
+        if err != nil {
+            return nil, err
+        }
 
-	if len(details) == 0 {
-		return nil, ErrResepNotFound
-	}
+        // Fetch composition details for section_type = 2 (obat racikan)
+        if detail.SectionType == 2 {
+            komposisiRows, err := s.DB.Query(`
+                SELECT o.nama, k.dosis, o.satuan, o.harga_satuan
+                FROM Komposisi k
+                JOIN Obat o ON k.id_obat = o.id_obat
+                WHERE k.id_section = ?`, detail.IDSection)
+            if err != nil {
+                return nil, err
+            }
+            defer komposisiRows.Close()
 
-	return details, nil
+            detail.Komposisi = []models.KomposisiDetail{}
+            for komposisiRows.Next() {
+                var kom models.KomposisiDetail
+                err := komposisiRows.Scan(&kom.NamaObat, &kom.Dosis, &kom.Satuan, &kom.HargaSatuan)
+                if err != nil {
+                    return nil, err
+                }
+                detail.Komposisi = append(detail.Komposisi, kom)
+            }
+        }
+
+        details = append(details, detail)
+    }
+
+    if len(details) == 0 {
+        return nil, ErrResepNotFound
+    }
+
+    return details, nil
 }
-
 var ErrResepNotFound = errors.New("resep not found")
