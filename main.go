@@ -31,6 +31,10 @@ func main() {
 
 	// Inisialisasi koneksi database
 	db := mariadb.Connect()
+	// Tambahkan konfigurasi connection pool
+	db.SetMaxOpenConns(25)          // Batas maksimum koneksi terbuka
+	db.SetMaxIdleConns(25)          // Batas maksimum koneksi idle
+	db.SetConnMaxLifetime(5 * time.Minute) // Waktu hidup maksimum koneksi
 
 	// Inisialisasi Echo
 	e := echo.New()

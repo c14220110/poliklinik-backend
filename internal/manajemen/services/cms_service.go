@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -1175,20 +1176,21 @@ var (
 	ErrCMSNotInactive  = errors.New("cms must be inactive to be moved")
 	ErrCMSActiveInPoli = errors.New("another active cms exists in the target poli")
 )
-
 func (svc *CMSService) DuplicateCMS(idCMS int) (int64, error) {
 	// Start transaction
 	tx, err := svc.DB.Begin()
 	if err != nil {
-		return 0, fmt.Errorf("failed to start transaction: %v", err)
+			return 0, fmt.Errorf("failed to start transaction: %v", err)
 	}
 
 	// Ensure rollback if an error occurs
 	defer func() {
-		if err != nil {
-			tx.Rollback()
-		}
+			if err != nil {
+					tx.Rollback()
+			}
 	}()
+
+	slog.Info("Starting DuplicateCMS", "idCMS", idCMS)
 
 	// Validate original CMS
 	var idPoli int
@@ -1196,130 +1198,138 @@ func (svc *CMSService) DuplicateCMS(idCMS int) (int64, error) {
 	var title string
 	err = tx.QueryRow("SELECT id_poli, deleted_at, title FROM CMS WHERE id_cms = ?", idCMS).Scan(&idPoli, &deletedAt, &title)
 	if err == sql.ErrNoRows {
-		return 0, ErrCMSNotFound
+			return 0, ErrCMSNotFound
 	}
 	if err != nil {
-		return 0, fmt.Errorf("failed to query CMS: %v", err)
+			return 0, fmt.Errorf("failed to query CMS: %v", err)
 	}
 	if !deletedAt.Valid {
-		return 0, ErrCMSNotInactive
+			return 0, ErrCMSNotInactive
 	}
 
 	// Create new CMS with immediate soft-delete
 	res, err := tx.Exec("INSERT INTO CMS (id_poli, title, created_at, updated_at, deleted_at) VALUES (?, ?, NOW(), NOW(), NOW())", idPoli, title)
 	if err != nil {
-		return 0, fmt.Errorf("failed to create new CMS: %v", err)
+			return 0, fmt.Errorf("failed to create new CMS: %v", err)
 	}
 	newIDCMS, err := res.LastInsertId()
 	if err != nil {
-		return 0, fmt.Errorf("failed to get new CMS ID: %v", err)
+			return 0, fmt.Errorf("failed to get new CMS ID: %v", err)
 	}
+	slog.Info("Created new CMS", "newIDCMS", newIDCMS)
 
 	// Duplicate active sections
 	sectionMap := make(map[int64]int64)
 	rows, err := tx.Query("SELECT id_section, title FROM CMS_Section WHERE id_cms = ? AND deleted_at IS NULL", idCMS)
 	if err != nil {
-		return 0, fmt.Errorf("failed to query sections: %v", err)
+			return 0, fmt.Errorf("failed to query sections: %v", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var oldIDSection int64
-		var sectionTitle string
-		if err := rows.Scan(&oldIDSection, &sectionTitle); err != nil {
-			return 0, fmt.Errorf("failed to scan section: %v", err)
-		}
-		res, err := tx.Exec("INSERT INTO CMS_Section (id_cms, title) VALUES (?, ?)", newIDCMS, sectionTitle)
-		if err != nil {
-			return 0, fmt.Errorf("failed to duplicate section: %v", err)
-		}
-		newIDSection, err := res.LastInsertId()
-		if err != nil {
-			return 0, fmt.Errorf("failed to get new section ID: %v", err)
-		}
-		sectionMap[oldIDSection] = newIDSection
+			var oldIDSection int64
+			var sectionTitle string
+			if err := rows.Scan(&oldIDSection, &sectionTitle); err != nil {
+					return 0, fmt.Errorf("failed to scan section: %v", err)
+			}
+			res, err := tx.Exec("INSERT INTO CMS_Section (id_cms, title) VALUES (?, ?)", newIDCMS, sectionTitle)
+			if err != nil {
+					return 0, fmt.Errorf("failed to duplicate section: %v", err)
+			}
+			newIDSection, err := res.LastInsertId()
+			if err != nil {
+					return 0, fmt.Errorf("failed to get new section ID: %v", err)
+			}
+			sectionMap[oldIDSection] = newIDSection
 	}
+	slog.Info("Duplicated sections", "count", len(sectionMap))
 
 	// Duplicate active subsections
 	subsectionMap := make(map[int64]int64)
 	for oldIDSection, newIDSection := range sectionMap {
-		subRows, err := tx.Query("SELECT id_subsection, title FROM CMS_Subsection WHERE id_section = ? AND deleted_at IS NULL", oldIDSection)
-		if err != nil {
-			return 0, fmt.Errorf("failed to query subsections: %v", err)
-		}
-		defer subRows.Close()
-		for subRows.Next() {
-			var oldIDSubsection int64
-			var subTitle string
-			if err := subRows.Scan(&oldIDSubsection, &subTitle); err != nil {
-				return 0, fmt.Errorf("failed to scan subsection: %v", err)
-			}
-			res, err := tx.Exec("INSERT INTO CMS_Subsection (id_section, title) VALUES (?, ?)", newIDSection, subTitle)
+			subRows, err := tx.Query("SELECT id_subsection, title FROM CMS_Subsection WHERE id_section = ? AND deleted_at IS NULL", oldIDSection)
 			if err != nil {
-				return 0, fmt.Errorf("failed to duplicate subsection: %v", err)
+					return 0, fmt.Errorf("failed to query subsections: %v", err)
 			}
-			newIDSubsection, err := res.LastInsertId()
-			if err != nil {
-				return 0, fmt.Errorf("failed to get new subsection ID: %v", err)
+			for subRows.Next() {
+					var oldIDSubsection int64
+					var subTitle string
+					if err := subRows.Scan(&oldIDSubsection, &subTitle); err != nil {
+							subRows.Close()
+							return 0, fmt.Errorf("failed to scan subsection: %v", err)
+					}
+					res, err := tx.Exec("INSERT INTO CMS_Subsection (id_section, title) VALUES (?, ?)", newIDSection, subTitle)
+					if err != nil {
+							subRows.Close()
+							return 0, fmt.Errorf("failed to duplicate subsection: %v", err)
+					}
+					newIDSubsection, err := res.LastInsertId()
+					if err != nil {
+							subRows.Close()
+							return 0, fmt.Errorf("failed to get new subsection ID: %v", err)
+					}
+					subsectionMap[oldIDSubsection] = newIDSubsection
 			}
-			subsectionMap[oldIDSubsection] = newIDSubsection
-		}
+			subRows.Close() // Tutup rows setelah selesai
 	}
+	slog.Info("Duplicated subsections", "count", len(subsectionMap))
 
 	// Duplicate active elements
 	elemRows, err := tx.Query(`
-		SELECT id_cms_elements, id_section, id_subsection, element_label, element_name, element_options, element_hint, is_required
-		FROM CMS_Elements
-		WHERE (id_section IN (SELECT id_section FROM CMS_Section WHERE id_cms = ? AND deleted_at IS NULL)
-			OR id_subsection IN (SELECT id_subsection FROM CMS_Subsection WHERE id_section IN (SELECT id_section FROM CMS_Section WHERE id_cms = ? AND deleted_at IS NULL) AND deleted_at IS NULL))
-			AND deleted_at IS NULL`, idCMS, idCMS)
+			SELECT id_cms_elements, id_section, id_subsection, element_label, element_name, element_options, element_hint, is_required
+			FROM CMS_Elements
+			WHERE (id_section IN (SELECT id_section FROM CMS_Section WHERE id_cms = ? AND deleted_at IS NULL)
+					OR id_subsection IN (SELECT id_subsection FROM CMS_Subsection WHERE id_section IN (SELECT id_section FROM CMS_Section WHERE id_cms = ? AND deleted_at IS NULL) AND deleted_at IS NULL))
+					AND deleted_at IS NULL`, idCMS, idCMS)
 	if err != nil {
-		return 0, fmt.Errorf("failed to query elements: %v", err)
+			return 0, fmt.Errorf("failed to query elements: %v", err)
 	}
 	defer elemRows.Close()
 	for elemRows.Next() {
-		var oldIDCMSElements int64
-		var oldIDSection int64
-		var oldIDSubsection sql.NullInt64
-		var label, name, hint string
-		var options sql.NullString
-		var isRequired bool
-		if err := elemRows.Scan(&oldIDCMSElements, &oldIDSection, &oldIDSubsection, &label, &name, &options, &hint, &isRequired); err != nil {
-			return 0, fmt.Errorf("failed to scan element: %v", err)
-		}
-		newIDSection := sectionMap[oldIDSection]
-		var newIDSubsection interface{}
-		if oldIDSubsection.Valid {
-			newIDSubsection = subsectionMap[oldIDSubsection.Int64]
-		} else {
-			newIDSubsection = nil
-		}
-		res, err := tx.Exec(`
-			INSERT INTO CMS_Elements (id_section, id_subsection, element_label, element_name, element_options, element_hint, is_required)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, newIDSection, newIDSubsection, label, name, options, hint, isRequired)
-		if err != nil {
-			return 0, fmt.Errorf("failed to duplicate element: %v", err)
-		}
-		newIDCMSElements, err := res.LastInsertId()
-		if err != nil {
-			return 0, fmt.Errorf("failed to get new element ID: %v", err)
-		}
+			var oldIDCMSElements int64
+			var oldIDSection int64
+			var oldIDSubsection sql.NullInt64
+			var label, name, hint string
+			var options sql.NullString
+			var isRequired bool
+			if err := elemRows.Scan(&oldIDCMSElements, &oldIDSection, &oldIDSubsection, &label, &name, &options, &hint, &isRequired); err != nil {
+					return 0, fmt.Errorf("failed to scan element: %v", err)
+			}
+			newIDSection := sectionMap[oldIDSection]
+			var newIDSubsection interface{}
+			if oldIDSubsection.Valid {
+					newIDSubsection = subsectionMap[oldIDSubsection.Int64]
+			} else {
+					newIDSubsection = nil
+			}
+			res, err := tx.Exec(`
+					INSERT INTO CMS_Elements (id_section, id_subsection, element_label, element_name, element_options, element_hint, is_required)
+					VALUES (?, ?, ?, ?, ?, ?, ?)`, newIDSection, newIDSubsection, label, name, options, hint, isRequired)
+			if err != nil {
+					return 0, fmt.Errorf("failed to duplicate element: %v", err)
+			}
+			newIDCMSElements, err := res.LastInsertId()
+			if err != nil {
+					return 0, fmt.Errorf("failed to get new element ID: %v", err)
+			}
 
-		// Duplicate Detail_Element
-		var idElement int
-		err = tx.QueryRow("SELECT id_element FROM Detail_Element WHERE id_cms_elements = ?", oldIDCMSElements).Scan(&idElement)
-		if err != nil {
-			return 0, fmt.Errorf("failed to query detail element: %v", err)
-		}
-		_, err = tx.Exec("INSERT INTO Detail_Element (id_element, id_cms_elements) VALUES (?, ?)", idElement, newIDCMSElements)
-		if err != nil {
-			return 0, fmt.Errorf("failed to duplicate detail element: %v", err)
-		}
+			// Duplicate Detail_Element
+			var idElement int
+			err = tx.QueryRow("SELECT id_element FROM Detail_Element WHERE id_cms_elements = ?", oldIDCMSElements).Scan(&idElement)
+			if err != nil {
+					return 0, fmt.Errorf("failed to query detail element: %v", err)
+			}
+			_, err = tx.Exec("INSERT INTO Detail_Element (id_element, id_cms_elements) VALUES (?, ?)", idElement, newIDCMSElements)
+			if err != nil {
+					return 0, fmt.Errorf("failed to duplicate detail element: %v", err)
+			}
 	}
+	slog.Info("Duplicated elements")
 
 	// Commit transaction
 	if err = tx.Commit(); err != nil {
-		return 0, fmt.Errorf("failed to commit transaction: %v", err)
+			return 0, fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
+	slog.Info("Successfully duplicated CMS", "newIDCMS", newIDCMS)
 	return newIDCMS, nil
 }
