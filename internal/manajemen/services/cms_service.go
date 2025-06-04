@@ -1176,9 +1176,9 @@ var (
 	ErrCMSActiveInPoli = errors.New("another active cms exists in the target poli")
 )
 
-func (s *CMSService) DuplicateCMS(idCMS int) (int64, error) {
+func (svc *CMSService) DuplicateCMS(idCMS int) (int64, error) {
 	// Start transaction
-	tx, err := s.DB.Begin()
+	tx, err := svc.DB.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("failed to start transaction: %v", err)
 	}
