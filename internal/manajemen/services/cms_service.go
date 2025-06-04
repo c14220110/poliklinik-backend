@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -1178,11 +1179,19 @@ var (
 // DuplicateCMS menduplikasi seluruh struktur CMS (section, subsection, element, detail_element)
 // hanya untuk record yang belum di-soft-delete (deleted_at IS NULL).
 func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
+	start := time.Now()
 	tx, err := svc.DB.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer func() { if err != nil { tx.Rollback() } }()
+	if err != nil { return 0, err }
+	defer func() {
+			if err != nil {
+					tx.Rollback()
+			}
+			duration := time.Since(start)
+			log.Printf("DuplicateCMS took %v", duration)
+	}()
+	
+	stats := svc.DB.Stats()
+	log.Printf("Open: %d, InUse: %d, Idle: %d", stats.OpenConnections, stats.InUse, stats.Idle)
 
 	// ----------------------------------------------------------------
 	// 1) Ambil header original
