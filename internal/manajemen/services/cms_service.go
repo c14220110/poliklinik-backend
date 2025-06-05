@@ -1,12 +1,10 @@
 package services
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -1178,36 +1176,11 @@ var (
 	ErrCMSActiveInPoli = errors.New("another active cms exists in the target poli")
 )
 
-
-// DuplicateCMS duplicates a CMS including its sections, subsections, and elements.
+// DuplicateCMS duplicates an existing CMS including its sections, subsections, and elements.
 func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
-	const maxRetries = 3
-	const retryDelay = 1 * time.Second
-	const queryTimeout = 10 * time.Second
-
-	// Retry query function for SELECT operations
-	retryQuery := func(query string, args ...interface{}) (*sql.Rows, error) {
-		for attempt := 0; attempt < maxRetries; attempt++ {
-			ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
-			defer cancel()
-			rows, err := svc.DB.QueryContext(ctx, query, args...)
-			if err == nil {
-				return rows, nil
-			}
-			log.Printf("Gagal menjalankan query: %s, args: %v, error: %v", query, args, err)
-			if strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection") {
-				time.Sleep(retryDelay)
-				continue
-			}
-			return nil, err
-		}
-		return nil, fmt.Errorf("gagal setelah %d percobaan", maxRetries)
-	}
-
-	// Start transaction
 	tx, err := svc.DB.Begin()
 	if err != nil {
-		return 0, fmt.Errorf("gagal memulai transaksi: %w", err)
+		return 0, err
 	}
 	defer func() {
 		if err != nil {
@@ -1215,105 +1188,117 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 		}
 	}()
 
-	// Retrieve original CMS header
-	var idPoli int64
-	var title string
-	err = tx.QueryRow(`SELECT id_poli, title FROM CMS WHERE id_cms = ? AND deleted_at IS NULL`, origCMSID).Scan(&idPoli, &title)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return 0, fmt.Errorf("CMS tidak ditemukan: %w", err)
-		}
-		return 0, fmt.Errorf("gagal mengambil CMS asli: %w", err)
-	}
-
 	now := time.Now()
 
-	// Insert new CMS header
-	res, err := tx.Exec(`INSERT INTO CMS (id_poli, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-		idPoli, title+" Duplikat", now, now)
-	if err != nil {
-		return 0, fmt.Errorf("gagal menyisipkan CMS baru: %w", err)
-	}
-	newCMSID, err := res.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("gagal mendapatkan ID CMS baru: %w", err)
+	// 1) Pastikan CMS asli ada dan ambil datanya
+	var idPoli int
+	var title string
+	if err = tx.QueryRow(
+		`SELECT id_poli, title FROM CMS WHERE id_cms = ? AND deleted_at IS NULL`,
+		origCMSID).Scan(&idPoli, &title); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("CMS tidak ditemukan")
+		}
+		return 0, err
 	}
 
-	// Duplicate sections
+	// 2) Buat header CMS baru
+	res, err := tx.Exec(
+		`INSERT INTO CMS (id_poli, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		idPoli, title+" Duplikat", now, now)
+	if err != nil {
+		return 0, err
+	}
+	newCMSID, _ := res.LastInsertId()
+
+	// 3) Duplikasi sections
+	rows, err := tx.Query(
+		`SELECT id_section, title FROM CMS_Section WHERE id_cms = ? AND deleted_at IS NULL`,
+		origCMSID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
 	type secMap struct {
 		oldID int64
 		newID int64
 	}
 	var sections []secMap
 
-	rowsSec, err := retryQuery(`SELECT id_section, title FROM CMS_Section WHERE id_cms = ? AND deleted_at IS NULL`, origCMSID)
-	if err != nil {
-		return 0, fmt.Errorf("gagal mengambil section: %w", err)
-	}
-	defer rowsSec.Close()
-
-	for rowsSec.Next() {
+	for rows.Next() {
 		var oldID int64
 		var secTitle string
-		if err := rowsSec.Scan(&oldID, &secTitle); err != nil {
-			return 0, fmt.Errorf("gagal membaca section: %w", err)
+		if err = rows.Scan(&oldID, &secTitle); err != nil {
+			return 0, err
 		}
-		r, err := tx.Exec(`INSERT INTO CMS_Section (id_cms, title) VALUES (?, ?)`, newCMSID, secTitle)
+
+		rSec, err := tx.Exec(
+			`INSERT INTO CMS_Section (id_cms, title) VALUES (?, ?)`,
+			newCMSID, secTitle)
 		if err != nil {
-			return 0, fmt.Errorf("gagal menduplikasi section: %w", err)
+			return 0, err
 		}
-		newID, err := r.LastInsertId()
-		if err != nil {
-			return 0, fmt.Errorf("gagal mendapatkan ID section baru: %w", err)
-		}
+		newID, _ := rSec.LastInsertId()
 		sections = append(sections, secMap{oldID: oldID, newID: newID})
 
-		// Duplicate elements directly under the section
-		if err := duplicateElements(tx, oldID, nil, newID, nil); err != nil {
-			return 0, fmt.Errorf("gagal menduplikasi elements di section: %w", err)
+		// Duplikasi elemen langsung di section
+		if err = duplicateElements(tx, oldID, nil, newID, nil); err != nil {
+			return 0, err
 		}
 	}
 
-	// Duplicate subsections and their elements
+	// 4) Duplikasi subsections dan elemennya
 	for _, s := range sections {
-		rowsSub, err := retryQuery(`SELECT id_subsection, title FROM CMS_Subsection WHERE id_section = ? AND deleted_at IS NULL`, s.oldID)
+		rowsSub, err := tx.Query(
+			`SELECT id_subsection, title FROM CMS_Subsection WHERE id_section = ? AND deleted_at IS NULL`,
+			s.oldID)
 		if err != nil {
-			return 0, fmt.Errorf("gagal mengambil subsection: %w", err)
+			return 0, err
 		}
 		defer rowsSub.Close()
 
 		for rowsSub.Next() {
 			var oldSubID int64
 			var subTitle string
-			if err := rowsSub.Scan(&oldSubID, &subTitle); err != nil {
-				return 0, fmt.Errorf("gagal membaca subsection: %w", err)
-			}
-			res, err := tx.Exec(`INSERT INTO CMS_Subsection (id_section, title) VALUES (?, ?)`, s.newID, subTitle)
-			if err != nil {
-				return 0, fmt.Errorf("gagal menduplikasi subsection: %w", err)
-			}
-			newSubID, err := res.LastInsertId()
-			if err != nil {
-				return 0, fmt.Errorf("gagal mendapatkan ID subsection baru: %w", err)
+			if err = rowsSub.Scan(&oldSubID, &subTitle); err != nil {
+				return 0, err
 			}
 
-			// Duplicate elements under the subsection
-			if err := duplicateElements(tx, s.oldID, &oldSubID, s.newID, &newSubID); err != nil {
-				return 0, fmt.Errorf("gagal menduplikasi elements di subsection: %w", err)
+			rSub, err := tx.Exec(
+				`INSERT INTO CMS_Subsection (id_section, title) VALUES (?, ?)`,
+				s.newID, subTitle)
+			if err != nil {
+				return 0, err
+			}
+			newSubID, _ := rSub.LastInsertId()
+
+			// Duplikasi elemen di subsection
+			if err = duplicateElements(tx, s.oldID, &oldSubID, s.newID, &newSubID); err != nil {
+				return 0, err
 			}
 		}
 	}
 
-	// Commit transaction
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("gagal mengkomit transaksi: %w", err)
+	// 5) Audit trail (opsional, sesuaikan dengan kebutuhan)
+	if _, err = tx.Exec(
+		`INSERT INTO Management_CMS (id_management, id_cms, created_by, updated_by)
+		 VALUES (?, ?, ?, ?)`,
+		0, newCMSID, idKaryawan, idKaryawan); err != nil {
+		return 0, err
 	}
 
-	return newCMSID, nil
+	return newCMSID, tx.Commit()
 }
 
-// duplicateElements duplicates elements for a section or subsection.
-func duplicateElements(tx *sql.Tx, origSectionID int64, origSubID *int64, newSectionID int64, newSubID *int64) error {
+// duplicateElements menyalin elemen dari section/subsection asli ke yang baru
+func duplicateElements(
+	tx *sql.Tx,
+	origSectionID int64,
+	origSubID *int64,
+	newSectionID int64,
+	newSubID *int64,
+) error {
 	var subCond string
 	var args []interface{}
 	if origSubID == nil {
@@ -1323,14 +1308,17 @@ func duplicateElements(tx *sql.Tx, origSectionID int64, origSubID *int64, newSec
 		subCond = "AND e.id_subsection = ?"
 		args = []interface{}{origSectionID, *origSubID}
 	}
-	query := fmt.Sprintf(`SELECT e.id_cms_elements, e.element_label, e.element_name, e.element_options, 
-	                             e.element_hint, e.is_required, d.id_element
-	                      FROM CMS_Elements e
-	                      JOIN Detail_Element d ON e.id_cms_elements = d.id_cms_elements
-	                      WHERE e.id_section = ? %s AND e.deleted_at IS NULL`, subCond)
+
+	query := fmt.Sprintf(`
+		SELECT e.id_cms_elements, e.element_label, e.element_name, e.element_options,
+		       e.element_hint, e.is_required, d.id_element
+		FROM CMS_Elements e
+		JOIN Detail_Element d ON e.id_cms_elements = d.id_cms_elements
+		WHERE e.id_section = ? %s AND e.deleted_at IS NULL`, subCond)
+
 	rows, err := tx.Query(query, args...)
 	if err != nil {
-		return fmt.Errorf("gagal mengambil elements: %w", err)
+		return err
 	}
 	defer rows.Close()
 
@@ -1339,31 +1327,30 @@ func duplicateElements(tx *sql.Tx, origSectionID int64, origSubID *int64, newSec
 		var label, name, hint string
 		var options []byte
 		var isRequired bool
-		if err := rows.Scan(&oldID, &label, &name, &options, &hint, &isRequired, &idElement); err != nil {
-			return fmt.Errorf("gagal membaca element: %w", err)
+		if err = rows.Scan(&oldID, &label, &name, &options, &hint, &isRequired, &idElement); err != nil {
+			return err
 		}
 
-		// Insert new CMS_Elements
 		var newSubIDVal interface{}
 		if newSubID != nil {
 			newSubIDVal = *newSubID
 		}
-		res, err := tx.Exec(`INSERT INTO CMS_Elements (id_section, id_subsection, element_label, element_name, 
-		                                              element_options, element_hint, is_required)
-		                     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+
+		rE, err := tx.Exec(`
+			INSERT INTO CMS_Elements
+			  (id_section, id_subsection, element_label, element_name,
+			   element_options, element_hint, is_required)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			newSectionID, newSubIDVal, label, name, options, hint, isRequired)
 		if err != nil {
-			return fmt.Errorf("gagal menduplikasi element: %w", err)
+			return err
 		}
-		newID, err := res.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("gagal mendapatkan ID element baru: %w", err)
-		}
+		newID, _ := rE.LastInsertId()
 
-		// Insert into Detail_Element
-		_, err = tx.Exec(`INSERT INTO Detail_Element (id_element, id_cms_elements) VALUES (?, ?)`, idElement, newID)
-		if err != nil {
-			return fmt.Errorf("gagal menyisipkan Detail_Element: %w", err)
+		if _, err = tx.Exec(
+			`INSERT INTO Detail_Element (id_element, id_cms_elements) VALUES (?, ?)`,
+			idElement, newID); err != nil {
+			return err
 		}
 	}
 	return nil
