@@ -1176,152 +1176,159 @@ var (
 	ErrCMSNotInactive  = errors.New("cms must be inactive to be moved")
 	ErrCMSActiveInPoli = errors.New("another active cms exists in the target poli")
 )
+
 // DuplicateCMS menduplikasi seluruh struktur CMS (section, subsection, element, detail_element)
-// hanya untuk record yang belum di-soft-delete (deleted_at IS NULL).
+// hanya untuk rekaman yang belum dihapus secara lunak (deleted_at IS NULL).
 func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
+	// Mulai menghitung waktu transaksi
 	start := time.Now()
+
+	// Memulai transaksi
 	tx, err := svc.DB.Begin()
-	if err != nil { return 0, err }
+	if err != nil {
+		return 0, fmt.Errorf("gagal memulai transaksi: %w", err)
+	}
 	defer func() {
-			if err != nil {
-					tx.Rollback()
-			}
-			duration := time.Since(start)
-			log.Printf("DuplicateCMS took %v", duration)
+		if err != nil {
+			tx.Rollback()
+			log.Printf("Transaksi dibatalkan karena error: %v", err)
+		}
+		duration := time.Since(start)
+		log.Printf("DuplicateCMS selesai dalam %v", duration)
 	}()
-	
+
+	// Log statistik koneksi database
 	stats := svc.DB.Stats()
-	log.Printf("Open: %d, InUse: %d, Idle: %d", stats.OpenConnections, stats.InUse, stats.Idle)
+	log.Printf("Koneksi - Open: %d, InUse: %d, Idle: %d", stats.OpenConnections, stats.InUse, stats.Idle)
 
-	// ----------------------------------------------------------------
-	// 1) Ambil header original
-	// ----------------------------------------------------------------
-	var (
-		idPoli int
-		title  string
-	)
-	if err = tx.QueryRow(
-		`SELECT id_poli, title
-		   FROM CMS
-		   WHERE id_cms = ? AND deleted_at IS NULL`,
-		origCMSID).Scan(&idPoli, &title); err != nil {
-
+	// 1. Ambil header CMS asli
+	var idPoli int
+	var title string
+	err = tx.QueryRow(
+		`SELECT id_poli, title FROM CMS WHERE id_cms = ? AND deleted_at IS NULL`,
+		origCMSID,
+	).Scan(&idPoli, &title)
+	if err != nil {
 		if err == sql.ErrNoRows {
 			return 0, ErrCMSNotFound
 		}
-		return 0, err
+		return 0, fmt.Errorf("gagal mengambil CMS asli: %w", err)
 	}
 
 	now := time.Now()
 
-	// ----------------------------------------------------------------
-	// 2) Sisipkan header baru
-	// ----------------------------------------------------------------
-	res, err := tx.Exec(`
-		INSERT INTO CMS (id_poli, title, created_at, updated_at)
-		VALUES (?, ?, ?, ?)`,
-		idPoli, title+" Duplikat", now, now)
+	// 2. Sisipkan header CMS baru
+	res, err := tx.Exec(
+		`INSERT INTO CMS (id_poli, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		idPoli, title+" Duplikat", now, now,
+	)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("gagal menyisipkan CMS baru: %w", err)
 	}
-	newCMSID, _ := res.LastInsertId()
+	newCMSID, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("gagal mendapatkan ID CMS baru: %w", err)
+	}
 
-	// ----------------------------------------------------------------
-	// 3) Prepare statement sekali saja supaya hemat koneksi
-	// ----------------------------------------------------------------
-	stmtInsSec, err := tx.Prepare(
-		`INSERT INTO CMS_Section (id_cms, title) VALUES (?, ?)`)
-	if err != nil { return 0, err }
+	// 3. Siapkan pernyataan untuk efisiensi
+	stmtInsSec, err := tx.Prepare(`INSERT INTO CMS_Section (id_cms, title) VALUES (?, ?)`)
+	if err != nil {
+		return 0, fmt.Errorf("gagal menyiapkan statement untuk section: %w", err)
+	}
 	defer stmtInsSec.Close()
 
-	stmtInsSub, err := tx.Prepare(
-		`INSERT INTO CMS_Subsection (id_section, title) VALUES (?, ?)`)
-	if err != nil { return 0, err }
+	stmtInsSub, err := tx.Prepare(`INSERT INTO CMS_Subsection (id_section, title) VALUES (?, ?)`)
+	if err != nil {
+		return 0, fmt.Errorf("gagal menyiapkan statement untuk subsection: %w", err)
+	}
 	defer stmtInsSub.Close()
 
 	stmtInsElem, err := tx.Prepare(`
 		INSERT INTO CMS_Elements
-		  (id_section, id_subsection, element_label, element_name,
-		   element_options, element_hint, is_required)
-		VALUES (?,?,?,?,?,?,?)`)
-	if err != nil { return 0, err }
+		(id_section, id_subsection, element_label, element_name, element_options, element_hint, is_required)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("gagal menyiapkan statement untuk element: %w", err)
+	}
 	defer stmtInsElem.Close()
 
-	stmtInsDet, err := tx.Prepare(`
-		INSERT INTO Detail_Element (id_element, id_cms_elements)
-		VALUES (?,?)`)
-	if err != nil { return 0, err }
+	stmtInsDet, err := tx.Prepare(`INSERT INTO Detail_Element (id_element, id_cms_elements) VALUES (?, ?)`)
+	if err != nil {
+		return 0, fmt.Errorf("gagal menyiapkan statement untuk detail element: %w", err)
+	}
 	defer stmtInsDet.Close()
 
-	// ----------------------------------------------------------------
-	// 4) Duplikasi SECTION
-	// ----------------------------------------------------------------
+	// 4. Duplikasi section
 	type secMap struct {
 		oldID int
 		newID int64
 	}
 	var sections []secMap
 
-	rowsSec, err := tx.Query(`
-		SELECT id_section, title
-		  FROM CMS_Section
-		 WHERE id_cms = ? AND deleted_at IS NULL`,
-		origCMSID)
-	if err != nil { return 0, err }
+	rowsSec, err := tx.Query(`SELECT id_section, title FROM CMS_Section WHERE id_cms = ? AND deleted_at IS NULL`, origCMSID)
+	if err != nil {
+		return 0, fmt.Errorf("gagal mengambil section: %w", err)
+	}
 	defer rowsSec.Close()
 
 	for rowsSec.Next() {
 		var oldID int
 		var secTitle string
-		if err = rowsSec.Scan(&oldID, &secTitle); err != nil {
-			return 0, err
+		if err := rowsSec.Scan(&oldID, &secTitle); err != nil {
+			return 0, fmt.Errorf("gagal membaca section: %w", err)
 		}
-
-		r, err2 := stmtInsSec.Exec(newCMSID, secTitle)
-		if err2 != nil { return 0, fmt.Errorf("duplicate section: %w", err2) }
-		newID, _ := r.LastInsertId()
-
+		r, err := stmtInsSec.Exec(newCMSID, secTitle)
+		if err != nil {
+			return 0, fmt.Errorf("gagal menduplikasi section: %w", err)
+		}
+		newID, err := r.LastInsertId()
+		if err != nil {
+			return 0, fmt.Errorf("gagal mendapatkan ID section baru: %w", err)
+		}
 		sections = append(sections, secMap{oldID: oldID, newID: newID})
 	}
-	if err = rowsSec.Err(); err != nil { return 0, err }
+	if err := rowsSec.Err(); err != nil {
+		return 0, fmt.Errorf("kesalahan saat iterasi section: %w", err)
+	}
 
-	// ----------------------------------------------------------------
-	// 5) Duplikasi SUB-SECTION
-	// ----------------------------------------------------------------
+	// 5. Duplikasi subsection
 	subMap := make(map[int]int64) // oldSubID → newSubID
 
 	for _, s := range sections {
-		rowsSub, err2 := tx.Query(`
-			SELECT id_subsection, title
-			  FROM CMS_Subsection
-			 WHERE id_section = ? AND deleted_at IS NULL`,
-			s.oldID)
-		if err2 != nil { return 0, err2 }
+		rowsSub, err := tx.Query(`SELECT id_subsection, title FROM CMS_Subsection WHERE id_section = ? AND deleted_at IS NULL`, s.oldID)
+		if err != nil {
+			return 0, fmt.Errorf("gagal mengambil subsection: %w", err)
+		}
+		defer rowsSub.Close()
 
 		for rowsSub.Next() {
 			var oldSub int
 			var subTitle string
-			if err = rowsSub.Scan(&oldSub, &subTitle); err != nil {
-				rowsSub.Close()
-				return 0, err
+			if err := rowsSub.Scan(&oldSub, &subTitle); err != nil {
+				return 0, fmt.Errorf("gagal membaca subsection: %w", err)
 			}
-
-			r, err3 := stmtInsSub.Exec(s.newID, subTitle)
-			if err3 != nil {
-				rowsSub.Close()
-				return 0, fmt.Errorf("duplicate subsection: %w", err3)
+			r, err := stmtInsSub.Exec(s.newID, subTitle)
+			if err != nil {
+				return 0, fmt.Errorf("gagal menduplikasi subsection: %w", err)
 			}
-			newSubID, _ := r.LastInsertId()
+			newSubID, err := r.LastInsertId()
+			if err != nil {
+				return 0, fmt.Errorf("gagal mendapatkan ID subsection baru: %w", err)
+			}
 			subMap[oldSub] = newSubID
 		}
-		if err = rowsSub.Err(); err != nil { rowsSub.Close(); return 0, err }
-		rowsSub.Close()
+		if err := rowsSub.Err(); err != nil {
+			return 0, fmt.Errorf("kesalahan saat iterasi subsection: %w", err)
+		}
 	}
 
-	// ----------------------------------------------------------------
-	// 6) Duplikasi ELEMENT + DETAIL_ELEMENT
-	// ----------------------------------------------------------------
-	// Kita ambil semua elemen di CMS asal sekaligus supaya minim query
+	// 6. Duplikasi element dan detail element
+	secIDMap := make(map[int]int64)
+	for _, sm := range sections {
+		secIDMap[sm.oldID] = sm.newID
+	}
+
 	elemRows, err := tx.Query(`
 		SELECT
 			e.id_cms_elements,
@@ -1333,13 +1340,13 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 			e.element_hint,
 			e.is_required
 		FROM CMS_Elements e
-		WHERE e.id_section IN (
-			SELECT id_section FROM CMS_Section
-			WHERE id_cms = ?
-		)
-		AND e.deleted_at IS NULL`,
-		origCMSID)
-	if err != nil { return 0, err }
+		JOIN CMS_Section s ON e.id_section = s.id_section
+		WHERE s.id_cms = ? AND e.deleted_at IS NULL AND s.deleted_at IS NULL`,
+		origCMSID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("gagal mengambil element: %w", err)
+	}
 	defer elemRows.Close()
 
 	for elemRows.Next() {
@@ -1351,7 +1358,7 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 			opts, hint     sql.NullString
 			isReq          int
 		)
-		if err = elemRows.Scan(
+		if err := elemRows.Scan(
 			&oldElemID,
 			&oldSecID,
 			&oldSubIDNull,
@@ -1359,19 +1366,16 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 			&opts, &hint,
 			&isReq,
 		); err != nil {
-			return 0, err
+			return 0, fmt.Errorf("gagal membaca element: %w", err)
 		}
 
-		// translate oldSecID→newSecID
-		var newSecID int64
-		for _, sm := range sections {
-			if sm.oldID == oldSecID {
-				newSecID = sm.newID
-				break
-			}
+		// Terjemahkan ID section
+		newSecID, ok := secIDMap[oldSecID]
+		if !ok {
+			return 0, fmt.Errorf("ID section %d tidak ditemukan di peta", oldSecID)
 		}
 
-		// translate oldSubID→newSubID (if any)
+		// Terjemahkan ID subsection jika ada
 		var newSub interface{} = nil
 		if oldSubIDNull.Valid {
 			if mapped, ok := subMap[int(oldSubIDNull.Int64)]; ok {
@@ -1379,8 +1383,8 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 			}
 		}
 
-		// insert element
-		r, err2 := stmtInsElem.Exec(
+		// Sisipkan element
+		r, err := stmtInsElem.Exec(
 			newSecID,
 			newSub,
 			label,
@@ -1389,46 +1393,53 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 			hint,
 			isReq,
 		)
-		if err2 != nil {
-			return 0, fmt.Errorf("duplicate element: %w", err2)
+		if err != nil {
+			return 0, fmt.Errorf("gagal menduplikasi element: %w", err)
 		}
-		newElemID, _ := r.LastInsertId()
+		newElemID, err := r.LastInsertId()
+		if err != nil {
+			return 0, fmt.Errorf("gagal mendapatkan ID element baru: %w", err)
+		}
 
-		// copy detail-element(s) langsung
-		detailRows, err3 := tx.Query(`
-			SELECT id_element
-			  FROM Detail_Element
-			 WHERE id_cms_elements = ?`,
-			oldElemID)
-		if err3 != nil { return 0, err3 }
+		// Salin detail element
+		detailRows, err := tx.Query(`SELECT id_element FROM Detail_Element WHERE id_cms_elements = ?`, oldElemID)
+		if err != nil {
+			return 0, fmt.Errorf("gagal mengambil detail element: %w", err)
+		}
+		defer detailRows.Close()
 
 		for detailRows.Next() {
 			var idElemMaster int
-			if err = detailRows.Scan(&idElemMaster); err != nil {
-				detailRows.Close()
-				return 0, err
+			if err := detailRows.Scan(&idElemMaster); err != nil {
+				return 0, fmt.Errorf("gagal membaca detail element: %w", err)
 			}
-			if _, err = stmtInsDet.Exec(idElemMaster, newElemID); err != nil {
-				detailRows.Close()
-				return 0, err
+			if _, err := stmtInsDet.Exec(idElemMaster, newElemID); err != nil {
+				return 0, fmt.Errorf("gagal menduplikasi detail element: %w", err)
 			}
 		}
-		if err = detailRows.Err(); err != nil { detailRows.Close(); return 0, err }
-		detailRows.Close()
+		if err := detailRows.Err(); err != nil {
+			return 0, fmt.Errorf("kesalahan saat iterasi detail element: %w", err)
+		}
 	}
-	if err = elemRows.Err(); err != nil { return 0, err }
+	if err := elemRows.Err(); err != nil {
+		return 0, fmt.Errorf("kesalahan saat iterasi element: %w", err)
+	}
 
-	// ----------------------------------------------------------------
-	// 7) (Optional) Catat di Management_CMS sbg audit trail
-	// ----------------------------------------------------------------
+	// 7. (Opsional) Log ke Management_CMS untuk jejak audit
 	if idKaryawan != 0 {
-		if _, err = tx.Exec(`
-			INSERT INTO Management_CMS (id_cms, created_by, updated_by)
-			VALUES (?, ?, ?)`,
-			newCMSID, idKaryawan, idKaryawan); err != nil {
-			return 0, err
+		_, err = tx.Exec(
+			`INSERT INTO Management_CMS (id_cms, created_by, updated_by) VALUES (?, ?, ?)`,
+			newCMSID, idKaryawan, idKaryawan,
+		)
+		if err != nil {
+			return 0, fmt.Errorf("gagal menyisipkan ke Management_CMS: %w", err)
 		}
 	}
 
-	return newCMSID, tx.Commit()
+	// Komit transaksi
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("gagal mengkomit transaksi: %w", err)
+	}
+
+	return newCMSID, nil
 }
