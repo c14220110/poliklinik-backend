@@ -1178,25 +1178,39 @@ var (
 	ErrCMSActiveInPoli = errors.New("another active cms exists in the target poli")
 )
 
+
 // DuplicateCMS menduplikasi seluruh struktur CMS (section, subsection, element, detail_element)
 // hanya untuk rekaman yang belum dihapus secara lunak (deleted_at IS NULL).
 func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 	const maxRetries = 3
 	const retryDelay = 1 * time.Second
+	const timeout = 30 * time.Second
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		// Mulai menghitung waktu transaksi
 		start := time.Now()
 
-		// Tambahkan timeout untuk transaksi
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Periksa koneksi database
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := svc.DB.PingContext(ctx); err != nil {
+			cancel()
+			log.Printf("Percobaan %d: Koneksi database tidak valid: %v", attempt+1, err)
+			if attempt < maxRetries-1 {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return 0, fmt.Errorf("koneksi database tidak valid setelah %d percobaan: %w", maxRetries, err)
+		}
+		cancel()
+
+		// Mulai transaksi dengan timeout
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
-		// Memulai transaksi
 		tx, err := svc.DB.BeginTx(ctx, nil)
 		if err != nil {
 			log.Printf("Percobaan %d: Gagal memulai transaksi: %v", attempt+1, err)
-			if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+			if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 				time.Sleep(retryDelay)
 				continue
 			}
@@ -1218,6 +1232,7 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 		log.Printf("Koneksi - Open: %d, InUse: %d, Idle: %d", stats.OpenConnections, stats.InUse, stats.Idle)
 
 		// 1. Ambil header CMS asli
+		startStep := time.Now()
 		var idPoli int
 		var title string
 		err = tx.QueryRowContext(ctx,
@@ -1229,23 +1244,25 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 				return 0, ErrCMSNotFound
 			}
 			log.Printf("Percobaan %d: Gagal mengambil CMS asli: %v", attempt+1, err)
-			if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+			if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 				time.Sleep(retryDelay)
 				continue
 			}
 			return 0, fmt.Errorf("gagal mengambil CMS asli: %w", err)
 		}
+		log.Printf("Percobaan %d: Berhasil mengambil CMS header dalam %v", attempt+1, time.Since(startStep))
 
 		now := time.Now()
 
 		// 2. Sisipkan header CMS baru
+		startStep = time.Now()
 		res, err := tx.ExecContext(ctx,
 			`INSERT INTO CMS (id_poli, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
 			idPoli, title+" Duplikat", now, now,
 		)
 		if err != nil {
 			log.Printf("Percobaan %d: Gagal menyisipkan CMS baru: %v", attempt+1, err)
-			if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+			if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 				time.Sleep(retryDelay)
 				continue
 			}
@@ -1255,6 +1272,7 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("gagal mendapatkan ID CMS baru: %w", err)
 		}
+		log.Printf("Percobaan %d: Berhasil menyisipkan CMS baru dalam %v", attempt+1, time.Since(startStep))
 
 		// 3. Siapkan pernyataan untuk efisiensi
 		stmtInsSec, err := tx.PrepareContext(ctx, `INSERT INTO CMS_Section (id_cms, title) VALUES (?, ?)`)
@@ -1286,6 +1304,7 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 		defer stmtInsDet.Close()
 
 		// 4. Duplikasi section
+		startStep = time.Now()
 		type secMap struct {
 			oldID int
 			newID int64
@@ -1293,10 +1312,11 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 		var sections []secMap
 		var sectionCount int
 
+		// Kumpulkan data section terlebih dahulu
 		rowsSec, err := tx.QueryContext(ctx, `SELECT id_section, title FROM CMS_Section WHERE id_cms = ? AND deleted_at IS NULL`, origCMSID)
 		if err != nil {
 			log.Printf("Percobaan %d: Gagal mengambil section: %v", attempt+1, err)
-			if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+			if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 				time.Sleep(retryDelay)
 				continue
 			}
@@ -1304,17 +1324,38 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 		}
 		defer rowsSec.Close()
 
+		// Simpan data section dalam slice
+		type sectionData struct {
+			id    int
+			title string
+		}
+		var sectionList []sectionData
 		for rowsSec.Next() {
-			sectionCount++
-			var oldID int
-			var secTitle string
-			if err := rowsSec.Scan(&oldID, &secTitle); err != nil {
+			var id int
+			var title string
+			if err := rowsSec.Scan(&id, &title); err != nil {
 				return 0, fmt.Errorf("gagal membaca section: %w", err)
 			}
-			r, err := stmtInsSec.ExecContext(ctx, newCMSID, secTitle)
+			sectionList = append(sectionList, sectionData{id: id, title: title})
+		}
+		if err := rowsSec.Err(); err != nil {
+			log.Printf("Percobaan %d: Kesalahan saat iterasi section: %v", attempt+1, err)
+			if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return 0, fmt.Errorf("kesalahan saat iterasi section: %w", err)
+		}
+		sectionCount = len(sectionList)
+		log.Printf("Percobaan %d: Mengambil %d section dalam %v", attempt+1, sectionCount, time.Since(startStep))
+
+		// Proses duplikasi section
+		startStep = time.Now()
+		for _, sec := range sectionList {
+			r, err := stmtInsSec.ExecContext(ctx, newCMSID, sec.title)
 			if err != nil {
 				log.Printf("Percobaan %d: Gagal menduplikasi section: %v", attempt+1, err)
-				if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+				if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 					time.Sleep(retryDelay)
 					continue
 				}
@@ -1324,14 +1365,12 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 			if err != nil {
 				return 0, fmt.Errorf("gagal mendapatkan ID section baru: %w", err)
 			}
-			sections = append(sections, secMap{oldID: oldID, newID: newID})
+			sections = append(sections, secMap{oldID: sec.id, newID: newID})
 		}
-		if err := rowsSec.Err(); err != nil {
-			return 0, fmt.Errorf("kesalahan saat iterasi section: %w", err)
-		}
-		log.Printf("Percobaan %d: Berhasil menduplikasi %d section", attempt+1, sectionCount)
+		log.Printf("Percobaan %d: Berhasil menduplikasi %d section dalam %v", attempt+1, sectionCount, time.Since(startStep))
 
 		// 5. Duplikasi subsection
+		startStep = time.Now()
 		subMap := make(map[int]int64) // oldSubID → newSubID
 		var subsectionCount int
 
@@ -1339,7 +1378,7 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 			rowsSub, err := tx.QueryContext(ctx, `SELECT id_subsection, title FROM CMS_Subsection WHERE id_section = ? AND deleted_at IS NULL`, s.oldID)
 			if err != nil {
 				log.Printf("Percobaan %d: Gagal mengambil subsection: %v", attempt+1, err)
-				if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+				if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 					time.Sleep(retryDelay)
 					continue
 				}
@@ -1357,7 +1396,7 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 				r, err := stmtInsSub.ExecContext(ctx, s.newID, subTitle)
 				if err != nil {
 					log.Printf("Percobaan %d: Gagal menduplikasi subsection: %v", attempt+1, err)
-					if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+					if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 						time.Sleep(retryDelay)
 						continue
 					}
@@ -1370,12 +1409,18 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 				subMap[oldSub] = newSubID
 			}
 			if err := rowsSub.Err(); err != nil {
+				log.Printf("Percobaan %d: Kesalahan saat iterasi subsection: %v", attempt+1, err)
+				if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
+					time.Sleep(retryDelay)
+					continue
+				}
 				return 0, fmt.Errorf("kesalahan saat iterasi subsection: %w", err)
 			}
 		}
-		log.Printf("Percobaan %d: Berhasil menduplikasi %d subsection", attempt+1, subsectionCount)
+		log.Printf("Percobaan %d: Berhasil menduplikasi %d subsection dalam %v", attempt+1, subsectionCount, time.Since(startStep))
 
 		// 6. Duplikasi element dan detail element
+		startStep = time.Now()
 		secIDMap := make(map[int]int64)
 		for _, sm := range sections {
 			secIDMap[sm.oldID] = sm.newID
@@ -1399,7 +1444,7 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 		)
 		if err != nil {
 			log.Printf("Percobaan %d: Gagal mengambil element: %v", attempt+1, err)
-			if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+			if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 				time.Sleep(retryDelay)
 				continue
 			}
@@ -1454,7 +1499,7 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 			)
 			if err != nil {
 				log.Printf("Percobaan %d: Gagal menduplikasi element: %v", attempt+1, err)
-				if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+				if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 					time.Sleep(retryDelay)
 					continue
 				}
@@ -1469,7 +1514,7 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 			detailRows, err := tx.QueryContext(ctx, `SELECT id_element FROM Detail_Element WHERE id_cms_elements = ?`, oldElemID)
 			if err != nil {
 				log.Printf("Percobaan %d: Gagal mengambil detail element: %v", attempt+1, err)
-				if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+				if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 					time.Sleep(retryDelay)
 					continue
 				}
@@ -1486,7 +1531,7 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 				}
 				if _, err := stmtInsDet.ExecContext(ctx, idElemMaster, newElemID); err != nil {
 					log.Printf("Percobaan %d: Gagal menduplikasi detail element: %v", attempt+1, err)
-					if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+					if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 						time.Sleep(retryDelay)
 						continue
 					}
@@ -1494,16 +1539,27 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 				}
 			}
 			if err := detailRows.Err(); err != nil {
+				log.Printf("Percobaan %d: Kesalahan saat iterasi detail element: %v", attempt+1, err)
+				if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
+					time.Sleep(retryDelay)
+					continue
+				}
 				return 0, fmt.Errorf("kesalahan saat iterasi detail element: %w", err)
 			}
-			log.Printf("Percobaan %d: Berhasil menduplikasi %d detail element untuk element %d", attempt+1, detailCount, oldElemID)
+			log.Printf("Percobaan %d: Berhasil menduplikasi %d detail element untuk element %d dalam %v", attempt+1, detailCount, oldElemID, time.Since(startStep))
 		}
 		if err := elemRows.Err(); err != nil {
+			log.Printf("Percobaan %d: Kesalahan saat iterasi element: %v", attempt+1, err)
+			if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
+				time.Sleep(retryDelay)
+				continue
+			}
 			return 0, fmt.Errorf("kesalahan saat iterasi element: %w", err)
 		}
-		log.Printf("Percobaan %d: Berhasil menduplikasi %d element", attempt+1, elementCount)
+		log.Printf("Percobaan %d: Berhasil menduplikasi %d element dalam %v", attempt+1, elementCount, time.Since(startStep))
 
 		// 7. (Opsional) Log ke Management_CMS untuk jejak audit
+		startStep = time.Now()
 		if idKaryawan != 0 {
 			_, err = tx.ExecContext(ctx,
 				`INSERT INTO Management_CMS (id_cms, created_by, updated_by) VALUES (?, ?, ?)`,
@@ -1511,26 +1567,29 @@ func (svc *CMSService) DuplicateCMS(origCMSID, idKaryawan int) (int64, error) {
 			)
 			if err != nil {
 				log.Printf("Percobaan %d: Gagal menyisipkan ke Management_CMS: %v", attempt+1, err)
-				if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+				if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 					time.Sleep(retryDelay)
 					continue
 				}
 				return 0, fmt.Errorf("gagal menyisipkan ke Management_CMS: %w", err)
 			}
 		}
+		log.Printf("Percobaan %d: Berhasil menyisipkan ke Management_CMS dalam %v", attempt+1, time.Since(startStep))
 
 		// Komit transaksi
+		startStep = time.Now()
 		if err := tx.Commit(); err != nil {
 			log.Printf("Percobaan %d: Gagal mengkomit transaksi: %v", attempt+1, err)
-			if attempt < maxRetries-1 && strings.Contains(err.Error(), "bad connection") {
+			if attempt < maxRetries-1 && (strings.Contains(err.Error(), "bad connection") || strings.Contains(err.Error(), "invalid connection")) {
 				time.Sleep(retryDelay)
 				continue
 			}
 			return 0, fmt.Errorf("gagal mengkomit transaksi: %w", err)
 		}
+		log.Printf("Percobaan %d: Berhasil mengkomit transaksi dalam %v", attempt+1, time.Since(startStep))
 
 		return newCMSID, nil
 	}
 
-	return 0, fmt.Errorf("gagal setelah %d percobaan: bad connection", maxRetries)
+	return 0, fmt.Errorf("gagal setelah %d percobaan: invalid connection", maxRetries)
 }
